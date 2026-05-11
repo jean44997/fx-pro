@@ -17,8 +17,10 @@ class TestRoot:
         body = r.json()
         assert body["app"] == "FX Pro 2026"
         assert "currencies" in body
-        for c in ["EUR", "XOF", "XAF", "USD", "GBP", "NGN", "MAD", "CAD", "CHF", "JPY", "CNY"]:
+        for c in ["EUR", "XOF", "XAF", "USD", "GBP", "NGN", "MAD", "CAD", "CHF", "JPY", "CNY",
+                  "AUD", "INR", "BRL", "ZAR", "KES", "GHS", "SEK", "AED"]:
             assert c in body["currencies"]
+        assert len(body["currencies"]) >= 19
 
 
 # ============ Auth ============
@@ -88,7 +90,8 @@ class TestRates:
         assert r.status_code == 200
         body = r.json()
         assert body["base"] == "EUR"
-        for c in ["EUR", "XOF", "USD", "GBP", "NGN", "MAD", "CAD", "CHF", "JPY", "CNY"]:
+        for c in ["EUR", "XOF", "USD", "GBP", "NGN", "MAD", "CAD", "CHF", "JPY", "CNY",
+                  "AUD", "INR", "BRL", "ZAR", "KES", "GHS", "SEK", "AED"]:
             assert c in body["rates"], f"Missing currency {c}"
 
     def test_rates_history(self):

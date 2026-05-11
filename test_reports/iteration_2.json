@@ -1,0 +1,51 @@
+{
+  "summary": "FX Pro 2026 iteration 2 — new features (8 new currencies, /users/check, change-password, base64 profile picture, vault/coffre) plus full regression. 59/59 pytest cases passed (100%): 42 existing + 17 new.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/profile/change-password", "issue": "After password change, old JWT tokens remain valid until natural expiry (7d). No session/token revocation. Consider rotating JWT secret per-user or maintaining a token version on the user doc."},
+      {"endpoint": "GET /api/vault", "issue": "Auto-status flip locked→ready is computed on the fly in the response only; not persisted. Acceptable, but downstream consumers querying directly from db.vaults will still see 'locked'. Document or persist."},
+      {"endpoint": "POST /api/vault/{id}/withdraw", "issue": "Status check rejects only 'withdrawn'. A vault re-fetched immediately after a successful withdraw can race; recommend including status='locked' filter in the find_one or using $set on a conditional update."},
+      {"endpoint": "PATCH /api/profile", "issue": "picture field accepts any string (no size/MIME validation). A very large base64 payload could be stored. Recommend max-length and data:image/* prefix check."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_backend_api.py",
+    "/app/backend/tests/test_new_features_v2.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: invalidate active sessions on change-password (token versioning or session_id rotation).",
+    "Optional: validate `picture` payload (size + data URI prefix) in PATCH /api/profile.",
+    "Optional: persist vault status update from 'locked' to 'ready' (currently computed only in the GET list response).",
+    "Backend fully verified for iteration 2 — main agent may proceed to frontend implementation/testing."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~960 lines — exceeds the 700-line guideline. Strongly recommend splitting into modules (auth.py, rates.py, wallet.py, vault.py, profile.py, admin.py).",
+    "PATCH /api/profile still uses untyped Dict[str, Any]; add a Pydantic model with picture max-length and kyc_status enum validation.",
+    "users/check leaks `name`+`picture` of any registered email to any authenticated user — intentional for the UX (real-time validation) but consider rate-limiting to prevent email-enumeration scraping.",
+    "Vault penalty is hard-coded (5%). Recommend extracting to a constant or admin-configurable setting.",
+    "vault_withdraw uses two non-atomic updates (users.balances + vaults status); on failure mid-way, money could be credited without status change. Wrap in a transaction or implement idempotency via the vault doc.",
+    "All response models continue to exclude `_id` correctly. ✅",
+    "Async/await usage remains consistent. ✅",
+    "JWT_SECRET still 27 bytes — InsecureKeyLengthWarning persists (carry-over from iteration 1)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py (modified — added _ensure_demo_user to auto-recreate demo on password drift)",
+    "/app/backend/tests/test_backend_api.py (modified — root + rates checks now include 19 currencies)",
+    "/app/backend/tests/test_new_features_v2.py (created — 17 new tests covering iteration 2 endpoints)"
+  ],
+  "success_rate": {"backend": "100% (59/59)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "TestChangePassword creates one TEST_pwd_* user per test method and cleans up via admin DELETE. Vault tests use the demo user (top-up via admin/balance to keep ≥100 EUR). Profile picture test restores picture=None after the assertion.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 59 backend endpoints verified (42 regression + 17 new). conftest.py now auto-recreates demo@fxpro.com via admin DELETE→register if its password drifted from Demo@2026 (this happens when frontend change-password flow is exercised between test runs). Pytest reusable at /app/backend/tests/. Live FX rates from open.er-api.com now include all 8 new currencies. Vault collection: db.vaults. Vault statuses: locked → ready (on-the-fly) → withdrawn. Early-withdraw penalty is 5%. /api/users/check returns {exists, name, email, picture} for others, {exists, self:true, name, email} for self, {exists:false} otherwise. Server.py is now 960+ lines and a refactor into modules is recommended.",
+  "rca_of_issue": "No bugs found in iteration 2 endpoints. All happy-path and error-path responses match the spec from the review request."
+}

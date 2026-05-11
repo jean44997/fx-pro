@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeIn, FadeInRight, FadeInUp } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path, Defs, LinearGradient as SvgGrad, Stop, Circle } from "react-native-svg";
+import { notify } from "../../src/notifs";
 
 const W = Dimensions.get("window").width;
 
@@ -35,7 +36,32 @@ export default function Home() {
 
   useEffect(() => {
     load();
+    const t = setInterval(load, 60000);
+    return () => clearInterval(t);
   }, [load]);
+
+  // Watch for new server notifications → trigger real local push
+  useEffect(() => {
+    let lastIds = new Set<string>();
+    const tick = async () => {
+      try {
+        const n = await api.get("/notifications");
+        const ids = new Set<string>((n.items || []).map((x: any) => x.notif_id as string));
+        if (lastIds.size === 0) {
+          lastIds = ids;
+          return;
+        }
+        for (const it of n.items || []) {
+          if (!lastIds.has(it.notif_id) && !it.read) {
+            notify(it.title, it.body);
+          }
+        }
+        lastIds = ids;
+      } catch {}
+    };
+    const t = setInterval(tick, 20000);
+    return () => clearInterval(t);
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);

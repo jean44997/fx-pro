@@ -137,12 +137,6 @@ export default function Login() {
                 Pas de compte ? <Text style={{ color: Colors.cyan, fontWeight: "800" }}>Créer un compte</Text>
               </Text>
             </Pressable>
-
-            <View style={styles.hint}>
-              <Text style={styles.hintText}>Comptes de démo :</Text>
-              <Text style={styles.hintMono}>admin@fxpro.com / Admin@2026</Text>
-              <Text style={styles.hintMono}>demo@fxpro.com / Demo@2026</Text>
-            </View>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -165,7 +159,4 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, color: "#fff", fontSize: 16, paddingVertical: 10 },
   signup: { color: Colors.textSoft, fontSize: 14 },
-  hint: { marginTop: 24, alignItems: "center" },
-  hintText: { color: Colors.textMuted, fontSize: 12 },
-  hintMono: { color: Colors.cyan, fontSize: 12, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", marginTop: 2 },
 });

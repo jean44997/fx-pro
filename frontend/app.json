@@ -2,7 +2,7 @@
   "expo": {
     "name": "FX Pro 2026",
     "slug": "frontend",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "fxpro",
@@ -11,8 +11,11 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Scan QR codes to send money",
-        "NSPhotoLibraryUsageDescription": "Save transaction receipts"
+        "NSCameraUsageDescription": "Scan QR codes to send money instantly",
+        "NSPhotoLibraryUsageDescription": "Pick a profile photo and save receipts",
+        "NSPhotoLibraryAddUsageDescription": "Save your transaction receipts",
+        "NSFaceIDUsageDescription": "Unlock your wallet with Face ID",
+        "NSUserNotificationsUsageDescription": "Receive transaction alerts"
       }
     },
     "android": {
@@ -20,7 +23,15 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000"
       },
-      "permissions": ["CAMERA", "VIBRATE", "RECEIVE_BOOT_COMPLETED"],
+      "permissions": [
+        "CAMERA",
+        "VIBRATE",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "READ_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED",
+        "POST_NOTIFICATIONS"
+      ],
       "edgeToEdgeEnabled": true
     },
     "web": {
@@ -41,13 +52,29 @@
       ],
       [
         "expo-camera",
+        { "cameraPermission": "Allow FX Pro to scan QR codes for payments" }
+      ],
+      [
+        "expo-image-picker",
+        { "photosPermission": "Allow FX Pro to use a profile photo from your gallery" }
+      ],
+      [
+        "expo-local-authentication",
+        { "faceIDPermission": "Allow FX Pro to use Face ID for secure unlock" }
+      ],
+      [
+        "expo-notifications",
         {
-          "cameraPermission": "Allow FX Pro to scan QR codes for payments"
+          "icon": "./assets/images/icon.png",
+          "color": "#00FFFF",
+          "sounds": []
         }
       ]
     ],
-    "experiments": {
-      "typedRoutes": true
-    }
+    "notification": {
+      "icon": "./assets/images/icon.png",
+      "color": "#00FFFF"
+    },
+    "experiments": { "typedRoutes": true }
   }
 }

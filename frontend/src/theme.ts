@@ -33,20 +33,31 @@ export const CURRENCIES: { code: string; name: string; flag: string; symbol: str
   { code: "CHF", name: "Franc suisse", flag: "🇨🇭", symbol: "Fr" },
   { code: "JPY", name: "Yen", flag: "🇯🇵", symbol: "¥" },
   { code: "CNY", name: "Yuan", flag: "🇨🇳", symbol: "¥" },
+  { code: "AUD", name: "Dollar australien", flag: "🇦🇺", symbol: "$" },
+  { code: "INR", name: "Roupie indienne", flag: "🇮🇳", symbol: "₹" },
+  { code: "BRL", name: "Real brésilien", flag: "🇧🇷", symbol: "R$" },
+  { code: "ZAR", name: "Rand sud-africain", flag: "🇿🇦", symbol: "R" },
+  { code: "KES", name: "Shilling kenyan", flag: "🇰🇪", symbol: "KSh" },
+  { code: "GHS", name: "Cedi ghanéen", flag: "🇬🇭", symbol: "₵" },
+  { code: "SEK", name: "Couronne suédoise", flag: "🇸🇪", symbol: "kr" },
+  { code: "AED", name: "Dirham EAU", flag: "🇦🇪", symbol: "د.إ" },
 ];
+
+export const ZERO_DECIMALS = ["XOF", "XAF", "JPY", "NGN", "KES"];
 
 export const currencyMeta = (code: string) =>
   CURRENCIES.find((c) => c.code === code) || { code, name: code, flag: "🏳️", symbol: code };
 
 export const formatMoney = (amount: number, code: string) => {
   const m = currencyMeta(code);
+  const zero = ZERO_DECIMALS.includes(code);
   const opts: Intl.NumberFormatOptions = {
-    minimumFractionDigits: ["XOF", "XAF", "JPY", "NGN"].includes(code) ? 0 : 2,
-    maximumFractionDigits: ["XOF", "XAF", "JPY", "NGN"].includes(code) ? 0 : 2,
+    minimumFractionDigits: zero ? 0 : 2,
+    maximumFractionDigits: zero ? 0 : 2,
   };
   try {
     return `${m.symbol} ${amount.toLocaleString("fr-FR", opts)}`;
   } catch {
-    return `${m.symbol} ${amount.toFixed(2)}`;
+    return `${m.symbol} ${amount.toFixed(zero ? 0 : 2)}`;
   }
 };

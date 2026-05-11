@@ -26,7 +26,10 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "fxpro-secret-change-me-2026")
 JWT_ALG = "HS256"
 JWT_TTL_DAYS = 7
 
-SUPPORTED_CURRENCIES = ["EUR", "XOF", "XAF", "USD", "GBP", "NGN", "MAD", "CAD", "CHF", "JPY", "CNY"]
+SUPPORTED_CURRENCIES = [
+    "EUR", "XOF", "XAF", "USD", "GBP", "NGN", "MAD", "CAD", "CHF", "JPY", "CNY",
+    "AUD", "INR", "BRL", "ZAR", "KES", "GHS", "SEK", "AED",
+]
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -169,6 +172,22 @@ class PushTokenIn(BaseModel):
 class RateOverrideIn(BaseModel):
     base: str = "EUR"
     rates: Dict[str, float]
+
+
+class ChangePasswordIn(BaseModel):
+    old_password: str
+    new_password: str
+
+
+class VaultCreateIn(BaseModel):
+    amount: float
+    currency: str
+    unlock_at: datetime
+    label: Optional[str] = None
+
+
+class UserSearchIn(BaseModel):
+    query: str
 
 
 # ============ Auth ============
@@ -615,6 +634,167 @@ async def update_profile(payload: Dict[str, Any], user: dict = Depends(get_curre
     if upd:
         await db.users.update_one({"user_id": user["user_id"]}, {"$set": upd})
     return await find_user_by_id(user["user_id"])
+
+
+@api.post("/profile/change-password")
+async def change_password(data: ChangePasswordIn, user: dict = Depends(get_current_user)):
+    if len(data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Nouveau mot de passe trop court (min 6 caractères)")
+    full = await find_user_full(user["user_id"])
+    if not full.get("password_hash"):
+        raise HTTPException(status_code=400, detail="Compte Google — pas de mot de passe à changer")
+    if not verify_password(data.old_password, full["password_hash"]):
+        raise HTTPException(status_code=401, detail="Ancien mot de passe incorrect")
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"password_hash": hash_password(data.new_password)}},
+    )
+    await db.notifications.insert_one({
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"],
+        "title": "Mot de passe changé",
+        "body": "Votre mot de passe a été modifié avec succès.",
+        "read": False,
+        "created_at": now_utc(),
+    })
+    return {"ok": True}
+
+
+@api.get("/users/check")
+async def check_user(email: str, user: dict = Depends(get_current_user)):
+    """Validate destinataire en temps réel par email."""
+    u = await db.users.find_one(
+        {"email": email.lower().strip()},
+        {"_id": 0, "user_id": 1, "email": 1, "name": 1, "picture": 1, "is_blocked": 1},
+    )
+    if not u:
+        return {"exists": False}
+    if u.get("is_blocked"):
+        return {"exists": True, "blocked": True}
+    if u["user_id"] == user["user_id"]:
+        return {"exists": True, "self": True, "name": u.get("name"), "email": u.get("email")}
+    return {
+        "exists": True,
+        "name": u.get("name"),
+        "email": u.get("email"),
+        "picture": u.get("picture"),
+    }
+
+
+# ============ Vault (Coffre) ============
+@api.post("/vault")
+async def vault_create(data: VaultCreateIn, user: dict = Depends(get_current_user)):
+    if data.amount <= 0:
+        raise HTTPException(status_code=400, detail="Montant invalide")
+    if data.currency not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail="Devise non supportée")
+    unlock_at = data.unlock_at
+    if unlock_at.tzinfo is None:
+        unlock_at = unlock_at.replace(tzinfo=timezone.utc)
+    if unlock_at <= now_utc():
+        raise HTTPException(status_code=400, detail="Date de déverrouillage doit être future")
+    full = await find_user_full(user["user_id"])
+    balances = full.get("balances", {})
+    if balances.get(data.currency, 0) < data.amount:
+        raise HTTPException(status_code=400, detail="Solde insuffisant")
+    balances[data.currency] = round(balances.get(data.currency, 0) - data.amount, 4)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"balances": balances}})
+
+    vault_id = f"vault_{uuid.uuid4().hex[:10]}"
+    doc = {
+        "vault_id": vault_id,
+        "user_id": user["user_id"],
+        "amount": data.amount,
+        "currency": data.currency,
+        "label": data.label or "Coffre",
+        "locked_at": now_utc(),
+        "unlock_at": unlock_at,
+        "status": "locked",
+        "created_at": now_utc(),
+    }
+    await db.vaults.insert_one(doc)
+    doc.pop("_id", None)
+    await db.transactions.insert_one({
+        "txn_id": f"txn_{uuid.uuid4().hex[:12]}",
+        "type": "vault_lock",
+        "user_id": user["user_id"],
+        "amount": data.amount,
+        "currency": data.currency,
+        "status": "completed",
+        "vault_id": vault_id,
+        "created_at": now_utc(),
+    })
+    await db.notifications.insert_one({
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"],
+        "title": "Coffre verrouillé 🔒",
+        "body": f"{data.amount} {data.currency} verrouillés jusqu'au {unlock_at.strftime('%d/%m/%Y')}",
+        "read": False,
+        "created_at": now_utc(),
+    })
+    return {"ok": True, "vault": doc, "balances": balances}
+
+
+@api.get("/vault")
+async def vault_list(user: dict = Depends(get_current_user)):
+    items = await db.vaults.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    # auto-mark ready
+    now = now_utc()
+    for v in items:
+        ua = v.get("unlock_at")
+        if ua and ua.tzinfo is None:
+            ua = ua.replace(tzinfo=timezone.utc)
+        if v["status"] == "locked" and ua and ua <= now:
+            v["status"] = "ready"
+    return {"items": items}
+
+
+@api.post("/vault/{vault_id}/withdraw")
+async def vault_withdraw(vault_id: str, user: dict = Depends(get_current_user)):
+    v = await db.vaults.find_one({"vault_id": vault_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Coffre introuvable")
+    if v["status"] == "withdrawn":
+        raise HTTPException(status_code=400, detail="Déjà retiré")
+    ua = v["unlock_at"]
+    if ua.tzinfo is None:
+        ua = ua.replace(tzinfo=timezone.utc)
+    penalty = 0.0
+    amount_back = v["amount"]
+    if ua > now_utc():
+        # Early withdrawal: 5% penalty
+        penalty = round(v["amount"] * 0.05, 4)
+        amount_back = round(v["amount"] - penalty, 4)
+    full = await find_user_full(user["user_id"])
+    balances = full.get("balances", {})
+    balances[v["currency"]] = round(balances.get(v["currency"], 0) + amount_back, 4)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"balances": balances}})
+    await db.vaults.update_one(
+        {"vault_id": vault_id},
+        {"$set": {"status": "withdrawn", "withdrawn_at": now_utc(), "penalty": penalty, "returned": amount_back}},
+    )
+    await db.transactions.insert_one({
+        "txn_id": f"txn_{uuid.uuid4().hex[:12]}",
+        "type": "vault_withdraw",
+        "user_id": user["user_id"],
+        "amount": amount_back,
+        "currency": v["currency"],
+        "status": "completed",
+        "vault_id": vault_id,
+        "penalty": penalty,
+        "created_at": now_utc(),
+    })
+    await db.notifications.insert_one({
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"],
+        "title": penalty > 0 and "Retrait anticipé 🔓" or "Coffre déverrouillé 🔓",
+        "body": penalty > 0
+            and f"+{amount_back} {v['currency']} (pénalité {penalty})"
+            or f"+{amount_back} {v['currency']}",
+        "read": False,
+        "created_at": now_utc(),
+    })
+    return {"ok": True, "amount_returned": amount_back, "penalty": penalty, "balances": balances}
 
 
 # ============ Admin ============
