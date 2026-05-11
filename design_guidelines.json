@@ -1,0 +1,99 @@
+{
+  "theme": "dark",
+  "archetype": "Electric & Neon meets Jewel & Luxury",
+  "style_description": "Néo-brutalisme coloré + Glassmorphism + dégradés sombres. A highly fluid, animation-heavy dark mode fintech application. Built with high-contrast neo-brutalist borders on top of deep, frosted glassmorphic panels. Designed as a mobile-first web app mimicking a premium 2026 React Native Expo aesthetic.",
+  "colors": {
+    "background": {
+      "primary": "#050505",
+      "secondary": "#111111",
+      "glass": "rgba(255, 255, 255, 0.03)",
+      "glass_heavy": "rgba(255, 255, 255, 0.08)"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA",
+      "accent": "#00FFFF"
+    },
+    "accents": {
+      "brand": "#00FFFF",
+      "brand_hover": "#00CCCC",
+      "success": "#39FF14",
+      "warning": "#FFD700",
+      "danger": "#FF007F",
+      "purple_glow": "#9D4CDD"
+    },
+    "borders": {
+      "neo_brutalist": "rgba(255, 255, 255, 0.2)",
+      "glass_edge": "rgba(255, 255, 255, 0.1)"
+    }
+  },
+  "typography": {
+    "font_families": {
+      "headings": "Unbounded, display",
+      "body": "Outfit, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "sizes": {
+      "h1": "text-4xl sm:text-5xl tracking-tighter font-black",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-bold",
+      "h3": "text-xl sm:text-2xl tracking-tight font-semibold",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm uppercase tracking-[0.2em]"
+    }
+  },
+  "layout": {
+    "spacing_scale": "Generous spacing. Use p-6 to p-8 for mobile cards. Screens must have pb-24 to accommodate bottom tab navigation.",
+    "container": "w-full max-w-md mx-auto h-screen overflow-hidden bg-black relative",
+    "grid_system": "Use 1-column mobile-first flex/grid layouts. Dense control-room style for admin dashboard (grid-cols-2 to grid-cols-4)."
+  },
+  "surfaces_and_components": {
+    "glassmorphic_card": "bg-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
+    "neo_brutalist_card": "bg-[#111] border-2 border-white/20 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,255,255,0.5)] p-6 transition-all",
+    "buttons": {
+      "primary": "bg-[#00FFFF] text-black font-bold border-2 border-[#00FFFF] hover:bg-transparent hover:text-[#00FFFF] hover:shadow-[inset_0_0_20px_rgba(0,255,255,0.5)] transition-all rounded-full px-8 py-4",
+      "secondary": "bg-transparent text-white border-2 border-white/20 hover:border-white/50 rounded-full px-8 py-4"
+    },
+    "inputs": "bg-white/5 backdrop-blur-xl border-b-2 border-white/20 focus:border-[#00FFFF] text-white rounded-none px-4 py-3 outline-none transition-colors",
+    "bottom_nav": "fixed bottom-0 w-full max-w-md bg-black/60 backdrop-blur-3xl border-t border-white/10 pb-safe pt-4 px-6 flex justify-between items-center z-50",
+    "charts": "Recharts with transparent backgrounds, glowing strokes (#00FFFF and #FF007F), and customized glassmorphic tooltips."
+  },
+  "animations": {
+    "rules": "ULTRA FLUID. Framer Motion must wrap every route and interactive element.",
+    "page_transitions": {
+      "initial": { "opacity": 0, "y": 20, "scale": 0.98 },
+      "animate": { "opacity": 1, "y": 0, "scale": 1 },
+      "exit": { "opacity": 0, "y": -20, "scale": 0.98 },
+      "transition": { "type": "spring", "stiffness": 260, "damping": 20 }
+    },
+    "interactions": {
+      "tap": { "scale": 0.95 },
+      "hover": { "scale": 1.02, "transition": { "type": "spring", "stiffness": 400, "damping": 10 } }
+    },
+    "list_stagger": {
+      "animate": { "transition": { "staggerChildren": 0.05 } }
+    }
+  },
+  "media": {
+    "icons": "lucide-react for standard icons, @phosphor-icons/react for duotone rich icons.",
+    "images": {
+      "avatar_1": "https://images.unsplash.com/photo-1740252117013-4fb21771e7ca?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDN8MHwxfHNlYXJjaHw0fHxkaXZlcnNlJTIwcG9ydHJhaXQlMjB1c2VyJTIwYXZhdGFyfGVufDB8fHx8MTc3ODUwNzA3MXww&ixlib=rb-4.1.0&q=85",
+      "avatar_2": "https://images.unsplash.com/photo-1740252117012-bb53ad05e370?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDN8MHwxfHNlYXJjaHwxfHxkaXZlcnNlJTIwcG9ydHJhaXQlMjB1c2VyJTIwYXZhdGFyfGVufDB8fHx8MTc3ODUwNzA3MXww&ixlib=rb-4.1.0&q=85",
+      "avatar_3": "https://images.unsplash.com/photo-1707396172424-f3293f788364?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDN8MHwxfHNlYXJjaHwyfHxkaXZlcnNlJTIwcG9ydHJhaXQlMjB1c2VyJTIwYXZhdGFyfGVufDB8fHx8MTc3ODUwNzA3MXww&ixlib=rb-4.1.0&q=85",
+      "background_gradient": "https://images.unsplash.com/photo-1771814565026-58211c831115?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGRhcmslMjBncmFkaWVudCUyMG1lc2h8ZW58MHx8fHwxNzc4NTA3MDc2fDA&ixlib=rb-4.1.0&q=85",
+      "glass_3d_shape": "https://images.unsplash.com/photo-1769613547913-7172c7cd772c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGdsYXNzbW9ycGhpc20lMjAzZCUyMHNoYXBlfGVufDB8fHx8MTc3ODUwNzA3Nnww&ixlib=rb-4.1.0&q=85"
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure glowing text passes APCA/WCAG ratios. Use text-shadow for glowing elements.",
+    "data_testid": "MANDATORY: Add data-testid to all interactive elements (buttons, inputs, tabs, list items) in kebab-case."
+  },
+  "instructions_to_main_agent": [
+    "This is a mobile-first web app mimicking a React Native app. Constrain the main view to a mobile aspect ratio on desktop (e.g., max-w-md mx-auto) or build a fully responsive fluid UI that feels like an app.",
+    "Implement pure CSS radial gradients for background 'dégradés sombres' (e.g. bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-purple-900/40 via-black to-black).",
+    "Use Framer Motion for EVERY route transition and component mount to hit the 'ultra-fluide' requirement.",
+    "For the dashboard/admin page, switch to a dense grid layout (Control Room Grid) but maintain the dark neo-brutalist/glass aesthetic.",
+    "Use Shadcn UI components but heavily override them to match the glassmorphism and neo-brutalist rules provided.",
+    "Do NOT use Space Grotesk. Use Unbounded for Headings and Outfit for body.",
+    "Ensure the P2P transfer screens use the provided avatars to demonstrate the flow."
+  ]
+}
