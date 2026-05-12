@@ -51,9 +51,9 @@ export default function Settings() {
 
           <GlassCard>
             <Text style={styles.sectionLabel}>Préférences</Text>
-            <SwitchRow testID="pref-notif" icon="notifications" label="Notifications push" value={notif} onChange={(v) => { setNotif(v); save("pref_notif", v); }} />
-            <SwitchRow testID="pref-biometric" icon="finger-print" label="Verrouillage biométrique" value={biometric} onChange={(v) => { setBiometric(v); save("pref_biometric", v); }} />
-            <SwitchRow testID="pref-hide-bal" icon="eye-off" label="Masquer les soldes" value={hideBal} onChange={(v) => { setHideBal(v); save("pref_hideBal", v); }} />
+            <SwitchRow testID="pref-notif" icon="notifications" label="Notifications push" value={notif} onChange={(v: boolean) => { setNotif(v); save("pref_notif", v); }} />
+            <SwitchRow testID="pref-biometric" icon="finger-print" label="Verrouillage biométrique" value={biometric} onChange={(v: boolean) => { setBiometric(v); save("pref_biometric", v); }} />
+            <SwitchRow testID="pref-hide-bal" icon="eye-off" label="Masquer les soldes" value={hideBal} onChange={(v: boolean) => { setHideBal(v); save("pref_hideBal", v); }} />
           </GlassCard>
 
           <GlassCard>

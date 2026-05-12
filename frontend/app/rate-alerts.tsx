@@ -114,9 +114,17 @@ export default function RateAlerts() {
   );
 }
 
-function CurrencyChip({ code, onPick, testIDPrefix }: any) {
+type Currency = (typeof CURRENCIES)[number];
+
+type CurrencyChipProps = {
+  code: string;
+  onPick: (code: string) => void;
+  testIDPrefix: string;
+};
+
+function CurrencyChip({ code, onPick, testIDPrefix }: CurrencyChipProps) {
   const [open, setOpen] = useState(false);
-  const meta = CURRENCIES.find((c) => c.code === code) || CURRENCIES[0];
+  const meta = CURRENCIES.find((c: Currency) => c.code === code) || CURRENCIES[0];
   return (
     <View style={{ flex: 1 }}>
       <Pressable testID={`${testIDPrefix}-toggle`} onPress={() => setOpen(!open)} style={styles.chip}>
@@ -127,7 +135,7 @@ function CurrencyChip({ code, onPick, testIDPrefix }: any) {
       {open && (
         <View style={styles.drop}>
           <ScrollView style={{ maxHeight: 200 }}>
-            {CURRENCIES.map((c) => (
+            {CURRENCIES.map((c: Currency) => (
               <Pressable
                 key={c.code}
                 testID={`${testIDPrefix}-${c.code}`}

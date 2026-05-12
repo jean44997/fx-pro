@@ -17,7 +17,7 @@ workflows:
       - name: TypeScript check
         script: |
           cd "$CM_BUILD_DIR/frontend"
-          npx tsc --noEmit
+          npx yarn@1.22.22 tsc --noEmit
       - name: Generate iOS Xcode project
         script: |
           cd "$CM_BUILD_DIR/frontend"
@@ -61,7 +61,7 @@ workflows:
       - name: TypeScript check
         script: |
           cd "$CM_BUILD_DIR/frontend"
-          npx tsc --noEmit
+          npx yarn@1.22.22 tsc --noEmit
       - name: Configure Android SDK
         script: |
           echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/frontend/android/local.properties"
@@ -90,7 +90,7 @@ workflows:
       - name: TypeScript check
         script: |
           cd "$CM_BUILD_DIR/frontend"
-          npx tsc --noEmit
+          npx yarn@1.22.22 tsc --noEmit
       - name: Export PWA
         script: |
           cd "$CM_BUILD_DIR/frontend"
