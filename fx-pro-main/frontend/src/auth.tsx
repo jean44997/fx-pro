@@ -1,0 +1,130 @@
+// API client + Auth context
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+const API = `${BASE}/api`;
+
+export type User = {
+  user_id: string;
+  email: string;
+  name: string;
+  phone?: string;
+  role: "user" | "admin";
+  balances: Record<string, number>;
+  is_blocked?: boolean;
+  kyc_status?: string;
+  picture?: string | null;
+  auth_provider?: string;
+  favorite_pairs?: [string, string][];
+};
+
+let _token: string | null = null;
+
+export async function loadToken() {
+  if (_token) return _token;
+  const t = await AsyncStorage.getItem("fxpro_token");
+  _token = t;
+  return t;
+}
+export async function setToken(t: string | null) {
+  _token = t;
+  if (t) await AsyncStorage.setItem("fxpro_token", t);
+  else await AsyncStorage.removeItem("fxpro_token");
+}
+
+async function request(path: string, opts: RequestInit = {}) {
+  const token = await loadToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(opts.headers as any),
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API}${path}`, { ...opts, headers });
+  const ct = res.headers.get("content-type") || "";
+  const body = ct.includes("application/json") ? await res.json() : await res.text();
+  if (!res.ok) {
+    const msg = (body && (body.detail || body.message)) || `Error ${res.status}`;
+    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+  }
+  return body;
+}
+
+export const api = {
+  get: (p: string) => request(p),
+  post: (p: string, body?: any) => request(p, { method: "POST", body: JSON.stringify(body ?? {}) }),
+  put: (p: string, body?: any) => request(p, { method: "PUT", body: JSON.stringify(body ?? {}) }),
+  patch: (p: string, body?: any) => request(p, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
+  del: (p: string) => request(p, { method: "DELETE" }),
+};
+
+type Ctx = {
+  user: User | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, name: string, phone?: string) => Promise<void>;
+  loginGoogle: (sessionId: string) => Promise<void>;
+  logout: () => Promise<void>;
+  refresh: () => Promise<void>;
+  setUser: (u: User | null) => void;
+};
+
+const AuthCtx = createContext<Ctx>({} as any);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    const token = await loadToken();
+    if (!token) {
+      setUser(null);
+      return;
+    }
+    try {
+      const u = await api.get("/auth/me");
+      setUser(u);
+    } catch {
+      await setToken(null);
+      setUser(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      await refresh();
+      setLoading(false);
+    })();
+  }, [refresh]);
+
+  const login = async (email: string, password: string) => {
+    const r = await api.post("/auth/login", { email, password });
+    await setToken(r.token);
+    setUser(r.user);
+  };
+  const register = async (email: string, password: string, name: string, phone?: string) => {
+    const r = await api.post("/auth/register", { email, password, name, phone });
+    await setToken(r.token);
+    setUser(r.user);
+  };
+  const loginGoogle = async (sessionId: string) => {
+    const r = await api.post("/auth/google/session", { session_id: sessionId });
+    await setToken(r.token);
+    setUser(r.user);
+  };
+  const logout = async () => {
+    try {
+      await api.post("/auth/logout");
+    } catch {}
+    await setToken(null);
+    setUser(null);
+  };
+
+  return (
+    <AuthCtx.Provider value={{ user, loading, login, register, loginGoogle, logout, refresh, setUser }}>
+      {children}
+    </AuthCtx.Provider>
+  );
+}
+
+export const useAuth = () => useContext(AuthCtx);
