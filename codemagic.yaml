@@ -3,7 +3,12 @@ workflows:
     name: FX Pro iOS release
     max_build_duration: 120
     instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic
     environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.fxpro2026.app
       groups:
         - fxpro_env
       node: latest
@@ -32,8 +37,48 @@ workflows:
           test -n "$(find . -maxdepth 1 -name '*.xcworkspace' -print -quit)"
       - name: Set up iOS code signing
         script: |
+          cd "$CM_BUILD_DIR/frontend"
+
+          IOS_BUNDLE_ID="com.fxpro2026.app"
+          keychain initialize
+          app-store-connect fetch-signing-files "$IOS_BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+
           cd "$CM_BUILD_DIR/frontend/ios"
-          xcode-project use-profiles --warn-only
+          xcode-project use-profiles
+
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          if ! ls "$PROFILE_DIR"/*.mobileprovision >/dev/null 2>&1; then
+            echo "No provisioning profiles were installed for $IOS_BUNDLE_ID."
+            exit 1
+          fi
+
+          MATCHED_PROFILE=""
+          for PROFILE in "$PROFILE_DIR"/*.mobileprovision; do
+            if ! security cms -D -i "$PROFILE" > /tmp/fxpro_profile.plist; then
+              continue
+            fi
+
+            APP_ID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" /tmp/fxpro_profile.plist 2>/dev/null || true)
+            if [[ "$APP_ID" == *".$IOS_BUNDLE_ID" ]]; then
+              MATCHED_PROFILE="$PROFILE"
+              break
+            fi
+          done
+
+          if [ -z "$MATCHED_PROFILE" ]; then
+            echo "No provisioning profile found for $IOS_BUNDLE_ID."
+            exit 1
+          fi
+
+          echo "Matched provisioning profile: $MATCHED_PROFILE"
+          /usr/libexec/PlistBuddy -c "Print :Entitlements:aps-environment" /tmp/fxpro_profile.plist >/dev/null || {
+            echo "The provisioning profile for $IOS_BUNDLE_ID does not include Push Notifications (aps-environment)."
+            echo "Enable Push Notifications for this App ID in Apple Developer, then let Codemagic regenerate signing files."
+            exit 1
+          }
       - name: Build IPA
         script: |
           cd "$CM_BUILD_DIR/frontend"
