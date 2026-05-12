@@ -3,8 +3,6 @@ workflows:
     name: FX Pro iOS release
     max_build_duration: 120
     instance_type: mac_mini_m2
-    integrations:
-      app_store_connect: codemagic
     environment:
       groups:
         - fxpro_env
@@ -37,18 +35,29 @@ workflows:
           cd "$CM_BUILD_DIR/frontend"
 
           IOS_BUNDLE_ID="com.fxpro2026.app"
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          CERTIFICATE_DIR="$HOME/Library/MobileDevice/Certificates"
+
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID in Codemagic group fxpro_env}"
+          : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER in Codemagic group fxpro_env}"
+          : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY in Codemagic group fxpro_env}"
+          : "${CERTIFICATE_PRIVATE_KEY:?Missing CERTIFICATE_PRIVATE_KEY in Codemagic group fxpro_env}"
+
+          mkdir -p "$PROFILE_DIR" "$CERTIFICATE_DIR"
           keychain initialize
           app-store-connect fetch-signing-files "$IOS_BUNDLE_ID" \
             --type IOS_APP_STORE \
-            --create
-          keychain add-certificates
+            --profiles-dir "$PROFILE_DIR" \
+            --certificates-dir "$CERTIFICATE_DIR" \
+            --create \
+            --delete-stale-profiles
+          keychain add-certificates --certificate "$CERTIFICATE_DIR/*.p12"
 
           cd "$CM_BUILD_DIR/frontend/ios"
           IOS_PROJECT="$(find . -maxdepth 1 -name '*.xcodeproj' -print -quit)"
           test -n "$IOS_PROJECT"
           xcode-project use-profiles --project "$IOS_PROJECT"
 
-          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
           if ! ls "$PROFILE_DIR"/*.mobileprovision >/dev/null 2>&1; then
             echo "No provisioning profiles were installed for $IOS_BUNDLE_ID."
             exit 1
