@@ -6,9 +6,6 @@ workflows:
     integrations:
       app_store_connect: codemagic
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.fxpro2026.app
       groups:
         - fxpro_env
       node: latest
@@ -47,7 +44,9 @@ workflows:
           keychain add-certificates
 
           cd "$CM_BUILD_DIR/frontend/ios"
-          xcode-project use-profiles
+          IOS_PROJECT="$(find . -maxdepth 1 -name '*.xcodeproj' -print -quit)"
+          test -n "$IOS_PROJECT"
+          xcode-project use-profiles --project "$IOS_PROJECT"
 
           PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
           if ! ls "$PROFILE_DIR"/*.mobileprovision >/dev/null 2>&1; then
