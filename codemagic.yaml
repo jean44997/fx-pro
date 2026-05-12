@@ -1,0 +1,99 @@
+workflows:
+  ios-release:
+    name: FX Pro iOS release
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      groups:
+        - fxpro_env
+      node: latest
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install JS dependencies
+        script: |
+          cd "$CM_BUILD_DIR/frontend"
+          npx yarn@1.22.22 install --frozen-lockfile
+      - name: TypeScript check
+        script: |
+          cd "$CM_BUILD_DIR/frontend"
+          npx tsc --noEmit
+      - name: Generate iOS Xcode project
+        script: |
+          cd "$CM_BUILD_DIR/frontend"
+          CI=1 npx expo prebuild --platform ios --clean
+          test -n "$(find ios -maxdepth 1 -name '*.xcodeproj' -print -quit)"
+          test -n "$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+      - name: Install CocoaPods
+        script: |
+          cd "$CM_BUILD_DIR/frontend/ios"
+          pod install
+      - name: Set up iOS code signing
+        script: |
+          cd "$CM_BUILD_DIR/frontend/ios"
+          xcode-project use-profiles --warn-only
+      - name: Build IPA
+        script: |
+          cd "$CM_BUILD_DIR/frontend"
+          IOS_WORKSPACE="$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          IOS_SCHEME="$(basename "$IOS_WORKSPACE" .xcworkspace)"
+          xcode-project build-ipa --workspace "$IOS_WORKSPACE" --scheme "$IOS_SCHEME"
+    artifacts:
+      - frontend/ios/*.xcodeproj
+      - frontend/ios/*.xcworkspace
+      - frontend/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+  android-release:
+    name: FX Pro Android release
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      groups:
+        - fxpro_env
+      node: latest
+      java: 21
+    scripts:
+      - name: Install JS dependencies
+        script: |
+          cd "$CM_BUILD_DIR/frontend"
+          npx yarn@1.22.22 install --frozen-lockfile
+      - name: TypeScript check
+        script: |
+          cd "$CM_BUILD_DIR/frontend"
+          npx tsc --noEmit
+      - name: Configure Android SDK
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/frontend/android/local.properties"
+      - name: Build Android release
+        script: |
+          cd "$CM_BUILD_DIR/frontend/android"
+          ./gradlew assembleRelease bundleRelease --no-daemon --console=plain
+    artifacts:
+      - frontend/android/app/build/outputs/apk/release/*.apk
+      - frontend/android/app/build/outputs/bundle/release/*.aab
+      - frontend/android/app/build/outputs/mapping/release/mapping.txt
+
+  web-pwa:
+    name: FX Pro Web PWA
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      groups:
+        - fxpro_env
+      node: latest
+    scripts:
+      - name: Install JS dependencies
+        script: |
+          cd "$CM_BUILD_DIR/frontend"
+          npx yarn@1.22.22 install --frozen-lockfile
+      - name: TypeScript check
+        script: |
+          cd "$CM_BUILD_DIR/frontend"
+          npx tsc --noEmit
+      - name: Export PWA
+        script: |
+          cd "$CM_BUILD_DIR/frontend"
+          npx expo export --platform web
+    artifacts:
+      - frontend/dist/**
