@@ -6,11 +6,13 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Platform } from "react-native";
 import { AuthProvider } from "../src/auth";
-import { ensureNotificationsPermission, setupAndroidChannel } from "../src/notifs";
+import { ensureNotificationsPermission, setupAndroidChannel, setupWebNotifications } from "../src/notifs";
 
 export default function RootLayout() {
   useEffect(() => {
-    if (Platform.OS !== "web") {
+    if (Platform.OS === "web") {
+      setupWebNotifications();
+    } else {
       (async () => {
         await setupAndroidChannel();
         await ensureNotificationsPermission();

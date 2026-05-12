@@ -58,9 +58,9 @@ export default function RateAlerts() {
           <GlassCard testID="add-alert-card">
             <Text style={styles.lbl}>Nouvelle alerte</Text>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-              <CurrencyChip code={from} onPick={(c) => setFrom(c)} testIDPrefix="alert-from" />
+              <CurrencyChip code={from} onPick={(c: string) => setFrom(c)} testIDPrefix="alert-from" />
               <Ionicons name="arrow-forward" size={20} color={Colors.textSoft} style={{ alignSelf: "center" }} />
-              <CurrencyChip code={to} onPick={(c) => setTo(c)} testIDPrefix="alert-to" />
+              <CurrencyChip code={to} onPick={(c: string) => setTo(c)} testIDPrefix="alert-to" />
             </View>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
               <Pressable testID="dir-above" onPress={() => setDirection("above")} style={[styles.dir, direction === "above" && styles.dirActive]}>

@@ -1,14 +1,6 @@
-// Local push notification helper
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
-import { getFirebaseWebPushToken } from "./firebase";
-import {
-  ensureWebNotificationPermission,
-  getWebNotificationPermission,
-  registerPwaServiceWorker,
-  showWebNotification,
-} from "./webPush";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -21,7 +13,6 @@ Notifications.setNotificationHandler({
 });
 
 export async function ensureNotificationsPermission(): Promise<boolean> {
-  if (Platform.OS === "web") return ensureWebNotificationPermission();
   const settings = await Notifications.getPermissionsAsync();
   if (settings.granted || settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) return true;
   const asked = await Notifications.requestPermissionsAsync({
@@ -34,10 +25,7 @@ export async function ensureNotificationsPermission(): Promise<boolean> {
   return asked.granted || asked.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
 }
 
-export async function setupWebNotifications() {
-  if (Platform.OS !== "web") return;
-  await registerPwaServiceWorker();
-}
+export async function setupWebNotifications() {}
 
 export async function setupAndroidChannel() {
   if (Platform.OS !== "android") return;
@@ -51,21 +39,6 @@ export async function setupAndroidChannel() {
 }
 
 export async function getDevicePushToken(options: { requestPermission?: boolean } = {}): Promise<string | null> {
-  if (Platform.OS === "web") {
-    const registration = await registerPwaServiceWorker();
-    let permission = getWebNotificationPermission();
-
-    if (permission !== "granted") {
-      if (!options.requestPermission) return null;
-      const ok = await ensureWebNotificationPermission();
-      if (!ok) return null;
-      permission = "granted";
-    }
-
-    if (permission !== "granted") return null;
-    return getFirebaseWebPushToken(registration);
-  }
-
   try {
     const ok =
       options.requestPermission === false
@@ -84,10 +57,6 @@ export async function getDevicePushToken(options: { requestPermission?: boolean 
 }
 
 export async function notify(title: string, body: string, data?: any) {
-  if (Platform.OS === "web") {
-    await showWebNotification(title, body, data);
-    return;
-  }
   try {
     await Notifications.scheduleNotificationAsync({
       content: {

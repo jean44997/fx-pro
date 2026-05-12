@@ -5,6 +5,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import OperationFailure
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict, Any
 from pathlib import Path
@@ -110,6 +111,28 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
                 return user
 
     raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+async def send_push_notification(user_id: str, title: str, body: str, data: Optional[dict] = None):
+    try:
+        doc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "push_token": 1})
+        token = (doc or {}).get("push_token")
+        if not token or not token.startswith(("ExpoPushToken", "ExponentPushToken")):
+            return
+
+        payload = {
+            "to": token,
+            "title": title,
+            "body": body,
+            "sound": "default",
+            "data": data or {},
+        }
+        async with httpx.AsyncClient(timeout=10) as h:
+            r = await h.post("https://exp.host/--/api/v2/push/send", json=payload)
+            if r.status_code >= 400:
+                logger.warning(f"Expo push failed for {user_id}: {r.status_code} {r.text[:200]}")
+    except Exception as exc:
+        logger.warning(f"Expo push error for {user_id}: {exc}")
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
@@ -445,14 +468,21 @@ async def convert(data: ConvertIn, user: dict = Depends(get_current_user)):
     }
     await db.transactions.insert_one(receipt)
     receipt.pop("_id", None)
-    await db.notifications.insert_one({
+    notification = {
         "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
         "user_id": user["user_id"],
         "title": "Conversion réussie",
         "body": f"{data.amount} {data.from_currency} → {received} {data.to_currency}",
         "read": False,
         "created_at": now_utc(),
-    })
+    }
+    await db.notifications.insert_one(notification)
+    asyncio.create_task(send_push_notification(
+        user["user_id"],
+        notification["title"],
+        notification["body"],
+        {"type": "convert", "txn_id": txn_id},
+    ))
     return {"ok": True, "transaction": receipt, "balances": balances}
 
 
@@ -463,6 +493,7 @@ async def transfer(data: TransferIn, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Amount must be positive")
     if data.currency not in SUPPORTED_CURRENCIES:
         raise HTTPException(status_code=400, detail="Unsupported currency")
+    amount = round(float(data.amount), 4)
 
     recipient = None
     if data.by == "qr":
@@ -477,44 +508,120 @@ async def transfer(data: TransferIn, user: dict = Depends(get_current_user)):
     if recipient.get("is_blocked"):
         raise HTTPException(status_code=403, detail="Destinataire bloqué")
 
-    sender = await find_user_full(user["user_id"])
-    s_bal = sender.get("balances", {})
-    if s_bal.get(data.currency, 0) < data.amount:
-        raise HTTPException(status_code=400, detail="Solde insuffisant")
-
-    r_bal = recipient.get("balances", {})
-    s_bal[data.currency] = round(s_bal.get(data.currency, 0) - data.amount, 4)
-    r_bal[data.currency] = round(r_bal.get(data.currency, 0) + data.amount, 4)
-    await db.users.update_one({"user_id": sender["user_id"]}, {"$set": {"balances": s_bal}})
-    await db.users.update_one({"user_id": recipient["user_id"]}, {"$set": {"balances": r_bal}})
-
     txn_id = f"txn_{uuid.uuid4().hex[:12]}"
     txn = {
         "txn_id": txn_id,
         "type": "transfer",
-        "sender_id": sender["user_id"],
-        "sender_email": sender["email"],
-        "sender_name": sender.get("name"),
+        "sender_id": user["user_id"],
+        "sender_email": user["email"],
+        "sender_name": user.get("name"),
         "receiver_id": recipient["user_id"],
         "receiver_email": recipient["email"],
         "receiver_name": recipient.get("name"),
-        "amount": data.amount,
+        "amount": amount,
         "currency": data.currency,
         "note": data.note or "",
         "status": "completed",
         "created_at": now_utc(),
     }
-    await db.transactions.insert_one(txn)
-    txn.pop("_id", None)
-    # Notify both
-    await db.notifications.insert_many([
-        {"notif_id": f"ntf_{uuid.uuid4().hex[:10]}", "user_id": sender["user_id"],
-         "title": "Transfert envoyé", "body": f"-{data.amount} {data.currency} → {recipient['email']}",
+    notifications = [
+        {"notif_id": f"ntf_{uuid.uuid4().hex[:10]}", "user_id": user["user_id"],
+         "title": "Transfert envoyé", "body": f"-{amount} {data.currency} → {recipient['email']}",
          "read": False, "created_at": now_utc()},
         {"notif_id": f"ntf_{uuid.uuid4().hex[:10]}", "user_id": recipient["user_id"],
-         "title": "Transfert reçu", "body": f"+{data.amount} {data.currency} de {sender['email']}",
+         "title": "Transfert reçu", "body": f"+{amount} {data.currency} de {user['email']}",
          "read": False, "created_at": now_utc()},
-    ])
+    ]
+
+    balance_path = f"balances.{data.currency}"
+    sender_after = None
+
+    async def run_without_transaction():
+        sender = await find_user_full(user["user_id"])
+        if not sender or sender.get("is_blocked"):
+            raise HTTPException(status_code=403, detail="Account blocked")
+        if sender.get("balances", {}).get(data.currency, 0) < amount:
+            raise HTTPException(status_code=400, detail="Solde insuffisant")
+
+        debit = await db.users.update_one(
+            {"user_id": user["user_id"], balance_path: {"$gte": amount}, "is_blocked": {"$ne": True}},
+            {"$inc": {balance_path: -amount}},
+        )
+        if debit.modified_count != 1:
+            raise HTTPException(status_code=400, detail="Solde insuffisant")
+
+        credit = await db.users.update_one(
+            {"user_id": recipient["user_id"], "is_blocked": {"$ne": True}},
+            {"$inc": {balance_path: amount}},
+        )
+        if credit.modified_count != 1:
+            await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {balance_path: amount}})
+            raise HTTPException(status_code=409, detail="Transfert annule, destinataire indisponible")
+
+        try:
+            await db.transactions.insert_one(txn.copy())
+            await db.notifications.insert_many([n.copy() for n in notifications])
+        except Exception:
+            await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {balance_path: amount}})
+            await db.users.update_one({"user_id": recipient["user_id"]}, {"$inc": {balance_path: -amount}})
+            raise HTTPException(status_code=500, detail="Transfert annule, recu non enregistre")
+
+        return await find_user_full(user["user_id"])
+
+    try:
+        async with await client.start_session() as session:
+            async with session.start_transaction():
+                sender = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0}, session=session)
+                fresh_recipient = await db.users.find_one({"user_id": recipient["user_id"]}, {"_id": 0}, session=session)
+                if not sender or sender.get("is_blocked"):
+                    raise HTTPException(status_code=403, detail="Account blocked")
+                if not fresh_recipient or fresh_recipient.get("is_blocked"):
+                    raise HTTPException(status_code=409, detail="Destinataire indisponible")
+
+                debit = await db.users.update_one(
+                    {"user_id": user["user_id"], balance_path: {"$gte": amount}, "is_blocked": {"$ne": True}},
+                    {"$inc": {balance_path: -amount}},
+                    session=session,
+                )
+                if debit.modified_count != 1:
+                    raise HTTPException(status_code=400, detail="Solde insuffisant")
+
+                credit = await db.users.update_one(
+                    {"user_id": recipient["user_id"], "is_blocked": {"$ne": True}},
+                    {"$inc": {balance_path: amount}},
+                    session=session,
+                )
+                if credit.modified_count != 1:
+                    raise HTTPException(status_code=409, detail="Destinataire indisponible")
+
+                await db.transactions.insert_one(txn.copy(), session=session)
+                await db.notifications.insert_many([n.copy() for n in notifications], session=session)
+                sender_after = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0}, session=session)
+    except HTTPException:
+        raise
+    except OperationFailure as exc:
+        msg = str(exc).lower()
+        unsupported_transaction = (
+            "transaction numbers are only allowed" in msg
+            or "transactions are not supported" in msg
+            or "replica set member or mongos" in msg
+        )
+        if not unsupported_transaction:
+            raise
+        logger.warning(f"MongoDB transactions unavailable, using atomic fallback: {exc}")
+        sender_after = await run_without_transaction()
+
+    txn.pop("_id", None)
+    s_bal = sender_after.get("balances", {}) if sender_after else {}
+    if data.currency in s_bal:
+        s_bal[data.currency] = round(float(s_bal[data.currency]), 4)
+    for notification in notifications:
+        asyncio.create_task(send_push_notification(
+            notification["user_id"],
+            notification["title"],
+            notification["body"],
+            {"type": "transfer", "txn_id": txn_id},
+        ))
     return {"ok": True, "transaction": txn, "balances": s_bal}
 
 
@@ -880,8 +987,13 @@ async def startup_seed():
     # Indexes
     await db.users.create_index("email", unique=True)
     await db.users.create_index("user_id", unique=True)
+    await db.users.create_index("qr_code", sparse=True)
+    await db.users.create_index("push_token", sparse=True)
     await db.user_sessions.create_index("session_token", unique=True)
     await db.transactions.create_index("created_at")
+    await db.transactions.create_index([("sender_id", 1), ("created_at", -1)])
+    await db.transactions.create_index([("receiver_id", 1), ("created_at", -1)])
+    await db.notifications.create_index([("user_id", 1), ("created_at", -1)])
 
     # Seed admin
     admin = await db.users.find_one({"email": "admin@fxpro.com"})

@@ -29,7 +29,7 @@ export default function Login() {
     if (!email || !pwd) return Alert.alert("Champs requis", "Email et mot de passe requis");
     setLoading(true);
     try {
-      await login(email.trim(), pwd);
+      await login(email.trim().toLowerCase(), pwd);
     } catch (e: any) {
       Alert.alert("Erreur", e.message || "Échec de la connexion");
     } finally {
@@ -40,7 +40,7 @@ export default function Login() {
   const handleGoogle = async () => {
     setGLoading(true);
     try {
-      const redirect = Platform.OS === "web" ? `${window.location.origin}/` : Linking.createURL("/");
+      const redirect = Platform.OS === "web" ? `${window.location.origin}/login` : Linking.createURL("/");
       const url = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirect)}`;
       if (Platform.OS === "web") {
         window.location.href = url;
@@ -63,13 +63,13 @@ export default function Login() {
   // Web fallback: detect session_id on mount (Emergent redirect)
   useEffect(() => {
     if (Platform.OS !== "web") return;
-    const hash = window.location.hash || "";
-    const m = hash.match(/session_id=([^&]+)/);
-    if (m && m[1]) {
+    const params = new URLSearchParams(`${window.location.search || ""}&${(window.location.hash || "").replace(/^#/, "")}`);
+    const sessionId = params.get("session_id");
+    if (sessionId) {
       (async () => {
         try {
           setGLoading(true);
-          await loginGoogle(m[1]);
+          await loginGoogle(sessionId);
           window.history.replaceState({}, "", window.location.pathname);
         } catch (e: any) {
           Alert.alert("Erreur Google", e.message || "");

@@ -22,7 +22,7 @@ export default function Register() {
     if (pwd.length < 6) return Alert.alert("Mot de passe", "Minimum 6 caractères");
     setLoading(true);
     try {
-      await register(email.trim(), pwd, name.trim(), phone.trim());
+      await register(email.trim().toLowerCase(), pwd, name.trim(), phone.trim());
       router.replace("/(tabs)/home");
     } catch (e: any) {
       Alert.alert("Erreur", e.message || "Inscription échouée");

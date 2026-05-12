@@ -10,6 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.fxpro2026.app",
+      "buildNumber": "1",
       "icon": "./assets/images/app-icon.png",
       "supportsTablet": true,
       "infoPlist": {
@@ -17,7 +18,11 @@
         "NSPhotoLibraryUsageDescription": "Pick a profile photo and save receipts",
         "NSPhotoLibraryAddUsageDescription": "Save your transaction receipts",
         "NSFaceIDUsageDescription": "Unlock your wallet with Face ID",
-        "NSUserNotificationsUsageDescription": "Receive transaction alerts"
+        "NSUserNotificationsUsageDescription": "Receive transaction alerts",
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -34,7 +39,11 @@
         "RECEIVE_BOOT_COMPLETED",
         "POST_NOTIFICATIONS"
       ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "edgeToEdgeEnabled": true,
+      "versionCode": 1,
       "package": "com.fxpro2026.app"
     },
     "web": {
@@ -76,6 +85,8 @@
         {
           "icon": "./assets/images/notification-icon.png",
           "color": "#00FFFF",
+          "defaultChannel": "default",
+          "enableBackgroundRemoteNotifications": true,
           "sounds": []
         }
       ]

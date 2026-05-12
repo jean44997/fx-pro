@@ -18,6 +18,7 @@ try {
 
 export default function ScanQR() {
   const router = useRouter();
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const [permission, requestPermission] = useCameraPermissions ? useCameraPermissions() : [null, async () => {}];
   const [scanned, setScanned] = useState(false);
   const [pasted, setPasted] = useState("");
@@ -67,7 +68,7 @@ export default function ScanQR() {
             <GlassCard>
               <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>Caméra indisponible</Text>
               <Text style={{ color: Colors.textSoft, marginTop: 6, fontSize: 13 }}>
-                Sur ce navigateur, collez le code QR ci-dessous ou ouvrez l'app sur mobile.
+                {"Sur ce navigateur, collez le code QR ci-dessous ou ouvrez l'app sur mobile."}
               </Text>
               <TextInput
                 testID="qr-paste"

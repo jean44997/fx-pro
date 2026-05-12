@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, Pressable, ScrollView, Switch, Alert, Platform 
 import { useRouter } from "expo-router";
 import { GradientBg, GlassCard, GhostButton } from "../src/ui";
 import { Colors } from "../src/theme";
-import { useAuth } from "../src/auth";
+import { api, useAuth } from "../src/auth";
+import { ensureNotificationsPermission, getDevicePushToken, notify } from "../src/notifs";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -30,6 +31,30 @@ export default function Settings() {
     await AsyncStorage.setItem(k, v ? "1" : "0");
   };
 
+  const handleNotifChange = async (v: boolean) => {
+    if (!v) {
+      setNotif(false);
+      await save("pref_notif", false);
+      return;
+    }
+
+    const ok = await ensureNotificationsPermission();
+    if (!ok) {
+      setNotif(false);
+      await save("pref_notif", false);
+      Alert.alert("Notifications", "Permission refusee. Active les notifications dans les reglages du navigateur ou du telephone.");
+      return;
+    }
+
+    setNotif(true);
+    await save("pref_notif", true);
+    try {
+      const token = await getDevicePushToken({ requestPermission: false });
+      if (token) await api.post("/notifications/push-token", { token });
+    } catch {}
+    await notify("Notifications activees", "FX Pro peut maintenant afficher les alertes de transaction.");
+  };
+
   return (
     <GradientBg>
       <SafeAreaView style={{ flex: 1 }}>
@@ -51,9 +76,9 @@ export default function Settings() {
 
           <GlassCard>
             <Text style={styles.sectionLabel}>Préférences</Text>
-            <SwitchRow testID="pref-notif" icon="notifications" label="Notifications push" value={notif} onChange={(v) => { setNotif(v); save("pref_notif", v); }} />
-            <SwitchRow testID="pref-biometric" icon="finger-print" label="Verrouillage biométrique" value={biometric} onChange={(v) => { setBiometric(v); save("pref_biometric", v); }} />
-            <SwitchRow testID="pref-hide-bal" icon="eye-off" label="Masquer les soldes" value={hideBal} onChange={(v) => { setHideBal(v); save("pref_hideBal", v); }} />
+            <SwitchRow testID="pref-notif" icon="notifications" label="Notifications push" value={notif} onChange={handleNotifChange} />
+            <SwitchRow testID="pref-biometric" icon="finger-print" label="Verrouillage biométrique" value={biometric} onChange={(v: boolean) => { setBiometric(v); save("pref_biometric", v); }} />
+            <SwitchRow testID="pref-hide-bal" icon="eye-off" label="Masquer les soldes" value={hideBal} onChange={(v: boolean) => { setHideBal(v); save("pref_hideBal", v); }} />
           </GlassCard>
 
           <GlassCard>

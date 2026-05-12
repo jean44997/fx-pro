@@ -1,6 +1,8 @@
 // API client + Auth context
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getDevicePushToken } from "./notifs";
+import { clearFirebaseSession, syncFirebaseEmailAuth } from "./firebaseSync";
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || "";
 const API = `${BASE}/api`;
@@ -97,15 +99,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [refresh]);
 
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const token = await getDevicePushToken({ requestPermission: false });
+        if (!cancelled && token) await api.post("/notifications/push-token", { token });
+      } catch {}
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.user_id]);
+
   const login = async (email: string, password: string) => {
     const r = await api.post("/auth/login", { email, password });
     await setToken(r.token);
     setUser(r.user);
+    syncFirebaseEmailAuth(email.trim().toLowerCase(), password, r.user).catch(() => {});
   };
   const register = async (email: string, password: string, name: string, phone?: string) => {
     const r = await api.post("/auth/register", { email, password, name, phone });
     await setToken(r.token);
     setUser(r.user);
+    syncFirebaseEmailAuth(email.trim().toLowerCase(), password, r.user).catch(() => {});
   };
   const loginGoogle = async (sessionId: string) => {
     const r = await api.post("/auth/google/session", { session_id: sessionId });
@@ -116,6 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await api.post("/auth/logout");
     } catch {}
+    clearFirebaseSession().catch(() => {});
     await setToken(null);
     setUser(null);
   };

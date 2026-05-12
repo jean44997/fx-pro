@@ -1,0 +1,63 @@
+{
+  "hosting": {
+    "public": "frontend/dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "headers": [
+      {
+        "source": "/service-worker.js",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+          { "key": "Service-Worker-Allowed", "value": "/" }
+        ]
+      },
+      {
+        "source": "/manifest.webmanifest",
+        "headers": [
+          { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" },
+          { "key": "Cache-Control", "value": "public, max-age=3600" }
+        ]
+      },
+      {
+        "source": "**/*.@(js|css|woff2|woff|ttf|otf|eot|svg|png|jpg|jpeg|gif|webp|ico)",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        ]
+      },
+      {
+        "source": "**/*.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+        ]
+      }
+    ],
+    "rewrites": [
+      { "source": "/transfer", "destination": "/transfer.html" },
+      { "source": "/convert", "destination": "/convert.html" },
+      { "source": "/home", "destination": "/home.html" },
+      { "source": "/wallet", "destination": "/wallet.html" },
+      { "source": "/profile", "destination": "/profile.html" },
+      { "source": "/history", "destination": "/history.html" },
+      { "source": "/settings", "destination": "/settings.html" },
+      { "source": "/notifications", "destination": "/notifications.html" },
+      { "source": "/login", "destination": "/login.html" },
+      { "source": "/register", "destination": "/register.html" },
+      { "source": "/onboarding", "destination": "/onboarding.html" },
+      { "source": "/kyc", "destination": "/kyc.html" },
+      { "source": "/vault", "destination": "/vault.html" },
+      { "source": "/scan-qr", "destination": "/scan-qr.html" },
+      { "source": "/receive-qr", "destination": "/receive-qr.html" },
+      { "source": "/rate-alerts", "destination": "/rate-alerts.html" },
+      { "source": "/change-password", "destination": "/change-password.html" },
+      { "source": "**", "destination": "/index.html" }
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  }
+}
