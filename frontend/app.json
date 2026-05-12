@@ -9,16 +9,24 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
+      "bundleIdentifier": "com.fxpro2026.app",
+      "buildNumber": "1",
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Scan QR codes to send money instantly",
         "NSPhotoLibraryUsageDescription": "Pick a profile photo and save receipts",
         "NSPhotoLibraryAddUsageDescription": "Save your transaction receipts",
         "NSFaceIDUsageDescription": "Unlock your wallet with Face ID",
-        "NSUserNotificationsUsageDescription": "Receive transaction alerts"
+        "NSUserNotificationsUsageDescription": "Receive transaction alerts",
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
+      "package": "com.fxpro2026.app",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000"
@@ -32,6 +40,9 @@
         "RECEIVE_BOOT_COMPLETED",
         "POST_NOTIFICATIONS"
       ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "edgeToEdgeEnabled": true
     },
     "web": {
@@ -44,7 +55,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/splash-image.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#000"
@@ -52,7 +63,10 @@
       ],
       [
         "expo-camera",
-        { "cameraPermission": "Allow FX Pro to scan QR codes for payments" }
+        {
+          "cameraPermission": "Allow FX Pro to scan QR codes for payments",
+          "recordAudioAndroid": false
+        }
       ],
       [
         "expo-image-picker",
@@ -67,6 +81,8 @@
         {
           "icon": "./assets/images/icon.png",
           "color": "#00FFFF",
+          "defaultChannel": "default",
+          "enableBackgroundRemoteNotifications": true,
           "sounds": []
         }
       ]

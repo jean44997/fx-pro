@@ -21,13 +21,15 @@ workflows:
       - name: Generate iOS Xcode project
         script: |
           cd "$CM_BUILD_DIR/frontend"
-          CI=1 npx expo prebuild --platform ios --clean
+          npx expo config --type public
+          CI=1 npx expo prebuild --platform ios --clean --no-install
           test -n "$(find ios -maxdepth 1 -name '*.xcodeproj' -print -quit)"
-          test -n "$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          test -f ios/Podfile
       - name: Install CocoaPods
         script: |
           cd "$CM_BUILD_DIR/frontend/ios"
           pod install
+          test -n "$(find . -maxdepth 1 -name '*.xcworkspace' -print -quit)"
       - name: Set up iOS code signing
         script: |
           cd "$CM_BUILD_DIR/frontend/ios"
@@ -62,6 +64,13 @@ workflows:
         script: |
           cd "$CM_BUILD_DIR/frontend"
           npx yarn@1.22.22 tsc --noEmit
+      - name: Generate Android project
+        script: |
+          cd "$CM_BUILD_DIR/frontend"
+          npx expo config --type public
+          CI=1 npx expo prebuild --platform android --clean --no-install
+          test -f android/gradlew
+          chmod +x android/gradlew
       - name: Configure Android SDK
         script: |
           echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/frontend/android/local.properties"
