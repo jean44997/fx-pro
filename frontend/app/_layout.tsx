@@ -10,12 +10,14 @@ import { ensureNotificationsPermission, setupAndroidChannel } from "../src/notif
 
 export default function RootLayout() {
   useEffect(() => {
-    if (Platform.OS !== "web") {
-      (async () => {
+    (async () => {
+      if (Platform.OS === "web") {
+        await ensureNotificationsPermission();
+      } else {
         await setupAndroidChannel();
         await ensureNotificationsPermission();
-      })();
-    }
+      }
+    })();
   }, []);
 
   return (

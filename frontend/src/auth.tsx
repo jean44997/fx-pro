@@ -1,6 +1,7 @@
 // API client + Auth context
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { syncWebPushToken } from "./webPush";
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || "";
 const API = `${BASE}/api`;
@@ -84,6 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const u = await api.get("/auth/me");
       setUser(u);
+      syncWebPushToken(token).catch(() => undefined);
     } catch {
       await setToken(null);
       setUser(null);
@@ -101,16 +103,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const r = await api.post("/auth/login", { email, password });
     await setToken(r.token);
     setUser(r.user);
+    syncWebPushToken(r.token).catch(() => undefined);
   };
   const register = async (email: string, password: string, name: string, phone?: string) => {
     const r = await api.post("/auth/register", { email, password, name, phone });
     await setToken(r.token);
     setUser(r.user);
+    syncWebPushToken(r.token).catch(() => undefined);
   };
   const loginGoogle = async (sessionId: string) => {
     const r = await api.post("/auth/google/session", { session_id: sessionId });
     await setToken(r.token);
     setUser(r.user);
+    syncWebPushToken(r.token).catch(() => undefined);
   };
   const logout = async () => {
     try {

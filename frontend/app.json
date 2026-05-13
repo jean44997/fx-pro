@@ -48,7 +48,13 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "FX Pro 2026",
+      "shortName": "FX Pro",
+      "themeColor": "#050505",
+      "backgroundColor": "#050505",
+      "display": "standalone",
+      "orientation": "portrait"
     },
     "plugins": [
       "expo-router",

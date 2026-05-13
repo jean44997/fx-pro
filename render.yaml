@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: fx-pro-pwa
+    runtime: static
+    buildCommand: cd frontend && npx yarn@1.22.22 install --frozen-lockfile && npx yarn@1.22.22 build:web
+    staticPublishPath: frontend/dist
+    headers:
+      - path: /firebase-messaging-sw.js
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /firebase-messaging-sw.js
+        name: Service-Worker-Allowed
+        value: /
+      - path: /manifest.json
+        name: Content-Type
+        value: application/manifest+json
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

@@ -1,6 +1,7 @@
 // Local push notification helper
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import { setupWebPush, showWebNotification } from "./webPush";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -13,7 +14,7 @@ Notifications.setNotificationHandler({
 });
 
 export async function ensureNotificationsPermission(): Promise<boolean> {
-  if (Platform.OS === "web") return false;
+  if (Platform.OS === "web") return setupWebPush();
   const { status } = await Notifications.getPermissionsAsync();
   if (status === "granted") return true;
   const { status: ask } = await Notifications.requestPermissionsAsync();
@@ -32,7 +33,10 @@ export async function setupAndroidChannel() {
 }
 
 export async function notify(title: string, body: string, data?: any) {
-  if (Platform.OS === "web") return;
+  if (Platform.OS === "web") {
+    await showWebNotification(title, body, data);
+    return;
+  }
   try {
     await Notifications.scheduleNotificationAsync({
       content: {
