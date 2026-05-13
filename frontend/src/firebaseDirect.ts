@@ -38,6 +38,7 @@ const TXNS = "fxpro_transactions";
 const NOTIFS = "fxpro_notifications";
 const ALERTS = "fxpro_alerts";
 const VAULTS = "fxpro_vaults";
+const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_XOF", "EUR_USD"];
 
 const INITIAL_BALANCES: Record<string, number> = {
   EUR: 100,
@@ -104,7 +105,42 @@ function parseBody(opts: RequestInit) {
   }
 }
 
-function normalizeUser(data: any): User {
+function normalizeFavoritePairs(raw: any): [string, string][] {
+  const value = Array.isArray(raw) && raw.length ? raw : DEFAULT_FAVORITE_PAIR_KEYS;
+  return value
+    .map((pair: any) => {
+      if (Array.isArray(pair) && pair.length >= 2) return [String(pair[0]), String(pair[1])] as [string, string];
+      if (typeof pair === "string" && pair.includes("_")) {
+        const [from, to] = pair.split("_");
+        return [from, to] as [string, string];
+      }
+      if (pair?.from && pair?.to) return [String(pair.from), String(pair.to)] as [string, string];
+      return null;
+    })
+    .filter(Boolean) as [string, string][];
+}
+
+function firebaseAuthMessage(error: any) {
+  const code = error?.code || "";
+  if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
+    return "Identifiants Firebase invalides: verifie l'email/mot de passe, ou cree le compte avant de te connecter.";
+  }
+  if (code === "auth/email-already-in-use") {
+    return "Cet email existe deja dans Firebase. Connecte-toi avec le meme mot de passe.";
+  }
+  if (code === "auth/operation-not-allowed") {
+    return "Firebase Auth Email/Password n'est pas active. Active-le dans Firebase Console > Authentication > Sign-in method.";
+  }
+  if (code === "auth/weak-password") {
+    return "Mot de passe trop faible: utilise au moins 6 caracteres.";
+  }
+  if (code === "auth/popup-closed-by-user") {
+    return "Connexion Google annulee.";
+  }
+  return error?.message || "Erreur Firebase.";
+}
+
+function normalizeUser(data: any = {}): User {
   return {
     user_id: data.user_id,
     email: data.email,
@@ -116,7 +152,7 @@ function normalizeUser(data: any): User {
     kyc_status: data.kyc_status || "pending",
     picture: data.picture || null,
     auth_provider: data.auth_provider || "firebase",
-    favorite_pairs: data.favorite_pairs || [["EUR", "XOF"], ["EUR", "USD"]],
+    favorite_pairs: normalizeFavoritePairs(data.favorite_pairs),
   };
 }
 
@@ -152,7 +188,7 @@ async function ensureUserDoc(firebaseUser: FirebaseUser, extra: Partial<User> = 
       kyc_status: "pending",
       picture: firebaseUser.photoURL || null,
       auth_provider: "firebase",
-      favorite_pairs: [["EUR", "XOF"], ["EUR", "USD"]],
+      favorite_pairs: DEFAULT_FAVORITE_PAIR_KEYS,
       qr_code: `FXPRO:${firebaseUser.uid}:${makeId("QR").toUpperCase()}`,
       created_at: nowIso(),
       updated_at: nowIso(),
@@ -230,23 +266,44 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   const pathname = url.pathname;
 
   if (pathname === "/auth/register" && method === "POST") {
-    const cred = await createUserWithEmailAndPassword(auth, body.email, body.password);
-    await updateProfile(cred.user, { displayName: body.name }).catch(() => undefined);
-    const profile = await ensureUserDoc(cred.user, { name: body.name, phone: body.phone, email: body.email });
-    return tokenAndUser(cred.user, profile);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, body.email, body.password);
+      await updateProfile(cred.user, { displayName: body.name }).catch(() => undefined);
+      const profile = await ensureUserDoc(cred.user, { name: body.name, phone: body.phone, email: body.email });
+      return tokenAndUser(cred.user, profile);
+    } catch (error: any) {
+      if (error?.code === "auth/email-already-in-use") {
+        try {
+          const cred = await signInWithEmailAndPassword(auth, body.email, body.password);
+          const profile = await ensureUserDoc(cred.user, { name: body.name, phone: body.phone, email: body.email });
+          return tokenAndUser(cred.user, profile);
+        } catch {
+          throw new Error(firebaseAuthMessage(error));
+        }
+      }
+      throw new Error(firebaseAuthMessage(error));
+    }
   }
 
   if (pathname === "/auth/login" && method === "POST") {
-    const cred = await signInWithEmailAndPassword(auth, body.email, body.password);
-    const profile = await ensureUserDoc(cred.user);
-    return tokenAndUser(cred.user, profile);
+    try {
+      const cred = await signInWithEmailAndPassword(auth, body.email, body.password);
+      const profile = await ensureUserDoc(cred.user);
+      return tokenAndUser(cred.user, profile);
+    } catch (error: any) {
+      throw new Error(firebaseAuthMessage(error));
+    }
   }
 
   if (pathname === "/auth/google/session" && method === "POST") {
-    const provider = new GoogleAuthProvider();
-    const cred = await signInWithPopup(auth, provider);
-    const profile = await ensureUserDoc(cred.user);
-    return tokenAndUser(cred.user, profile);
+    try {
+      const provider = new GoogleAuthProvider();
+      const cred = await signInWithPopup(auth, provider);
+      const profile = await ensureUserDoc(cred.user);
+      return tokenAndUser(cred.user, profile);
+    } catch (error: any) {
+      throw new Error(firebaseAuthMessage(error));
+    }
   }
 
   if (pathname === "/auth/me") return currentProfile();
