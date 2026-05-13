@@ -20,21 +20,18 @@ export default function Profile() {
   const [saving, setSaving] = useState(false);
 
   const pickPhoto = async () => {
-    if (Platform.OS === "web") {
-      Alert.alert("Photo", "Disponible uniquement sur mobile (iOS/Android)");
-      return;
-    }
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) return Alert.alert("Permission refusée", "Autorisez l'accès aux photos dans les paramètres.");
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.6,
+      quality: 0.45,
       base64: true,
     });
     if (!res.canceled && res.assets[0]?.base64) {
-      const picture = `data:image/jpeg;base64,${res.assets[0].base64}`;
+      const mimeType = res.assets[0].mimeType || "image/jpeg";
+      const picture = `data:${mimeType};base64,${res.assets[0].base64}`;
       try {
         await api.patch("/profile", { picture });
         await refresh();

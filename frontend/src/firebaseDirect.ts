@@ -19,6 +19,7 @@ import {
   getDocs,
   getFirestore,
   limit,
+  onSnapshot,
   query,
   runTransaction,
   setDoc,
@@ -26,12 +27,14 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
+import { getDownloadURL, getStorage, ref as storageRef, uploadString } from "firebase/storage";
 import { firebaseConfig } from "./firebaseConfig";
 import type { User } from "./auth";
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 const USERS = "fxpro_users";
 const TXNS = "fxpro_transactions";
@@ -257,6 +260,28 @@ function historyForPair(pair: string, rate: number) {
 
 function sortByDateDesc(items: any[]) {
   return items.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+}
+
+async function uploadProfilePicture(userId: string, picture?: string) {
+  if (!picture || !picture.startsWith("data:image/")) return picture;
+  const avatarRef = storageRef(storage, `profile-pictures/${userId}/avatar.jpg`);
+  await uploadString(avatarRef, picture, "data_url");
+  return getDownloadURL(avatarRef);
+}
+
+export function subscribeFirebaseNotifications(
+  onItems: (items: any[]) => void,
+  onError?: (error: Error) => void
+) {
+  const user = auth.currentUser;
+  if (!user) return () => undefined;
+
+  const q = query(collection(db, NOTIFS), where("user_id", "==", user.uid));
+  return onSnapshot(
+    q,
+    (snap) => onItems(sortByDateDesc(snap.docs.map((d) => d.data()))),
+    (error) => onError?.(error)
+  );
 }
 
 export async function firebaseDirectRequest(path: string, opts: RequestInit = {}) {
@@ -497,7 +522,11 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
 
   if (pathname === "/profile" && method === "PATCH") {
     const firebaseUser = await requireFirebaseUser();
-    await updateDoc(doc(db, USERS, firebaseUser.uid), { ...body, updated_at: nowIso() });
+    const patch = { ...body };
+    if (patch.picture) {
+      patch.picture = await uploadProfilePicture(firebaseUser.uid, patch.picture);
+    }
+    await updateDoc(doc(db, USERS, firebaseUser.uid), { ...patch, updated_at: nowIso() });
     return currentProfile();
   }
 

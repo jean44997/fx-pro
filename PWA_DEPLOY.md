@@ -33,6 +33,7 @@ npx yarn@1.22.22 install --frozen-lockfile
 npx yarn@1.22.22 build:web
 cd ..
 npx firebase-tools deploy --only firestore:rules
+npx firebase-tools deploy --only storage
 npx firebase-tools deploy --only hosting
 ```
 

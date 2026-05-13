@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl } from "r
 import { useRouter } from "expo-router";
 import { GradientBg, GlassCard, GhostButton } from "../src/ui";
 import { Colors } from "../src/theme";
-import { api } from "../src/auth";
+import { isFirebaseDirectMode, api } from "../src/auth";
+import { subscribeFirebaseNotifications } from "../src/firebaseDirect";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, { FadeInRight } from "react-native-reanimated";
@@ -21,6 +22,9 @@ export default function Notifications() {
   };
 
   useEffect(() => {
+    if (isFirebaseDirectMode) {
+      return subscribeFirebaseNotifications(setItems);
+    }
     load();
   }, []);
 

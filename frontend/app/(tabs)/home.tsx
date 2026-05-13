@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl, Dimensio
 import { useRouter } from "expo-router";
 import { GradientBg, GlassCard, NeoCard, PrimaryButton } from "../../src/ui";
 import { Colors, CURRENCIES, formatMoney, currencyMeta } from "../../src/theme";
-import { useAuth, api } from "../../src/auth";
+import { isFirebaseDirectMode, useAuth, api } from "../../src/auth";
+import { subscribeFirebaseNotifications } from "../../src/firebaseDirect";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeIn, FadeInRight, FadeInUp } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -43,6 +44,25 @@ export default function Home() {
   // Watch for new server notifications → trigger real local push
   useEffect(() => {
     let lastIds = new Set<string>();
+    let ready = false;
+    if (isFirebaseDirectMode) {
+      return subscribeFirebaseNotifications((items) => {
+        setNotifCount((items || []).filter((x: any) => !x.read).length);
+        const ids = new Set<string>((items || []).map((x: any) => x.notif_id as string));
+        if (!ready) {
+          lastIds = ids;
+          ready = true;
+          return;
+        }
+        for (const it of items || []) {
+          if (!lastIds.has(it.notif_id) && !it.read) {
+            notify(it.title, it.body, { notif_id: it.notif_id });
+          }
+        }
+        lastIds = ids;
+      });
+    }
+
     const tick = async () => {
       try {
         const n = await api.get("/notifications");
@@ -53,13 +73,13 @@ export default function Home() {
         }
         for (const it of n.items || []) {
           if (!lastIds.has(it.notif_id) && !it.read) {
-            notify(it.title, it.body);
+            notify(it.title, it.body, { notif_id: it.notif_id });
           }
         }
         lastIds = ids;
       } catch {}
     };
-    const t = setInterval(tick, 20000);
+    const t = setInterval(tick, 5000);
     return () => clearInterval(t);
   }, []);
 

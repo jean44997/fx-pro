@@ -9,6 +9,7 @@ import { requestWebInstallPermissions } from "../src/webPermissions";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as LocalAuthentication from "expo-local-authentication";
 
 export default function Settings() {
   const router = useRouter();
@@ -30,6 +31,47 @@ export default function Settings() {
 
   const save = async (k: string, v: boolean) => {
     await AsyncStorage.setItem(k, v ? "1" : "0");
+  };
+
+  const updateBiometric = async (enabled: boolean) => {
+    if (!enabled) {
+      setBiometric(false);
+      await save("pref_biometric", false);
+      return;
+    }
+
+    if (Platform.OS === "web") {
+      const available =
+        typeof window !== "undefined" &&
+        "PublicKeyCredential" in window &&
+        Boolean(await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.().catch(() => false));
+      setBiometric(available);
+      await save("pref_biometric", available);
+      Alert.alert(
+        "Biométrie",
+        available
+          ? "Ton navigateur supporte Face ID/empreinte via passkeys. La session Firebase reste mémorisée pour la prochaine ouverture."
+          : "Ce navigateur ne donne pas de permission biométrique globale. Utilise Safari/Chrome avec passkeys si disponible."
+      );
+      return;
+    }
+
+    const hasHardware = await LocalAuthentication.hasHardwareAsync();
+    const enrolled = await LocalAuthentication.isEnrolledAsync();
+    if (!hasHardware || !enrolled) {
+      setBiometric(false);
+      await save("pref_biometric", false);
+      Alert.alert("Biométrie", "Configure d'abord Face ID ou une empreinte dans les réglages du téléphone.");
+      return;
+    }
+
+    const result = await LocalAuthentication.authenticateAsync({
+      promptMessage: "Activer la connexion biométrique FX Pro",
+      cancelLabel: "Annuler",
+      disableDeviceFallback: false,
+    });
+    setBiometric(result.success);
+    await save("pref_biometric", result.success);
   };
 
   return (
@@ -54,7 +96,7 @@ export default function Settings() {
           <GlassCard>
             <Text style={styles.sectionLabel}>Préférences</Text>
             <SwitchRow testID="pref-notif" icon="notifications" label="Notifications push" value={notif} onChange={(v: boolean) => { setNotif(v); save("pref_notif", v); if (v) (Platform.OS === "web" ? requestWebInstallPermissions() : ensureNotificationsPermission()).catch(() => {}); }} />
-            <SwitchRow testID="pref-biometric" icon="finger-print" label="Verrouillage biométrique" value={biometric} onChange={(v: boolean) => { setBiometric(v); save("pref_biometric", v); }} />
+            <SwitchRow testID="pref-biometric" icon="finger-print" label="Verrouillage biométrique" value={biometric} onChange={updateBiometric} />
             <SwitchRow testID="pref-hide-bal" icon="eye-off" label="Masquer les soldes" value={hideBal} onChange={(v: boolean) => { setHideBal(v); save("pref_hideBal", v); }} />
           </GlassCard>
 
