@@ -91,7 +91,7 @@ export default function Vault() {
           <Pressable testID="vault-back" onPress={() => router.back()} hitSlop={12}>
             <Ionicons name="arrow-back" size={26} color="#fff" />
           </Pressable>
-          <Text style={styles.title}>🔒 Coffre d'épargne</Text>
+          <Text style={styles.title}>{"🔒 Coffre d'épargne"}</Text>
           <View style={{ width: 26 }} />
         </View>
         <ScrollView contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">

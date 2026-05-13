@@ -136,7 +136,7 @@ export default function Transfer() {
                 {mode === "email" && check.status === "not_found" && (
                   <Animated.View entering={FadeIn} style={[styles.foundCard, { borderColor: Colors.danger }]}>
                     <Ionicons name="close-circle" size={22} color={Colors.danger} />
-                    <Text style={{ color: Colors.danger, fontWeight: "700", flex: 1 }}>Cet utilisateur n'existe pas dans FX Pro</Text>
+                    <Text style={{ color: Colors.danger, fontWeight: "700", flex: 1 }}>{"Cet utilisateur n'existe pas dans FX Pro"}</Text>
                   </Animated.View>
                 )}
                 {check.status === "self" && (

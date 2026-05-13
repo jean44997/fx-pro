@@ -22,7 +22,7 @@ export default function Register() {
   const submit = async () => {
     if (!email || !pwd || !name) return showAlert("Champs requis", "Nom, email et mot de passe requis");
     if (pwd.length < 6) return showAlert("Mot de passe", "Minimum 6 caractères");
-    if (Platform.OS === "web") requestWebInstallPermissions().catch(() => {});
+    if (Platform.OS === "web") await requestWebInstallPermissions().catch(() => false);
     setLoading(true);
     try {
       await register(email.trim(), pwd, name.trim(), phone.trim());

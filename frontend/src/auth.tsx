@@ -6,6 +6,10 @@ import { syncWebPushToken } from "./webPush";
 const BASE = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/+$/, "");
 const API = `${BASE}/api`;
 const REQUEST_TIMEOUT_MS = 15000;
+const MISSING_BACKEND_MESSAGE =
+  "Backend web non configure. Ajoute EXPO_PUBLIC_BACKEND_URL dans Vercel avec l'URL HTTPS du backend, sans /api.";
+const WRONG_BACKEND_MESSAGE =
+  "L'URL backend pointe vers un site statique, pas vers l'API FastAPI. EXPO_PUBLIC_BACKEND_URL doit etre l'URL HTTPS du backend, sans /api.";
 
 export type User = {
   user_id: string;
@@ -36,6 +40,10 @@ export async function setToken(t: string | null) {
 }
 
 async function request(path: string, opts: RequestInit = {}) {
+  if (!BASE) {
+    throw new Error(MISSING_BACKEND_MESSAGE);
+  }
+
   const token = await loadToken();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -67,12 +75,13 @@ async function request(path: string, opts: RequestInit = {}) {
 
   if (!res.ok) {
     const looksLikeStaticHost =
-      !BASE && typeof body === "string" && (body.includes("<!DOCTYPE") || body.includes("<html"));
+      typeof body === "string" && (body.includes("<!DOCTYPE") || body.includes("<html"));
+    if (looksLikeStaticHost || res.status === 405) {
+      throw new Error(WRONG_BACKEND_MESSAGE);
+    }
     const msg =
       (body && (body.detail || body.message)) ||
-      (looksLikeStaticHost
-        ? "Backend web non configuré. Ajoute EXPO_PUBLIC_BACKEND_URL dans Vercel avec l'URL HTTPS de ton backend."
-        : `Erreur serveur ${res.status}`);
+      `Erreur serveur ${res.status}`;
     throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
   }
   return body;

@@ -29,7 +29,7 @@ export default function Login() {
 
   const handleLogin = async () => {
     if (!email || !pwd) return showAlert("Champs requis", "Email et mot de passe requis");
-    if (Platform.OS === "web") requestWebInstallPermissions().catch(() => {});
+    if (Platform.OS === "web") await requestWebInstallPermissions().catch(() => false);
     setLoading(true);
     try {
       await login(email.trim(), pwd);
@@ -43,7 +43,7 @@ export default function Login() {
   const handleGoogle = async () => {
     setGLoading(true);
     try {
-      if (Platform.OS === "web") requestWebInstallPermissions().catch(() => {});
+      if (Platform.OS === "web") await requestWebInstallPermissions().catch(() => false);
       const redirect = Platform.OS === "web" ? `${window.location.origin}/` : Linking.createURL("/");
       const url = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirect)}`;
       if (Platform.OS === "web") {

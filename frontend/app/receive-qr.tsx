@@ -41,7 +41,7 @@ export default function ReceiveQR() {
           <View style={{ width: 26 }} />
         </View>
         <ScrollView contentContainerStyle={{ padding: 20 }}>
-          <Text style={styles.sub}>Demandez à l'expéditeur de scanner ce QR code pour vous envoyer de l'argent.</Text>
+          <Text style={styles.sub}>{"Demandez à l'expéditeur de scanner ce QR code pour vous envoyer de l'argent."}</Text>
           <Animated.View entering={FadeIn.duration(500)} style={styles.qrWrap}>
             <View style={styles.qrInner}>
               {code ? <QRCode value={code} size={220} backgroundColor="#ffffff" color="#000000" /> : null}

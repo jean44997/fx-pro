@@ -44,7 +44,7 @@ export default function KYC() {
                 Statut: {user?.kyc_status === "verified" ? "Vérifié" : "En attente"}
               </Text>
               <Text style={{ color: Colors.textSoft, marginTop: 8, textAlign: "center", fontSize: 13 }}>
-                Une vérification KYC simulée pour la démo. En production, vous téléchargeriez votre pièce d'identité.
+                {"Une vérification KYC simulée pour la démo. En production, vous téléchargeriez votre pièce d'identité."}
               </Text>
             </View>
             {user?.kyc_status !== "verified" && (

@@ -6,28 +6,20 @@ import { Colors } from "../src/theme";
 import { api } from "../src/auth";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-let CameraView: any = null;
-let useCameraPermissions: any = null;
-try {
-  // Camera not available on web — guard imports
-  const camMod = require("expo-camera");
-  CameraView = camMod.CameraView;
-  useCameraPermissions = camMod.useCameraPermissions;
-} catch {}
+import { CameraView, useCameraPermissions } from "expo-camera";
 
 export default function ScanQR() {
   const router = useRouter();
-  const [permission, requestPermission] = useCameraPermissions ? useCameraPermissions() : [null, async () => {}];
+  const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [pasted, setPasted] = useState("");
   const isWeb = Platform.OS === "web";
 
   useEffect(() => {
-    if (!isWeb && useCameraPermissions && !permission?.granted) {
-      requestPermission?.();
+    if (!isWeb && !permission?.granted) {
+      requestPermission();
     }
-  }, [permission, isWeb, requestPermission]);
+  }, [permission?.granted, isWeb, requestPermission]);
 
   const handleCode = async (code: string) => {
     if (scanned) return;
@@ -52,7 +44,7 @@ export default function ScanQR() {
           <View style={{ width: 26 }} />
         </View>
 
-        {!isWeb && CameraView && permission?.granted ? (
+        {!isWeb && permission?.granted ? (
           <View style={styles.cam}>
             <CameraView
               testID="qr-camera"
@@ -67,7 +59,7 @@ export default function ScanQR() {
             <GlassCard>
               <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>Caméra indisponible</Text>
               <Text style={{ color: Colors.textSoft, marginTop: 6, fontSize: 13 }}>
-                Sur ce navigateur, collez le code QR ci-dessous ou ouvrez l'app sur mobile.
+                {"Sur ce navigateur, collez le code QR ci-dessous ou ouvrez l'app sur mobile."}
               </Text>
               <TextInput
                 testID="qr-paste"

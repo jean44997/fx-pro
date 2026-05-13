@@ -70,7 +70,7 @@ async function getMessagingInstance() {
 }
 
 async function sendTokenToBackend(fcmToken: string, authToken?: string | null) {
-  if (!authToken) return;
+  if (!authToken || !BASE) return;
   await fetch(`${API}/notifications/push-token`, {
     method: "POST",
     headers: {
