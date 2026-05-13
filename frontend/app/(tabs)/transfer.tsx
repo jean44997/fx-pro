@@ -8,6 +8,7 @@ import { CurrencyPickerButton } from "../../src/CurrencyPicker";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { notify } from "../../src/notifs";
 
 type CheckState = { status: "idle" | "checking" | "ok" | "not_found" | "self" | "blocked"; name?: string; email?: string; picture?: string };
 
@@ -88,6 +89,14 @@ export default function Transfer() {
     setLoading(true);
     try {
       const r = await api.post("/transfer", { recipient: recipient.trim(), by: mode, amount: n, currency, note });
+      const txnId = r?.transaction?.txn_id;
+      if (txnId) {
+        notify("FX Pro - Transfert envoye", `${n} ${currency} envoye a ${check.name || check.email || "destinataire"}`, {
+          notif_id: r?.notification_ids?.sender || `sent_${txnId}`,
+          txn_id: txnId,
+          type: "transfer",
+        }).catch(() => undefined);
+      }
       await refresh();
       router.push({ pathname: "/receipt/[id]", params: { id: r.transaction.txn_id } });
       setAmount("");

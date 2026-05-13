@@ -118,7 +118,14 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
-async def send_push_to_user(user_id: str, title: str, body: str, txn_id: Optional[str] = None, type_: str = "notification"):
+async def send_push_to_user(
+    user_id: str,
+    title: str,
+    body: str,
+    txn_id: Optional[str] = None,
+    type_: str = "notification",
+    notif_id: Optional[str] = None,
+):
     full = await find_user_full(user_id)
     token = (full or {}).get("push_token")
     if not token or not (token.startswith("ExponentPushToken[") or token.startswith("ExpoPushToken[")):
@@ -131,7 +138,12 @@ async def send_push_to_user(user_id: str, title: str, body: str, txn_id: Optiona
                     "to": token,
                     "title": title,
                     "body": body,
-                    "data": {"txn_id": txn_id or "", "type": type_, "url": "/notifications"},
+                    "data": {
+                        "txn_id": txn_id or "",
+                        "type": type_,
+                        "url": "/notifications",
+                        "notif_id": notif_id or "",
+                    },
                     "sound": "default",
                     "priority": "high",
                     "badge": 1,
@@ -547,10 +559,15 @@ async def transfer(data: TransferIn, user: dict = Depends(get_current_user)):
                       "read": False, "created_at": now_utc()}
     await db.notifications.insert_many([sender_notif, receiver_notif])
     await asyncio.gather(
-        send_push_to_user(sender["user_id"], sender_notif["title"], sender_notif["body"], txn_id, "transfer"),
-        send_push_to_user(recipient["user_id"], receiver_notif["title"], receiver_notif["body"], txn_id, "transfer"),
+        send_push_to_user(sender["user_id"], sender_notif["title"], sender_notif["body"], txn_id, "transfer", sender_notif["notif_id"]),
+        send_push_to_user(recipient["user_id"], receiver_notif["title"], receiver_notif["body"], txn_id, "transfer", receiver_notif["notif_id"]),
     )
-    return {"ok": True, "transaction": txn, "balances": s_bal}
+    return {
+        "ok": True,
+        "transaction": txn,
+        "balances": s_bal,
+        "notification_ids": {"sender": sender_notif["notif_id"], "receiver": receiver_notif["notif_id"]},
+    }
 
 
 # ============ QR codes ============

@@ -6,6 +6,7 @@ import { registerFirebasePushToken } from "./firebaseDirect";
 import { setupWebPush, showWebNotification } from "./webPush";
 
 const shownNotificationIds = new Map<string, number>();
+const LOCAL_NOTIFICATION_MARKER = "__fxpro_local_notification";
 
 function shouldDisplayNotification(id?: unknown) {
   if (typeof id !== "string" || !id) return true;
@@ -35,7 +36,9 @@ export async function setNotificationBadgeCount(count: number) {
 
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
-    const shouldShow = shouldDisplayNotification(notification.request.content.data?.notif_id);
+    const data = notification.request.content.data || {};
+    const isLocalNotification = data[LOCAL_NOTIFICATION_MARKER] === "1";
+    const shouldShow = isLocalNotification || shouldDisplayNotification(data.notif_id);
     return {
       shouldShowAlert: shouldShow,
       shouldPlaySound: shouldShow,
@@ -88,7 +91,7 @@ export async function notify(title: string, body: string, data?: any) {
       content: {
         title,
         body,
-        data: data || {},
+        data: { ...(data || {}), [LOCAL_NOTIFICATION_MARKER]: "1" },
         sound: "default",
         priority: Notifications.AndroidNotificationPriority.MAX,
       },

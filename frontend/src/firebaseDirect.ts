@@ -27,7 +27,7 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { getDownloadURL, getStorage, ref as storageRef, uploadString } from "firebase/storage";
+import { deleteObject, getDownloadURL, getStorage, ref as storageRef, uploadString } from "firebase/storage";
 import { firebaseConfig } from "./firebaseConfig";
 import type { User } from "./auth";
 
@@ -42,6 +42,7 @@ const NOTIFS = "fxpro_notifications";
 const ALERTS = "fxpro_alerts";
 const VAULTS = "fxpro_vaults";
 const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_XOF", "EUR_USD"];
+const MAX_INLINE_PROFILE_PICTURE_CHARS = 700000;
 
 const INITIAL_BALANCES: Record<string, number> = {
   EUR: 0,
@@ -270,13 +271,26 @@ function sortByDateDesc(items: any[]) {
   return items.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 }
 
-async function uploadProfilePicture(userId: string, picture?: string) {
+async function uploadProfilePicture(userId: string, picture?: string | null) {
   if (!picture || !picture.startsWith("data:image/")) return picture;
   const mime = picture.slice(5, picture.indexOf(";")) || "image/jpeg";
   const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
   const avatarRef = storageRef(storage, `profile-pictures/${userId}/avatar.${ext}`);
-  await uploadString(avatarRef, picture, "data_url", { contentType: mime });
-  return getDownloadURL(avatarRef);
+  try {
+    await uploadString(avatarRef, picture, "data_url", { contentType: mime });
+    return getDownloadURL(avatarRef);
+  } catch (error) {
+    if (picture.length <= MAX_INLINE_PROFILE_PICTURE_CHARS) return picture;
+    throw error;
+  }
+}
+
+async function deleteProfilePicture(userId: string) {
+  await Promise.all(
+    ["jpg", "jpeg", "png", "webp"].map((ext) =>
+      deleteObject(storageRef(storage, `profile-pictures/${userId}/avatar.${ext}`)).catch(() => undefined)
+    )
+  );
 }
 
 export function subscribeFirebaseNotifications(
@@ -490,7 +504,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
         created_at: nowIso(),
       });
     });
-    return { ok: true, transaction, balances };
+    return { ok: true, transaction, balances, notification_ids: { sender: senderNotifId, receiver: recipientNotifId } };
   }
 
   if (pathname === "/users/check") {
@@ -649,13 +663,18 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   if (pathname === "/profile" && method === "PATCH") {
     const firebaseUser = await requireFirebaseUser();
     const patch = { ...body };
-    if (patch.picture) {
+    if (Object.prototype.hasOwnProperty.call(patch, "picture")) {
       try {
-        patch.picture = await uploadProfilePicture(firebaseUser.uid, patch.picture);
+        if (patch.picture === null || patch.picture === "") {
+          await deleteProfilePicture(firebaseUser.uid);
+          patch.picture = null;
+        } else if (patch.picture) {
+          patch.picture = await uploadProfilePicture(firebaseUser.uid, patch.picture);
+        }
       } catch (error: any) {
         const code = error?.code || "";
         if (code.includes("storage/unauthorized")) {
-          throw new Error("Upload photo bloque par Firebase Storage. Deploie storage.rules puis reessaie.");
+          throw new Error("Upload photo bloque par Firebase Storage. Deploie storage.rules, ou choisis une photo plus legere.");
         }
         throw new Error(error?.message || "Upload photo impossible.");
       }

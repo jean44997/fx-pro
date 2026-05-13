@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Image, Platform, TextInput, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Image, Platform, TextInput, Modal, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { GradientBg, GlassCard, GhostButton, PrimaryButton } from "../../src/ui";
 import { Colors } from "../../src/theme";
@@ -18,6 +18,7 @@ export default function Profile() {
   const [name, setName] = useState(user?.name || "");
   const [phone, setPhone] = useState(user?.phone || "");
   const [saving, setSaving] = useState(false);
+  const [photoSaving, setPhotoSaving] = useState(false);
 
   const pickPhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -26,23 +27,53 @@ export default function Profile() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.25,
+      quality: 0.18,
       base64: true,
+      exif: false,
     });
-    if (!res.canceled && res.assets[0]?.base64) {
-      if (res.assets[0].base64.length > 1900000) {
+    const asset = res.canceled ? null : res.assets[0];
+    if (asset?.base64) {
+      if (asset.base64.length > 1900000) {
         return Alert.alert("Photo trop lourde", "Choisissez une image plus légère pour le profil.");
       }
-      const mimeType = res.assets[0].mimeType || "image/jpeg";
-      const picture = `data:${mimeType};base64,${res.assets[0].base64}`;
+      const mimeType = asset.mimeType || "image/jpeg";
+      const picture = `data:${mimeType};base64,${asset.base64}`;
       try {
+        setPhotoSaving(true);
         await api.patch("/profile", { picture });
         await refresh();
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       } catch (e: any) {
         Alert.alert("Erreur", e.message);
+      } finally {
+        setPhotoSaving(false);
       }
     }
+  };
+
+  const removePhoto = async () => {
+    try {
+      setPhotoSaving(true);
+      await api.patch("/profile", { picture: null });
+      await refresh();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } catch (e: any) {
+      Alert.alert("Erreur", e.message);
+    } finally {
+      setPhotoSaving(false);
+    }
+  };
+
+  const openPhotoActions = () => {
+    if (!user?.picture) {
+      pickPhoto();
+      return;
+    }
+    Alert.alert("Photo de profil", "Remplacer ou supprimer la photo actuelle.", [
+      { text: "Remplacer", onPress: pickPhoto },
+      { text: "Supprimer", style: "destructive", onPress: removePhoto },
+      { text: "Annuler", style: "cancel" },
+    ]);
   };
 
   const testBiometric = async () => {
@@ -110,8 +141,10 @@ export default function Profile() {
       <SafeAreaView style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
           <Animated.View entering={FadeInUp.duration(500)} style={{ alignItems: "center", padding: 24 }}>
-            <Pressable testID="profile-photo" onPress={pickPhoto} style={styles.avatarWrap}>
-              {user?.picture ? (
+            <Pressable testID="profile-photo" onPress={openPhotoActions} disabled={photoSaving} style={styles.avatarWrap}>
+              {photoSaving ? (
+                <ActivityIndicator color={Colors.cyan} />
+              ) : user?.picture ? (
                 <Image source={{ uri: user.picture }} style={styles.avatarImg} />
               ) : (
                 <Text style={{ color: Colors.cyan, fontSize: 36, fontWeight: "900" }}>
@@ -122,6 +155,18 @@ export default function Profile() {
                 <Ionicons name="camera" size={14} color="#000" />
               </View>
             </Pressable>
+            <View style={styles.photoActions}>
+              <Pressable testID="change-photo" onPress={pickPhoto} disabled={photoSaving} style={styles.photoActionBtn}>
+                <Ionicons name="image-outline" size={14} color={Colors.cyan} />
+                <Text style={styles.photoActionText}>{user?.picture ? "Changer" : "Ajouter une photo"}</Text>
+              </Pressable>
+              {user?.picture ? (
+                <Pressable testID="remove-photo" onPress={removePhoto} disabled={photoSaving} style={[styles.photoActionBtn, styles.photoDeleteBtn]}>
+                  <Ionicons name="trash-outline" size={14} color={Colors.danger} />
+                  <Text style={[styles.photoActionText, { color: Colors.danger }]}>Supprimer</Text>
+                </Pressable>
+              ) : null}
+            </View>
             <Text testID="profile-name" style={{ color: "#fff", fontSize: 22, fontWeight: "900", marginTop: 14 }}>{user?.name}</Text>
             <Text style={{ color: Colors.textSoft, marginTop: 4 }}>{user?.email}</Text>
             {user?.phone ? <Text style={{ color: Colors.textSoft, fontSize: 12, marginTop: 2 }}>📞 {user.phone}</Text> : null}
@@ -188,6 +233,10 @@ const styles = StyleSheet.create({
   },
   avatarImg: { width: "100%", height: "100%" },
   cam: { position: "absolute", bottom: 0, right: 0, width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.cyan, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#050505" },
+  photoActions: { flexDirection: "row", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 12 },
+  photoActionBtn: { flexDirection: "row", gap: 6, alignItems: "center", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: "rgba(0,255,255,0.08)", borderWidth: 1, borderColor: Colors.cyan },
+  photoDeleteBtn: { backgroundColor: "rgba(255,70,100,0.08)", borderColor: Colors.danger },
+  photoActionText: { color: Colors.cyan, fontWeight: "800", fontSize: 12 },
   badge: { flexDirection: "row", gap: 6, alignItems: "center", marginTop: 12, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: Colors.border },
   badgeText: { fontSize: 11, fontWeight: "800" },
   editBtn: { flexDirection: "row", gap: 6, alignItems: "center", marginTop: 10, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: "rgba(0,255,255,0.08)", borderWidth: 1, borderColor: Colors.cyan },
