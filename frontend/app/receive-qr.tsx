@@ -57,6 +57,7 @@ export default function ReceiveQR() {
               <View style={{ flex: 1 }}>
                 <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>{user?.name}</Text>
                 <Text style={{ color: Colors.textSoft, fontSize: 12 }}>{user?.email}</Text>
+                <Text style={{ color: Colors.textMuted, fontSize: 11, marginTop: 2 }}>{user?.user_id}</Text>
               </View>
             </View>
           </GlassCard>

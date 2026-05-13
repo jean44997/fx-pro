@@ -16,17 +16,17 @@ export default function ScanQR() {
   const isWeb = Platform.OS === "web";
 
   useEffect(() => {
-    if (!isWeb && !permission?.granted) {
+    if (!permission?.granted && permission?.canAskAgain !== false) {
       requestPermission();
     }
-  }, [permission?.granted, isWeb, requestPermission]);
+  }, [permission?.granted, permission?.canAskAgain, requestPermission]);
 
   const handleCode = async (code: string) => {
     if (scanned) return;
     setScanned(true);
     try {
       const r = await api.get(`/qr/lookup?code=${encodeURIComponent(code)}`);
-      router.replace({ pathname: "/(tabs)/transfer", params: { qr: code, name: r.name } });
+      router.replace({ pathname: "/(tabs)/transfer", params: { qr: code, name: r.name, email: r.email, user_id: r.user_id } });
     } catch (e: any) {
       Alert.alert("QR invalide", e.message || "Code introuvable");
       setScanned(false);
@@ -44,7 +44,7 @@ export default function ScanQR() {
           <View style={{ width: 26 }} />
         </View>
 
-        {!isWeb && permission?.granted ? (
+        {permission?.granted ? (
           <View style={styles.cam}>
             <CameraView
               testID="qr-camera"
@@ -59,8 +59,13 @@ export default function ScanQR() {
             <GlassCard>
               <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>Caméra indisponible</Text>
               <Text style={{ color: Colors.textSoft, marginTop: 6, fontSize: 13 }}>
-                {"Sur ce navigateur, collez le code QR ci-dessous ou ouvrez l'app sur mobile."}
+                {isWeb
+                  ? "Autorisez la caméra du navigateur ou collez le code QR ci-dessous."
+                  : "Autorisez la caméra de l'appareil ou collez le code QR ci-dessous."}
               </Text>
+              {permission?.canAskAgain !== false && (
+                <PrimaryButton testID="qr-camera-permission" title="Autoriser la caméra" onPress={() => requestPermission()} />
+              )}
               <TextInput
                 testID="qr-paste"
                 value={pasted}

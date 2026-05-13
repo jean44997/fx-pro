@@ -9,11 +9,11 @@ import { requestWebInstallPermissions } from "../src/webPermissions";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as LocalAuthentication from "expo-local-authentication";
+import { disableBiometricLogin, enableBiometricLogin } from "../src/biometricAuth";
 
 export default function Settings() {
   const router = useRouter();
-  const { user, logout, refresh } = useAuth();
+  const { user, logout } = useAuth();
   const [notif, setNotif] = useState(true);
   const [biometric, setBiometric] = useState(false);
   const [hideBal, setHideBal] = useState(false);
@@ -36,42 +36,13 @@ export default function Settings() {
   const updateBiometric = async (enabled: boolean) => {
     if (!enabled) {
       setBiometric(false);
-      await save("pref_biometric", false);
+      await disableBiometricLogin();
       return;
     }
 
-    if (Platform.OS === "web") {
-      const available =
-        typeof window !== "undefined" &&
-        "PublicKeyCredential" in window &&
-        Boolean(await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.().catch(() => false));
-      setBiometric(available);
-      await save("pref_biometric", available);
-      Alert.alert(
-        "Biométrie",
-        available
-          ? "Ton navigateur supporte Face ID/empreinte via passkeys. La session Firebase reste mémorisée pour la prochaine ouverture."
-          : "Ce navigateur ne donne pas de permission biométrique globale. Utilise Safari/Chrome avec passkeys si disponible."
-      );
-      return;
-    }
-
-    const hasHardware = await LocalAuthentication.hasHardwareAsync();
-    const enrolled = await LocalAuthentication.isEnrolledAsync();
-    if (!hasHardware || !enrolled) {
-      setBiometric(false);
-      await save("pref_biometric", false);
-      Alert.alert("Biométrie", "Configure d'abord Face ID ou une empreinte dans les réglages du téléphone.");
-      return;
-    }
-
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: "Activer la connexion biométrique FX Pro",
-      cancelLabel: "Annuler",
-      disableDeviceFallback: false,
-    });
-    setBiometric(result.success);
-    await save("pref_biometric", result.success);
+    const result = await enableBiometricLogin(user);
+    setBiometric(result.ok);
+    Alert.alert("Biométrie", result.message);
   };
 
   return (
@@ -103,8 +74,8 @@ export default function Settings() {
           <GlassCard>
             <Text style={styles.sectionLabel}>Sécurité & Légal</Text>
             <NavRow icon="shield-checkmark" label="KYC" onPress={() => router.push("/kyc")} testID="nav-kyc" />
-            <NavRow icon="document-text" label="Conditions d'utilisation" onPress={() => Alert.alert("CGU", "© FX Pro 2026")} testID="nav-cgu" />
-            <NavRow icon="lock-closed" label="Politique de confidentialité" onPress={() => Alert.alert("Privacy", "Vos données sont protégées.")} testID="nav-privacy" />
+            <NavRow icon="document-text" label="Conditions d'utilisation" onPress={() => router.push("/terms")} testID="nav-cgu" />
+            <NavRow icon="lock-closed" label="Politique de confidentialité" onPress={() => router.push("/privacy")} testID="nav-privacy" />
           </GlassCard>
 
           <View style={{ paddingHorizontal: 16, marginTop: 12 }}>

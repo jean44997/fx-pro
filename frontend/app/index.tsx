@@ -2,12 +2,13 @@ import React, { useEffect } from "react";
 import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "../src/auth";
+import { verifyBiometricLogin } from "../src/biometricAuth";
 import { GradientBg } from "../src/ui";
 import { Colors } from "../src/theme";
 import Animated, { FadeIn, useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from "react-native-reanimated";
 
 export default function Index() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
   const router = useRouter();
   const rot = useSharedValue(0);
 
@@ -17,13 +18,19 @@ export default function Index() {
 
   useEffect(() => {
     if (loading) return;
-    const t = setTimeout(() => {
+    const t = setTimeout(async () => {
       if (!user) router.replace("/onboarding");
-      else if (user.role === "admin") router.replace("/admin");
-      else router.replace("/(tabs)/home");
+      else {
+        const unlocked = await verifyBiometricLogin().catch(() => false);
+        if (!unlocked) {
+          await logout();
+          router.replace("/(auth)/login");
+        } else if (user.role === "admin") router.replace("/admin");
+        else router.replace("/(tabs)/home");
+      }
     }, 900);
     return () => clearTimeout(t);
-  }, [loading, user, router]);
+  }, [loading, user, router, logout]);
 
   const ringStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rot.value}deg` }],

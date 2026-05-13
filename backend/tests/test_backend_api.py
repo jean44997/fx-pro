@@ -25,7 +25,7 @@ class TestRoot:
 
 # ============ Auth ============
 class TestAuth:
-    def test_register_new_user_with_welcome_bonus(self):
+    def test_register_new_user_starts_with_zero_balance(self):
         email = f"TEST_{uuid.uuid4().hex[:8]}@fxtest.com"
         r = requests.post(f"{BASE}/api/auth/register",
                           json={"email": email, "password": "testpass123", "name": "TEST User"},
@@ -34,8 +34,7 @@ class TestAuth:
         body = r.json()
         assert "token" in body and "user" in body
         bal = body["user"]["balances"]
-        assert bal["EUR"] == 100.0
-        assert bal["XOF"] == 50000.0
+        assert all(amount == 0.0 for amount in bal.values())
         # cleanup via admin
         admin = requests.post(f"{BASE}/api/auth/login",
                               json={"email": "admin@fxpro.com", "password": "Admin@2026"}).json()["token"]

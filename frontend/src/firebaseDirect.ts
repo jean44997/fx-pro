@@ -44,25 +44,25 @@ const VAULTS = "fxpro_vaults";
 const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_XOF", "EUR_USD"];
 
 const INITIAL_BALANCES: Record<string, number> = {
-  EUR: 100,
-  XOF: 50000,
-  XAF: 50000,
-  USD: 100,
-  GBP: 50,
-  NGN: 50000,
-  MAD: 1000,
-  CAD: 100,
-  CHF: 100,
-  JPY: 10000,
-  CNY: 500,
-  AUD: 100,
-  INR: 5000,
-  BRL: 500,
-  ZAR: 1500,
-  KES: 10000,
-  GHS: 1000,
-  SEK: 1000,
-  AED: 350,
+  EUR: 0,
+  XOF: 0,
+  XAF: 0,
+  USD: 0,
+  GBP: 0,
+  NGN: 0,
+  MAD: 0,
+  CAD: 0,
+  CHF: 0,
+  JPY: 0,
+  CNY: 0,
+  AUD: 0,
+  INR: 0,
+  BRL: 0,
+  ZAR: 0,
+  KES: 0,
+  GHS: 0,
+  SEK: 0,
+  AED: 0,
 };
 
 const FALLBACK_RATES: Record<string, number> = {
@@ -284,6 +284,17 @@ export function subscribeFirebaseNotifications(
   );
 }
 
+export async function registerFirebasePushToken(token: string, provider = "expo") {
+  const user = auth.currentUser;
+  if (!user || !token) return false;
+  await setDoc(
+    doc(db, "fxpro_push_tokens", user.uid),
+    { token, provider, user_id: user.uid, updated_at: nowIso() },
+    { merge: true }
+  );
+  return true;
+}
+
 export async function firebaseDirectRequest(path: string, opts: RequestInit = {}) {
   const method = (opts.method || "GET").toUpperCase();
   const body = parseBody(opts);
@@ -410,8 +421,10 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     const senderRef = doc(db, USERS, firebaseUser.uid);
     const recipientRef = doc(db, USERS, recipient.user_id);
     const txnRef = doc(db, TXNS, txnId);
-    const senderNotifRef = doc(db, NOTIFS, makeId("ntf"));
-    const recipientNotifRef = doc(db, NOTIFS, makeId("ntf"));
+    const senderNotifId = makeId("ntf");
+    const recipientNotifId = makeId("ntf");
+    const senderNotifRef = doc(db, NOTIFS, senderNotifId);
+    const recipientNotifRef = doc(db, NOTIFS, recipientNotifId);
     let balances: Record<string, number> = {};
     const transaction = {
       txn_id: txnId,
@@ -436,25 +449,33 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       const recipientData = normalizeUser(recipientSnap.data());
       balances = { ...senderData.balances };
       const recipientBalances = { ...recipientData.balances };
-      if ((balances[currency] || 0) < amount) throw new Error("Solde insuffisant");
+      if ((balances[currency] || 0) < amount) {
+        throw new Error(`Solde insuffisant: tu veux envoyer ${amount} ${currency}, mais ton solde disponible est ${balances[currency] || 0} ${currency}.`);
+      }
       balances[currency] = Number(((balances[currency] || 0) - amount).toFixed(4));
       recipientBalances[currency] = Number(((recipientBalances[currency] || 0) + amount).toFixed(4));
       tx.update(senderRef, { balances, updated_at: nowIso() });
       tx.update(recipientRef, { balances: recipientBalances, updated_at: nowIso() });
       tx.set(txnRef, transaction);
       tx.set(senderNotifRef, {
-        notif_id: senderNotifRef.id,
+        notif_id: senderNotifId,
         user_id: firebaseUser.uid,
-        title: "Transfert envoye",
-        body: `-${amount} ${currency} -> ${recipient.email}`,
+        type: "transfer",
+        transfer_role: "sender",
+        txn_id: txnId,
+        title: "FX Pro - Transfert envoyé",
+        body: `${amount} ${currency} envoyé à ${recipient.name || recipient.email}`,
         read: false,
         created_at: nowIso(),
       });
       tx.set(recipientNotifRef, {
-        notif_id: recipientNotifRef.id,
+        notif_id: recipientNotifId,
         user_id: recipient.user_id,
-        title: "Transfert recu",
-        body: `+${amount} ${currency} de ${sender.email}`,
+        type: "transfer",
+        transfer_role: "receiver",
+        txn_id: txnId,
+        title: "FX Pro - Argent reçu",
+        body: `${amount} ${currency} reçu de ${sender.name || sender.email}`,
         read: false,
         created_at: nowIso(),
       });

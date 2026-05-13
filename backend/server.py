@@ -200,9 +200,6 @@ async def register(data: RegisterIn):
         raise HTTPException(status_code=409, detail="Email already registered")
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     balances = {c: 0.0 for c in SUPPORTED_CURRENCIES}
-    # Welcome bonus
-    balances["EUR"] = 100.0
-    balances["XOF"] = 50000.0
     doc = {
         "user_id": user_id,
         "email": data.email.lower(),
@@ -262,8 +259,6 @@ async def google_session(data: GoogleSessionIn):
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
         balances = {c: 0.0 for c in SUPPORTED_CURRENCIES}
-        balances["EUR"] = 100.0
-        balances["XOF"] = 50000.0
         await db.users.insert_one({
             "user_id": user_id,
             "email": email,
@@ -509,10 +504,12 @@ async def transfer(data: TransferIn, user: dict = Depends(get_current_user)):
     # Notify both
     await db.notifications.insert_many([
         {"notif_id": f"ntf_{uuid.uuid4().hex[:10]}", "user_id": sender["user_id"],
-         "title": "Transfert envoyé", "body": f"-{data.amount} {data.currency} → {recipient['email']}",
+         "type": "transfer", "transfer_role": "sender", "txn_id": txn_id,
+         "title": "FX Pro - Transfert envoye", "body": f"{data.amount} {data.currency} envoye a {recipient.get('name') or recipient['email']}",
          "read": False, "created_at": now_utc()},
         {"notif_id": f"ntf_{uuid.uuid4().hex[:10]}", "user_id": recipient["user_id"],
-         "title": "Transfert reçu", "body": f"+{data.amount} {data.currency} de {sender['email']}",
+         "type": "transfer", "transfer_role": "receiver", "txn_id": txn_id,
+         "title": "FX Pro - Argent recu", "body": f"{data.amount} {data.currency} recu de {sender.get('name') or sender['email']}",
          "read": False, "created_at": now_utc()},
     ])
     return {"ok": True, "transaction": txn, "balances": s_bal}

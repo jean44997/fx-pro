@@ -10,6 +10,7 @@ const TOKEN_KEY = "fxpro_web_fcm_token";
 
 let registrationPromise: Promise<ServiceWorkerRegistration | null> | null = null;
 let foregroundListenerReady = false;
+const shownTags = new Map<string, number>();
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof navigator !== "undefined";
@@ -154,12 +155,22 @@ export async function showWebNotification(
     return false;
   }
 
-  const options: NotificationOptions = {
+  const tag = data?.notif_id ? String(data.notif_id) : undefined;
+  if (tag) {
+    const lastShown = shownTags.get(tag) || 0;
+    if (Date.now() - lastShown < 15000) return false;
+    shownTags.set(tag, Date.now());
+  }
+
+  const options: NotificationOptions & { renotify?: boolean; vibrate?: number[] } = {
     body,
     icon: "/icons/icon-192.png",
     badge: "/icons/badge-96.png",
-    data: { url: "/", ...(data || {}) },
-    tag: data?.notif_id ? String(data.notif_id) : undefined,
+    data: { url: "/notifications", ...(data || {}) },
+    tag,
+    renotify: false,
+    requireInteraction: false,
+    vibrate: [100, 50, 100],
   };
 
   const registration = await registerServiceWorker();

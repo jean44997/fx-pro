@@ -8,12 +8,11 @@ import { CurrencyPickerButton } from "../../src/CurrencyPicker";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { notify } from "../../src/notifs";
 
 type CheckState = { status: "idle" | "checking" | "ok" | "not_found" | "self" | "blocked"; name?: string; email?: string; picture?: string };
 
 export default function Transfer() {
-  const params = useLocalSearchParams<{ currency?: string; qr?: string; name?: string }>();
+  const params = useLocalSearchParams<{ currency?: string; qr?: string; name?: string; email?: string; user_id?: string }>();
   const router = useRouter();
   const { user, refresh } = useAuth();
   const [mode, setMode] = useState<"email" | "qr">(params.qr ? "qr" : "email");
@@ -22,12 +21,38 @@ export default function Transfer() {
   const [currency, setCurrency] = useState(params.currency || "EUR");
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
-  const [check, setCheck] = useState<CheckState>({ status: "idle" });
+  const [check, setCheck] = useState<CheckState>(
+    params.qr ? { status: "ok", name: params.name, email: params.email } : { status: "idle" }
+  );
 
   const bal = (user?.balances || {})[currency] || 0;
 
+  useEffect(() => {
+    if (!params.qr) return;
+    setMode("qr");
+    setRecipient(params.qr);
+    setCheck({ status: "ok", name: params.name, email: params.email });
+  }, [params.qr, params.name, params.email]);
+
   // Realtime email check with debounce
   useEffect(() => {
+    if (mode === "qr") {
+      const v = recipient.trim();
+      if (!v) {
+        setCheck({ status: "idle" });
+        return;
+      }
+      const t = setTimeout(async () => {
+        try {
+          const r = await api.get(`/qr/lookup?code=${encodeURIComponent(v)}`);
+          setCheck({ status: r.user_id === user?.user_id ? "self" : "ok", name: r.name, email: r.email, picture: r.picture });
+        } catch {
+          setCheck({ status: "not_found" });
+        }
+      }, 250);
+      return () => clearTimeout(t);
+    }
+
     if (mode !== "email") {
       setCheck({ status: "idle" });
       return;
@@ -50,21 +75,20 @@ export default function Transfer() {
       }
     }, 350);
     return () => clearTimeout(t);
-  }, [recipient, mode]);
+  }, [recipient, mode, user?.user_id]);
 
   const submit = async () => {
     if (!recipient.trim()) return Alert.alert("Destinataire requis");
-    if (mode === "email" && check.status !== "ok") {
+    if (check.status !== "ok") {
       return Alert.alert("Destinataire", check.status === "not_found" ? "Cet utilisateur n'existe pas dans FX Pro" : "Destinataire invalide");
     }
     const n = parseFloat(amount.replace(",", "."));
     if (!n || n <= 0) return Alert.alert("Montant invalide");
-    if (n > bal) return Alert.alert("Solde insuffisant", `Solde ${currency}: ${formatMoney(bal, currency)}`);
+    if (n > bal) return Alert.alert("Solde insuffisant", `Tu veux envoyer ${formatMoney(n, currency)}, mais ton solde disponible est ${formatMoney(bal, currency)}.`);
     setLoading(true);
     try {
       const r = await api.post("/transfer", { recipient: recipient.trim(), by: mode, amount: n, currency, note });
       await refresh();
-      notify("💸 Transfert envoyé", `-${n} ${currency} → ${check.email || recipient}`);
       router.push({ pathname: "/receipt/[id]", params: { id: r.transaction.txn_id } });
       setAmount("");
       setRecipient("");
@@ -121,14 +145,14 @@ export default function Transfer() {
                     </Pressable>
                   )}
                 </View>
-                {mode === "email" && check.status === "ok" && check.name && (
+                {check.status === "ok" && (check.name || check.email) && (
                   <Animated.View entering={FadeIn} style={styles.foundCard}>
                     <View style={styles.foundAvatar}>
                       <Text style={{ color: Colors.green, fontWeight: "900" }}>{(check.name || "?").charAt(0).toUpperCase()}</Text>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ color: "#fff", fontWeight: "800" }}>{check.name}</Text>
-                      <Text style={{ color: Colors.textSoft, fontSize: 12 }}>{check.email}</Text>
+                      <Text style={{ color: "#fff", fontWeight: "800" }}>{check.name || "Utilisateur FX Pro"}</Text>
+                      <Text style={{ color: Colors.textSoft, fontSize: 12 }}>{check.email || "QR vérifié"}</Text>
                     </View>
                     <Ionicons name="checkmark-circle" size={22} color={Colors.green} />
                   </Animated.View>

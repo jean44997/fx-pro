@@ -1,4 +1,4 @@
-const CACHE_NAME = "fxpro-pwa-v2";
+const CACHE_NAME = "fxpro-pwa-v3";
 const CORE_ASSETS = [
   "/",
   "/manifest.json",
@@ -89,6 +89,9 @@ try {
       icon: "/icons/icon-192.png",
       badge: "/icons/badge-96.png",
       tag: data.notif_id || data.tag || undefined,
+      renotify: false,
+      requireInteraction: false,
+      vibrate: [100, 50, 100],
       data: {
         url: data.url || "/notifications",
         ...data

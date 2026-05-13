@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { firebaseDirectRequest } from "./firebaseDirect";
 import { syncWebPushToken } from "./webPush";
+import { ensureNotificationsPermission } from "./notifs";
 
 const BASE = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/+$/, "");
 const API = `${BASE}/api`;
@@ -123,6 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const u = await api.get("/auth/me");
       setUser(u);
       syncWebPushToken(token).catch(() => undefined);
+      ensureNotificationsPermission().catch(() => undefined);
     } catch {
       await setToken(null);
       setUser(null);
@@ -141,18 +143,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await setToken(r.token);
     setUser(r.user);
     syncWebPushToken(r.token).catch(() => undefined);
+    ensureNotificationsPermission().catch(() => undefined);
   };
   const register = async (email: string, password: string, name: string, phone?: string) => {
     const r = await api.post("/auth/register", { email, password, name, phone });
     await setToken(r.token);
     setUser(r.user);
     syncWebPushToken(r.token).catch(() => undefined);
+    ensureNotificationsPermission().catch(() => undefined);
   };
   const loginGoogle = async (sessionId: string) => {
     const r = await api.post("/auth/google/session", { session_id: sessionId });
     await setToken(r.token);
     setUser(r.user);
     syncWebPushToken(r.token).catch(() => undefined);
+    ensureNotificationsPermission().catch(() => undefined);
   };
   const logout = async () => {
     try {
