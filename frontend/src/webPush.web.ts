@@ -1,18 +1,9 @@
 import { initializeApp, getApp, getApps } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { doc, getFirestore, setDoc } from "firebase/firestore";
 import { getMessaging, getToken, isSupported, onMessage, type MessagePayload } from "firebase/messaging";
+import { firebaseConfig, firebaseWebPushVapidKey } from "./firebaseConfig";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyBSs0TJf7UHuC-bNSQqQmHkufOqAPX90Ig",
-  authDomain: "mon-site-58f25.firebaseapp.com",
-  projectId: "mon-site-58f25",
-  storageBucket: "mon-site-58f25.firebasestorage.app",
-  messagingSenderId: "664586032837",
-  appId: "1:664586032837:web:ac6ad66a7c0b24507a42ac",
-};
-
-const FALLBACK_VAPID_KEY =
-  "BHn1PummgMk2Im-xvAP3zeXXqeS9qm0XsoYJHzlUfEvY49MSIb0TlQ6P-v4DKTOHGRVyBJtnMa8ax0Fkesl8Ido";
-const VAPID_KEY = process.env.EXPO_PUBLIC_FIREBASE_WEB_PUSH_VAPID_KEY || FALLBACK_VAPID_KEY;
 const BASE = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/+$/, "");
 const API = `${BASE}/api`;
 const TOKEN_KEY = "fxpro_web_fcm_token";
@@ -65,12 +56,27 @@ async function getMessagingInstance() {
   if (!isBrowser()) return null;
   const supported = await isSupported().catch(() => false);
   if (!supported) return null;
-  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-  return getMessaging(app);
+  return getMessaging(getFirebaseApp());
+}
+
+function getFirebaseApp() {
+  return getApps().length ? getApp() : initializeApp(firebaseConfig);
 }
 
 async function sendTokenToBackend(fcmToken: string, authToken?: string | null) {
-  if (!authToken || !BASE) return;
+  if (!BASE) {
+    const app = getFirebaseApp();
+    const user = getAuth(app).currentUser;
+    if (!user) return;
+    await setDoc(
+      doc(getFirestore(app), "fxpro_push_tokens", user.uid),
+      { token: fcmToken, user_id: user.uid, updated_at: new Date().toISOString() },
+      { merge: true }
+    ).catch(() => undefined);
+    return;
+  }
+
+  if (!authToken) return;
   await fetch(`${API}/notifications/push-token`, {
     method: "POST",
     headers: {
@@ -110,7 +116,7 @@ export async function setupWebPush(authToken?: string | null): Promise<boolean> 
   if (!messaging) return false;
 
   const fcmToken = await getToken(messaging, {
-    vapidKey: VAPID_KEY,
+    vapidKey: firebaseWebPushVapidKey,
     serviceWorkerRegistration: registration,
   }).catch(() => null);
 

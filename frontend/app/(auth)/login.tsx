@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Pla
 import { useRouter } from "expo-router";
 import { GradientBg, PrimaryButton, GhostButton, GlassCard } from "../../src/ui";
 import { Colors } from "../../src/theme";
-import { useAuth } from "../../src/auth";
+import { isFirebaseDirectMode, useAuth } from "../../src/auth";
 import { showAlert } from "../../src/platformAlert";
 import { requestWebInstallPermissions } from "../../src/webPermissions";
 import { Ionicons } from "@expo/vector-icons";
@@ -44,6 +44,10 @@ export default function Login() {
     setGLoading(true);
     try {
       if (Platform.OS === "web") await requestWebInstallPermissions().catch(() => false);
+      if (Platform.OS === "web" && isFirebaseDirectMode) {
+        await loginGoogle("");
+        return;
+      }
       const redirect = Platform.OS === "web" ? `${window.location.origin}/` : Linking.createURL("/");
       const url = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirect)}`;
       if (Platform.OS === "web") {

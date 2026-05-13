@@ -1,15 +1,16 @@
 // API client + Auth context
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { firebaseDirectRequest } from "./firebaseDirect";
 import { syncWebPushToken } from "./webPush";
 
 const BASE = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/+$/, "");
 const API = `${BASE}/api`;
 const REQUEST_TIMEOUT_MS = 15000;
-const MISSING_BACKEND_MESSAGE =
-  "Backend web non configure. Ajoute EXPO_PUBLIC_BACKEND_URL dans Vercel avec l'URL HTTPS du backend, sans /api.";
 const WRONG_BACKEND_MESSAGE =
   "L'URL backend pointe vers un site statique, pas vers l'API FastAPI. EXPO_PUBLIC_BACKEND_URL doit etre l'URL HTTPS du backend, sans /api.";
+
+export const isFirebaseDirectMode = !BASE;
 
 export type User = {
   user_id: string;
@@ -41,7 +42,7 @@ export async function setToken(t: string | null) {
 
 async function request(path: string, opts: RequestInit = {}) {
   if (!BASE) {
-    throw new Error(MISSING_BACKEND_MESSAGE);
+    return firebaseDirectRequest(path, opts);
   }
 
   const token = await loadToken();
@@ -114,7 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refresh = useCallback(async () => {
     const token = await loadToken();
-    if (!token) {
+    if (!token && !isFirebaseDirectMode) {
       setUser(null);
       return;
     }
