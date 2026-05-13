@@ -1,5 +1,6 @@
 {
-  "buildCommand": "cd frontend && npx yarn@1.22.22 install --frozen-lockfile && npx yarn@1.22.22 build:web",
+  "installCommand": "cd frontend && npx yarn@1.22.22 install --frozen-lockfile",
+  "buildCommand": "cd frontend && npx yarn@1.22.22 build:web",
   "outputDirectory": "frontend/dist",
   "headers": [
     {

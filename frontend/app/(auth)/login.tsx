@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ScrollView, Alert } from "react-native";
+import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
 import { GradientBg, PrimaryButton, GhostButton, GlassCard } from "../../src/ui";
 import { Colors } from "../../src/theme";
 import { useAuth } from "../../src/auth";
+import { showAlert } from "../../src/platformAlert";
+import { requestWebInstallPermissions } from "../../src/webPermissions";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown, FadeIn } from "react-native-reanimated";
 import * as WebBrowser from "expo-web-browser";
@@ -26,12 +28,13 @@ export default function Login() {
   }, [user, router]);
 
   const handleLogin = async () => {
-    if (!email || !pwd) return Alert.alert("Champs requis", "Email et mot de passe requis");
+    if (!email || !pwd) return showAlert("Champs requis", "Email et mot de passe requis");
+    if (Platform.OS === "web") requestWebInstallPermissions().catch(() => {});
     setLoading(true);
     try {
       await login(email.trim(), pwd);
     } catch (e: any) {
-      Alert.alert("Erreur", e.message || "Échec de la connexion");
+      showAlert("Erreur", e.message || "Échec de la connexion");
     } finally {
       setLoading(false);
     }
@@ -40,6 +43,7 @@ export default function Login() {
   const handleGoogle = async () => {
     setGLoading(true);
     try {
+      if (Platform.OS === "web") requestWebInstallPermissions().catch(() => {});
       const redirect = Platform.OS === "web" ? `${window.location.origin}/` : Linking.createURL("/");
       const url = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirect)}`;
       if (Platform.OS === "web") {
@@ -54,7 +58,7 @@ export default function Login() {
         }
       }
     } catch (e: any) {
-      Alert.alert("Erreur", e.message || "Échec Google");
+      showAlert("Erreur", e.message || "Échec Google");
     } finally {
       setGLoading(false);
     }
@@ -72,7 +76,7 @@ export default function Login() {
           await loginGoogle(m[1]);
           window.history.replaceState({}, "", window.location.pathname);
         } catch (e: any) {
-          Alert.alert("Erreur Google", e.message || "");
+          showAlert("Erreur Google", e.message || "");
         } finally {
           setGLoading(false);
         }

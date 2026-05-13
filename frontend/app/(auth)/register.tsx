@@ -1,9 +1,11 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ScrollView, Alert } from "react-native";
+import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
 import { GradientBg, PrimaryButton, GlassCard } from "../../src/ui";
 import { Colors } from "../../src/theme";
 import { useAuth } from "../../src/auth";
+import { showAlert } from "../../src/platformAlert";
+import { requestWebInstallPermissions } from "../../src/webPermissions";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown, FadeIn } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -18,14 +20,15 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    if (!email || !pwd || !name) return Alert.alert("Champs requis", "Nom, email et mot de passe requis");
-    if (pwd.length < 6) return Alert.alert("Mot de passe", "Minimum 6 caractères");
+    if (!email || !pwd || !name) return showAlert("Champs requis", "Nom, email et mot de passe requis");
+    if (pwd.length < 6) return showAlert("Mot de passe", "Minimum 6 caractères");
+    if (Platform.OS === "web") requestWebInstallPermissions().catch(() => {});
     setLoading(true);
     try {
       await register(email.trim(), pwd, name.trim(), phone.trim());
       router.replace("/(tabs)/home");
     } catch (e: any) {
-      Alert.alert("Erreur", e.message || "Inscription échouée");
+      showAlert("Erreur", e.message || "Inscription échouée");
     } finally {
       setLoading(false);
     }

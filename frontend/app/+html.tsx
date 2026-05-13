@@ -6,7 +6,7 @@ const APP_NAME = "FX Pro 2026";
 
 export default function Root({ children }: PropsWithChildren) {
   return (
-    <html lang="fr" style={{ height: "100%" }}>
+    <html lang="fr" style={{ height: "100%", minHeight: "100%" }}>
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
@@ -39,15 +39,23 @@ export default function Root({ children }: PropsWithChildren) {
           dangerouslySetInnerHTML={{
             __html: `
               :root { color-scheme: dark; background: #050505; }
-              html { height: 100%; background: #050505; overscroll-behavior: none; }
+              html, body, #root { width: 100%; height: 100%; min-height: 100%; background: #050505; }
+              html { min-height: -webkit-fill-available; overscroll-behavior: none; }
+              body { min-height: 100dvh; min-height: -webkit-fill-available; touch-action: manipulation; }
               * { box-sizing: border-box; }
-              body > div:first-child { position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; }
+              body > div:first-child, #root {
+                position: fixed !important;
+                inset: 0 !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                height: 100dvh !important;
+                min-height: -webkit-fill-available;
+                overflow: hidden !important;
+                background: #050505;
+              }
               [role="tablist"] [role="tab"] * { overflow: visible !important; }
               [role="heading"], [role="heading"] * { overflow: visible !important; }
               input, textarea, select { font-size: 16px !important; }
-              @media (display-mode: standalone) {
-                body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
-              }
             `,
           }}
         />

@@ -1,4 +1,4 @@
-const CACHE_NAME = "fxpro-pwa-v1";
+const CACHE_NAME = "fxpro-pwa-v2";
 const CORE_ASSETS = [
   "/",
   "/manifest.json",

@@ -12,7 +12,7 @@ Le dossier a publier est `frontend/dist`.
 
 ## Variables utiles
 
-- `EXPO_PUBLIC_BACKEND_URL`: URL HTTPS de ton backend, sans `/api`.
+- `EXPO_PUBLIC_BACKEND_URL`: URL HTTPS de ton backend, sans `/api`. Elle est obligatoire pour que connexion, creation de compte, transferts et notifications serveur fonctionnent sur Vercel/Render/Firebase Hosting.
 - `EXPO_PUBLIC_FIREBASE_WEB_PUSH_VAPID_KEY`: cle publique VAPID FCM web. Le projet contient deja la cle fournie en fallback.
 
 ## Vercel
@@ -51,3 +51,6 @@ Pour que la PWA se comporte comme une app iOS:
 4. Accepte les notifications quand iOS les demande.
 
 Les notifications web iOS exigent Safari, HTTPS et l'app ajoutee a l'ecran d'accueil.
+La demande de permission doit partir d'une action utilisateur. L'app la declenche pendant les actions de connexion, creation de compte et activation du switch notifications.
+
+Les permissions camera peuvent etre demandees par la PWA. Les permissions galerie/photo et Face ID/empreinte ne sont pas des prompts web generaux comme dans une app native: le navigateur les demande uniquement au moment d'utiliser le selecteur de fichier, la camera, ou une authentification WebAuthn/passkey.

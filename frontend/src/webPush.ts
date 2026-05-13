@@ -1,3 +1,7 @@
+export async function registerWebRuntime(): Promise<boolean> {
+  return false;
+}
+
 export async function setupWebPush(_authToken?: string | null): Promise<boolean> {
   return false;
 }

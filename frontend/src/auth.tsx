@@ -3,8 +3,9 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { syncWebPushToken } from "./webPush";
 
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+const BASE = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/+$/, "");
 const API = `${BASE}/api`;
+const REQUEST_TIMEOUT_MS = 15000;
 
 export type User = {
   user_id: string;
@@ -36,16 +37,42 @@ export async function setToken(t: string | null) {
 
 async function request(path: string, opts: RequestInit = {}) {
   const token = await loadToken();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(opts.headers as any),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${API}${path}`, { ...opts, headers });
+
+  let res: Response;
+  try {
+    res = await fetch(`${API}${path}`, { ...opts, headers, signal: controller.signal });
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      throw new Error("Le serveur ne répond pas. Vérifie l'URL HTTPS du backend.");
+    }
+    throw new Error("Connexion au serveur impossible. Vérifie EXPO_PUBLIC_BACKEND_URL.");
+  } finally {
+    clearTimeout(timer);
+  }
+
   const ct = res.headers.get("content-type") || "";
-  const body = ct.includes("application/json") ? await res.json() : await res.text();
+  let body: any = null;
+  try {
+    body = ct.includes("application/json") ? await res.json() : await res.text();
+  } catch {
+    body = null;
+  }
+
   if (!res.ok) {
-    const msg = (body && (body.detail || body.message)) || `Error ${res.status}`;
+    const looksLikeStaticHost =
+      !BASE && typeof body === "string" && (body.includes("<!DOCTYPE") || body.includes("<html"));
+    const msg =
+      (body && (body.detail || body.message)) ||
+      (looksLikeStaticHost
+        ? "Backend web non configuré. Ajoute EXPO_PUBLIC_BACKEND_URL dans Vercel avec l'URL HTTPS de ton backend."
+        : `Erreur serveur ${res.status}`);
     throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
   }
   return body;

@@ -13,7 +13,7 @@ const firebaseConfig = {
 const FALLBACK_VAPID_KEY =
   "BHn1PummgMk2Im-xvAP3zeXXqeS9qm0XsoYJHzlUfEvY49MSIb0TlQ6P-v4DKTOHGRVyBJtnMa8ax0Fkesl8Ido";
 const VAPID_KEY = process.env.EXPO_PUBLIC_FIREBASE_WEB_PUSH_VAPID_KEY || FALLBACK_VAPID_KEY;
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+const BASE = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/+$/, "");
 const API = `${BASE}/api`;
 const TOKEN_KEY = "fxpro_web_fcm_token";
 
@@ -56,6 +56,11 @@ async function registerServiceWorker() {
   return registrationPromise;
 }
 
+export async function registerWebRuntime(): Promise<boolean> {
+  const registration = await registerServiceWorker();
+  return Boolean(registration);
+}
+
 async function getMessagingInstance() {
   if (!isBrowser()) return null;
   const supported = await isSupported().catch(() => false);
@@ -96,7 +101,9 @@ export async function setupWebPush(authToken?: string | null): Promise<boolean> 
   }
 
   const permission =
-    Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+    Notification.permission === "granted"
+      ? "granted"
+      : await Notification.requestPermission().catch(() => "default");
   if (permission !== "granted") return false;
 
   const messaging = await getMessagingInstance();
@@ -129,7 +136,7 @@ export async function syncWebPushToken(authToken?: string | null): Promise<boole
     await sendTokenToBackend(cachedToken, authToken);
     return true;
   }
-  return setupWebPush(authToken);
+  return false;
 }
 
 export async function showWebNotification(

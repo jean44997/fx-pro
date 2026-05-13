@@ -7,12 +7,13 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Platform } from "react-native";
 import { AuthProvider } from "../src/auth";
 import { ensureNotificationsPermission, setupAndroidChannel } from "../src/notifs";
+import { registerWebRuntime } from "../src/webPush";
 
 export default function RootLayout() {
   useEffect(() => {
     (async () => {
       if (Platform.OS === "web") {
-        await ensureNotificationsPermission();
+        await registerWebRuntime();
       } else {
         await setupAndroidChannel();
         await ensureNotificationsPermission();
