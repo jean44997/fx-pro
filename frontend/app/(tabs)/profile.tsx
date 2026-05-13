@@ -26,10 +26,13 @@ export default function Profile() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.45,
+      quality: 0.25,
       base64: true,
     });
     if (!res.canceled && res.assets[0]?.base64) {
+      if (res.assets[0].base64.length > 1900000) {
+        return Alert.alert("Photo trop lourde", "Choisissez une image plus légère pour le profil.");
+      }
       const mimeType = res.assets[0].mimeType || "image/jpeg";
       const picture = `data:${mimeType};base64,${res.assets[0].base64}`;
       try {
@@ -90,6 +93,8 @@ export default function Profile() {
 
   const items: { icon: any; label: string; route?: any; testID: string; onPress?: () => void; color?: string }[] = [
     { icon: "lock-closed", label: "🔒 Coffre d'épargne", route: "/vault", testID: "menu-vault", color: Colors.purple },
+    { icon: "add-circle", label: "Depot d'argent", route: "/deposit", testID: "menu-deposit", color: Colors.green },
+    { icon: "cash", label: "Retrait d'argent", route: "/withdraw", testID: "menu-withdraw", color: Colors.yellow },
     { icon: "qr-code", label: "Mon QR Code", route: "/receive-qr", testID: "menu-qr" },
     { icon: "key", label: "Changer le mot de passe", route: "/change-password", testID: "menu-password" },
     { icon: "finger-print", label: "Tester biométrie / Face ID", testID: "menu-biometric", onPress: testBiometric },
@@ -97,7 +102,7 @@ export default function Profile() {
     { icon: "alert-circle", label: "Alertes de taux", route: "/rate-alerts", testID: "menu-alerts" },
     { icon: "settings", label: "Paramètres", route: "/settings", testID: "menu-settings" },
     { icon: "shield-checkmark", label: "Statut KYC", route: "/kyc", testID: "menu-kyc" },
-    { icon: "help-circle", label: "Aide & FAQ", testID: "menu-help", onPress: () => Alert.alert("Aide", "Contact: support@fxpro.com") },
+    { icon: "help-circle", label: "Aide & FAQ", route: "/help", testID: "menu-help" },
   ];
 
   return (

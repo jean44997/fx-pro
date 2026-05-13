@@ -44,6 +44,7 @@ exports.sendTransactionNotification = onDocumentCreated("fxpro_notifications/{no
           title,
           body,
           data,
+          badge: 1,
           sound: "default",
           priority: "high",
           channelId: "default",
@@ -84,6 +85,7 @@ exports.sendTransactionNotification = onDocumentCreated("fxpro_notifications/{no
         payload: {
           aps: {
             sound: "default",
+            badge: 1,
           },
         },
       },

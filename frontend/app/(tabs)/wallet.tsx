@@ -25,6 +25,16 @@ export default function Wallet() {
           <View style={{ padding: 20 }}>
             <Text style={{ color: "#fff", fontSize: 28, fontWeight: "900" }}>Portefeuille</Text>
             <Text style={{ color: Colors.textSoft, marginTop: 4 }}>Vos soldes multi-devises</Text>
+            <View style={styles.topActions}>
+              <Pressable testID="wallet-deposit" onPress={() => router.push("/deposit")} style={[styles.topAction, { borderColor: Colors.green }]}>
+                <Ionicons name="add-circle" size={17} color={Colors.green} />
+                <Text style={styles.actionText}>Depot</Text>
+              </Pressable>
+              <Pressable testID="wallet-withdraw" onPress={() => router.push("/withdraw")} style={[styles.topAction, { borderColor: Colors.yellow }]}>
+                <Ionicons name="remove-circle" size={17} color={Colors.yellow} />
+                <Text style={styles.actionText}>Retrait</Text>
+              </Pressable>
+            </View>
           </View>
           {CURRENCIES.map((c, i) => {
             const v = (user?.balances || {})[c.code] || 0;
@@ -61,6 +71,24 @@ export default function Wallet() {
                           <Text style={styles.actionText}>Envoyer</Text>
                         </Pressable>
                       </View>
+                      <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                        <Pressable
+                          testID={`deposit-${c.code}`}
+                          onPress={() => router.push({ pathname: "/deposit", params: { currency: c.code } })}
+                          style={styles.action}
+                        >
+                          <Ionicons name="add" size={14} color={Colors.green} />
+                          <Text style={styles.actionText}>Depot</Text>
+                        </Pressable>
+                        <Pressable
+                          testID={`withdraw-${c.code}`}
+                          onPress={() => router.push({ pathname: "/withdraw", params: { currency: c.code } })}
+                          style={styles.action}
+                        >
+                          <Ionicons name="cash-outline" size={14} color={Colors.yellow} />
+                          <Text style={styles.actionText}>Retrait</Text>
+                        </Pressable>
+                      </View>
                     </View>
                   </View>
                 </GlassCard>
@@ -74,6 +102,18 @@ export default function Wallet() {
 }
 
 const styles = StyleSheet.create({
+  topActions: { flexDirection: "row", gap: 10, marginTop: 14 },
+  topAction: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 11,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 1,
+  },
   flagWrap: {
     width: 54,
     height: 54,

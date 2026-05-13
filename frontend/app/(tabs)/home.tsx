@@ -2,14 +2,13 @@ import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl, Dimensions } from "react-native";
 import { useRouter } from "expo-router";
 import { GradientBg, GlassCard, NeoCard, PrimaryButton } from "../../src/ui";
-import { Colors, CURRENCIES, formatMoney, currencyMeta } from "../../src/theme";
+import { Colors, CURRENCIES, formatMoney } from "../../src/theme";
 import { isFirebaseDirectMode, useAuth, api } from "../../src/auth";
 import { subscribeFirebaseNotifications } from "../../src/firebaseDirect";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeIn, FadeInRight, FadeInUp } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path, Defs, LinearGradient as SvgGrad, Stop, Circle } from "react-native-svg";
-import { notify } from "../../src/notifs";
 
 const W = Dimensions.get("window").width;
 
@@ -43,40 +42,16 @@ export default function Home() {
 
   // Watch for new server notifications → trigger real local push
   useEffect(() => {
-    let lastIds = new Set<string>();
-    let ready = false;
     if (isFirebaseDirectMode) {
       return subscribeFirebaseNotifications((items) => {
         setNotifCount((items || []).filter((x: any) => !x.read).length);
-        const ids = new Set<string>((items || []).map((x: any) => x.notif_id as string));
-        if (!ready) {
-          lastIds = ids;
-          ready = true;
-          return;
-        }
-        for (const it of items || []) {
-          if (!lastIds.has(it.notif_id) && !it.read) {
-            notify(it.title, it.body, { notif_id: it.notif_id });
-          }
-        }
-        lastIds = ids;
       });
     }
 
     const tick = async () => {
       try {
         const n = await api.get("/notifications");
-        const ids = new Set<string>((n.items || []).map((x: any) => x.notif_id as string));
-        if (lastIds.size === 0) {
-          lastIds = ids;
-          return;
-        }
-        for (const it of n.items || []) {
-          if (!lastIds.has(it.notif_id) && !it.read) {
-            notify(it.title, it.body, { notif_id: it.notif_id });
-          }
-        }
-        lastIds = ids;
+        setNotifCount((n.items || []).filter((x: any) => !x.read).length);
       } catch {}
     };
     const t = setInterval(tick, 5000);
@@ -158,10 +133,18 @@ export default function Home() {
             <NeoCard color={Colors.cyan}>
               <Text style={styles.totalLabel}>SOLDE TOTAL ESTIMÉ</Text>
               <Text testID="total-balance" style={styles.totalValue}>{formatMoney(totalEur, "EUR")}</Text>
-              <View style={{ flexDirection: "row", marginTop: 18, gap: 10 }}>
+              <View style={styles.quickGrid}>
                 <Pressable testID="quick-convert" onPress={() => router.push("/convert")} style={styles.quickBtn}>
                   <Ionicons name="swap-horizontal" size={18} color={Colors.cyan} />
                   <Text style={styles.quickText}>Convertir</Text>
+                </Pressable>
+                <Pressable testID="quick-deposit" onPress={() => router.push("/deposit")} style={styles.quickBtn}>
+                  <Ionicons name="add-circle" size={18} color={Colors.green} />
+                  <Text style={styles.quickText}>Depot</Text>
+                </Pressable>
+                <Pressable testID="quick-withdraw" onPress={() => router.push("/withdraw")} style={styles.quickBtn}>
+                  <Ionicons name="cash-outline" size={18} color={Colors.yellow} />
+                  <Text style={styles.quickText}>Retrait</Text>
                 </Pressable>
                 <Pressable testID="quick-transfer" onPress={() => router.push("/(tabs)/transfer")} style={styles.quickBtn}>
                   <Ionicons name="paper-plane" size={18} color={Colors.magenta} />
@@ -282,8 +265,10 @@ const styles = StyleSheet.create({
   dotText: { color: "#fff", fontSize: 10, fontWeight: "900" },
   totalLabel: { color: Colors.textSoft, fontSize: 11, letterSpacing: 2 },
   totalValue: { color: "#fff", fontSize: 36, fontWeight: "900", marginTop: 6, letterSpacing: -1 },
+  quickGrid: { flexDirection: "row", flexWrap: "wrap", marginTop: 18, gap: 10 },
   quickBtn: {
-    flex: 1,
+    flexBasis: "30%",
+    flexGrow: 1,
     flexDirection: "row",
     gap: 6,
     alignItems: "center",

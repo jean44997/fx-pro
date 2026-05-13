@@ -99,6 +99,14 @@ function makeId(prefix: string) {
   return `${prefix}_${random.slice(0, 14)}`;
 }
 
+function makeReference(prefix: "DEP" | "WDR") {
+  const random =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID().replace(/-/g, "")
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return `${prefix}-${random.slice(0, 8).toUpperCase()}`;
+}
+
 function parseBody(opts: RequestInit) {
   if (!opts.body || typeof opts.body !== "string") return {};
   try {
@@ -264,8 +272,10 @@ function sortByDateDesc(items: any[]) {
 
 async function uploadProfilePicture(userId: string, picture?: string) {
   if (!picture || !picture.startsWith("data:image/")) return picture;
-  const avatarRef = storageRef(storage, `profile-pictures/${userId}/avatar.jpg`);
-  await uploadString(avatarRef, picture, "data_url");
+  const mime = picture.slice(5, picture.indexOf(";")) || "image/jpeg";
+  const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
+  const avatarRef = storageRef(storage, `profile-pictures/${userId}/avatar.${ext}`);
+  await uploadString(avatarRef, picture, "data_url", { contentType: mime });
   return getDownloadURL(avatarRef);
 }
 
@@ -541,11 +551,114 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     return { ok: true };
   }
 
+  if (pathname === "/cash/deposit" && method === "POST") {
+    const firebaseUser = await requireFirebaseUser();
+    const profile = await currentProfile();
+    const amount = Number(body.amount);
+    const currency = body.currency;
+    if (!amount || amount <= 0) throw new Error("Montant invalide");
+    if (!Object.prototype.hasOwnProperty.call(INITIAL_BALANCES, currency)) throw new Error("Devise non supportee");
+    const txnId = makeId("txn");
+    const notifId = makeId("ntf");
+    const reference = makeReference("DEP");
+    const transaction = {
+      txn_id: txnId,
+      type: "deposit",
+      user_id: firebaseUser.uid,
+      participants: [firebaseUser.uid],
+      amount,
+      currency,
+      method: body.method || "manual",
+      account_name: body.account_name || profile.name,
+      account_ref: body.account_ref || "",
+      note: body.note || "",
+      reference,
+      fees: 0,
+      status: "pending",
+      created_at: nowIso(),
+    };
+    await setDoc(doc(db, TXNS, txnId), transaction);
+    await setDoc(doc(db, NOTIFS, notifId), {
+      notif_id: notifId,
+      user_id: firebaseUser.uid,
+      type: "deposit",
+      txn_id: txnId,
+      title: "Dépôt en attente",
+      body: `Référence ${reference}: ${amount} ${currency} en validation.`,
+      read: false,
+      created_at: nowIso(),
+    });
+    return { ok: true, transaction };
+  }
+
+  if (pathname === "/cash/withdraw" && method === "POST") {
+    const firebaseUser = await requireFirebaseUser();
+    const profile = await currentProfile();
+    const amount = Number(body.amount);
+    const currency = body.currency;
+    if (!amount || amount <= 0) throw new Error("Montant invalide");
+    if (!Object.prototype.hasOwnProperty.call(INITIAL_BALANCES, currency)) throw new Error("Devise non supportee");
+    if (!body.method || !body.account_ref) throw new Error("Méthode et destination requises");
+    const txnId = makeId("txn");
+    const notifId = makeId("ntf");
+    const reference = makeReference("WDR");
+    const userRef = doc(db, USERS, firebaseUser.uid);
+    const txnRef = doc(db, TXNS, txnId);
+    const notifRef = doc(db, NOTIFS, notifId);
+    let balances: Record<string, number> = {};
+    const transaction = {
+      txn_id: txnId,
+      type: "withdraw",
+      user_id: firebaseUser.uid,
+      participants: [firebaseUser.uid],
+      amount,
+      currency,
+      method: body.method,
+      account_name: body.account_name || profile.name,
+      account_ref: body.account_ref,
+      note: body.note || "",
+      reference,
+      fees: 0,
+      status: "pending",
+      created_at: nowIso(),
+    };
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(userRef);
+      const data = normalizeUser(snap.data());
+      balances = { ...data.balances };
+      if ((balances[currency] || 0) < amount) {
+        throw new Error(`Solde insuffisant: disponible ${balances[currency] || 0} ${currency}.`);
+      }
+      balances[currency] = Number(((balances[currency] || 0) - amount).toFixed(4));
+      tx.update(userRef, { balances, updated_at: nowIso() });
+      tx.set(txnRef, transaction);
+      tx.set(notifRef, {
+        notif_id: notifId,
+        user_id: firebaseUser.uid,
+        type: "withdraw",
+        txn_id: txnId,
+        title: "Retrait en traitement",
+        body: `Référence ${reference}: ${amount} ${currency} réservés pour retrait.`,
+        read: false,
+        created_at: nowIso(),
+      });
+    });
+    return { ok: true, transaction, balances };
+  }
+
   if (pathname === "/profile" && method === "PATCH") {
     const firebaseUser = await requireFirebaseUser();
     const patch = { ...body };
     if (patch.picture) {
-      patch.picture = await uploadProfilePicture(firebaseUser.uid, patch.picture);
+      try {
+        patch.picture = await uploadProfilePicture(firebaseUser.uid, patch.picture);
+      } catch (error: any) {
+        const code = error?.code || "";
+        if (code.includes("storage/unauthorized")) {
+          throw new Error("Upload photo bloque par Firebase Storage. Deploie storage.rules puis reessaie.");
+        }
+        throw new Error(error?.message || "Upload photo impossible.");
+      }
     }
     await updateDoc(doc(db, USERS, firebaseUser.uid), { ...patch, updated_at: nowIso() });
     return currentProfile();
@@ -585,10 +698,25 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   if (pathname === "/vault" && method === "POST") {
     const firebaseUser = await requireFirebaseUser();
     const vaultId = makeId("vlt");
+    const txnId = makeId("txn");
+    const notifId = makeId("ntf");
     const amount = Number(body.amount);
     const currency = body.currency;
     const userRef = doc(db, USERS, firebaseUser.uid);
     const vaultRef = doc(db, VAULTS, vaultId);
+    const txnRef = doc(db, TXNS, txnId);
+    const notifRef = doc(db, NOTIFS, notifId);
+    const transaction = {
+      txn_id: txnId,
+      type: "vault_lock",
+      user_id: firebaseUser.uid,
+      participants: [firebaseUser.uid],
+      amount,
+      currency,
+      status: "completed",
+      vault_id: vaultId,
+      created_at: nowIso(),
+    };
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(userRef);
       const user = normalizeUser(snap.data());
@@ -603,11 +731,22 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
         currency,
         unlock_at: body.unlock_at,
         label: body.label,
-        status: "active",
+        status: "locked",
+        created_at: nowIso(),
+      });
+      tx.set(txnRef, transaction);
+      tx.set(notifRef, {
+        notif_id: notifId,
+        user_id: firebaseUser.uid,
+        type: "vault_lock",
+        txn_id: txnId,
+        title: "Coffre verrouillé",
+        body: `${amount} ${currency} verrouillés jusqu'au ${new Date(body.unlock_at).toLocaleDateString("fr-FR")}`,
+        read: false,
         created_at: nowIso(),
       });
     });
-    return { ok: true };
+    return { ok: true, transaction };
   }
 
   if (pathname.startsWith("/vault/") && pathname.endsWith("/withdraw") && method === "POST") {
@@ -615,7 +754,12 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     const vaultId = pathname.split("/")[2];
     const userRef = doc(db, USERS, firebaseUser.uid);
     const vaultRef = doc(db, VAULTS, vaultId);
+    const txnId = makeId("txn");
+    const notifId = makeId("ntf");
+    const txnRef = doc(db, TXNS, txnId);
+    const notifRef = doc(db, NOTIFS, notifId);
     let amountReturned = 0;
+    let transaction: any = null;
     await runTransaction(db, async (tx) => {
       const userSnap = await tx.get(userRef);
       const vaultSnap = await tx.get(vaultRef);
@@ -630,8 +774,31 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       balances[vault.currency] = Number(((balances[vault.currency] || 0) + amountReturned).toFixed(4));
       tx.update(userRef, { balances, updated_at: nowIso() });
       tx.update(vaultRef, { status: "withdrawn", withdrawn_at: nowIso(), penalty });
+      transaction = {
+        txn_id: txnId,
+        type: "vault_withdraw",
+        user_id: firebaseUser.uid,
+        participants: [firebaseUser.uid],
+        amount: amountReturned,
+        currency: vault.currency,
+        status: "completed",
+        vault_id: vaultId,
+        penalty,
+        created_at: nowIso(),
+      };
+      tx.set(txnRef, transaction);
+      tx.set(notifRef, {
+        notif_id: notifId,
+        user_id: firebaseUser.uid,
+        type: "vault_withdraw",
+        txn_id: txnId,
+        title: penalty > 0 ? "Retrait coffre anticipé" : "Coffre retiré",
+        body: penalty > 0 ? `+${amountReturned} ${vault.currency} après pénalité ${penalty}` : `+${amountReturned} ${vault.currency}`,
+        read: false,
+        created_at: nowIso(),
+      });
     });
-    return { ok: true, amount_returned: amountReturned };
+    return { ok: true, amount_returned: amountReturned, transaction };
   }
 
   if (pathname === "/admin/stats") {

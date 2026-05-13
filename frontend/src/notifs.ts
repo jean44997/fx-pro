@@ -15,6 +15,24 @@ function shouldDisplayNotification(id?: unknown) {
   return true;
 }
 
+export async function setNotificationBadgeCount(count: number) {
+  const value = Math.max(0, Math.floor(count));
+  if (Platform.OS === "web") {
+    const nav = navigator as Navigator & {
+      setAppBadge?: (contents?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
+    try {
+      if (value > 0 && nav.setAppBadge) await nav.setAppBadge(value);
+      if (value === 0 && nav.clearAppBadge) await nav.clearAppBadge();
+    } catch {}
+    return;
+  }
+  try {
+    await Notifications.setBadgeCountAsync(value);
+  } catch {}
+}
+
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const shouldShow = shouldDisplayNotification(notification.request.content.data?.notif_id);
@@ -60,6 +78,7 @@ export async function setupAndroidChannel() {
 }
 
 export async function notify(title: string, body: string, data?: any) {
+  if (!shouldDisplayNotification(data?.notif_id)) return;
   if (Platform.OS === "web") {
     await showWebNotification(title, body, data);
     return;

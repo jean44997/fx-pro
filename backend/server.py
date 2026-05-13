@@ -118,6 +118,31 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+async def send_push_to_user(user_id: str, title: str, body: str, txn_id: Optional[str] = None, type_: str = "notification"):
+    full = await find_user_full(user_id)
+    token = (full or {}).get("push_token")
+    if not token or not (token.startswith("ExponentPushToken[") or token.startswith("ExpoPushToken[")):
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(
+                "https://exp.host/--/api/v2/push/send",
+                json={
+                    "to": token,
+                    "title": title,
+                    "body": body,
+                    "data": {"txn_id": txn_id or "", "type": type_, "url": "/notifications"},
+                    "sound": "default",
+                    "priority": "high",
+                    "badge": 1,
+                    "channelId": "default",
+                },
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+            )
+    except Exception as exc:
+        logger.warning("Expo push failed for %s: %s", user_id, exc)
+
+
 # ============ Models ============
 class RegisterIn(BaseModel):
     email: EmailStr
@@ -184,6 +209,15 @@ class VaultCreateIn(BaseModel):
     currency: str
     unlock_at: datetime
     label: Optional[str] = None
+
+
+class CashOperationIn(BaseModel):
+    amount: float
+    currency: str
+    method: str
+    account_name: Optional[str] = None
+    account_ref: Optional[str] = None
+    note: Optional[str] = None
 
 
 class UserSearchIn(BaseModel):
@@ -501,17 +535,21 @@ async def transfer(data: TransferIn, user: dict = Depends(get_current_user)):
     }
     await db.transactions.insert_one(txn)
     txn.pop("_id", None)
-    # Notify both
-    await db.notifications.insert_many([
-        {"notif_id": f"ntf_{uuid.uuid4().hex[:10]}", "user_id": sender["user_id"],
-         "type": "transfer", "transfer_role": "sender", "txn_id": txn_id,
-         "title": "FX Pro - Transfert envoye", "body": f"{data.amount} {data.currency} envoye a {recipient.get('name') or recipient['email']}",
-         "read": False, "created_at": now_utc()},
-        {"notif_id": f"ntf_{uuid.uuid4().hex[:10]}", "user_id": recipient["user_id"],
-         "type": "transfer", "transfer_role": "receiver", "txn_id": txn_id,
-         "title": "FX Pro - Argent recu", "body": f"{data.amount} {data.currency} recu de {sender.get('name') or sender['email']}",
-         "read": False, "created_at": now_utc()},
-    ])
+    sender_notif = {"notif_id": f"ntf_{uuid.uuid4().hex[:10]}", "user_id": sender["user_id"],
+                    "type": "transfer", "transfer_role": "sender", "txn_id": txn_id,
+                    "title": "FX Pro - Transfert envoye",
+                    "body": f"{data.amount} {data.currency} envoye a {recipient.get('name') or recipient['email']}",
+                    "read": False, "created_at": now_utc()}
+    receiver_notif = {"notif_id": f"ntf_{uuid.uuid4().hex[:10]}", "user_id": recipient["user_id"],
+                      "type": "transfer", "transfer_role": "receiver", "txn_id": txn_id,
+                      "title": "FX Pro - Argent recu",
+                      "body": f"{data.amount} {data.currency} recu de {sender.get('name') or sender['email']}",
+                      "read": False, "created_at": now_utc()}
+    await db.notifications.insert_many([sender_notif, receiver_notif])
+    await asyncio.gather(
+        send_push_to_user(sender["user_id"], sender_notif["title"], sender_notif["body"], txn_id, "transfer"),
+        send_push_to_user(recipient["user_id"], receiver_notif["title"], receiver_notif["body"], txn_id, "transfer"),
+    )
     return {"ok": True, "transaction": txn, "balances": s_bal}
 
 
@@ -576,6 +614,99 @@ async def read_all(user: dict = Depends(get_current_user)):
 async def register_push(data: PushTokenIn, user: dict = Depends(get_current_user)):
     await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"push_token": data.token}})
     return {"ok": True}
+
+
+# ============ Deposit / Withdraw ============
+@api.post("/cash/deposit")
+async def cash_deposit(data: CashOperationIn, user: dict = Depends(get_current_user)):
+    if data.amount <= 0:
+        raise HTTPException(status_code=400, detail="Montant invalide")
+    if data.currency not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail="Devise non supportee")
+    if not data.method:
+        raise HTTPException(status_code=400, detail="Methode de depot requise")
+
+    txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+    reference = f"DEP-{uuid.uuid4().hex[:8].upper()}"
+    txn = {
+        "txn_id": txn_id,
+        "type": "deposit",
+        "user_id": user["user_id"],
+        "participants": [user["user_id"]],
+        "amount": data.amount,
+        "currency": data.currency,
+        "method": data.method,
+        "account_name": data.account_name or user.get("name"),
+        "account_ref": data.account_ref or "",
+        "note": data.note or "",
+        "reference": reference,
+        "fees": 0.0,
+        "status": "pending",
+        "created_at": now_utc(),
+    }
+    await db.transactions.insert_one(txn)
+    await db.notifications.insert_one({
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"],
+        "type": "deposit",
+        "txn_id": txn_id,
+        "title": "Depot en attente",
+        "body": f"Reference {reference}: {data.amount} {data.currency} en validation.",
+        "read": False,
+        "created_at": now_utc(),
+    })
+    txn.pop("_id", None)
+    return {"ok": True, "transaction": txn}
+
+
+@api.post("/cash/withdraw")
+async def cash_withdraw(data: CashOperationIn, user: dict = Depends(get_current_user)):
+    if data.amount <= 0:
+        raise HTTPException(status_code=400, detail="Montant invalide")
+    if data.currency not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail="Devise non supportee")
+    if not data.method or not data.account_ref:
+        raise HTTPException(status_code=400, detail="Methode et destination requises")
+
+    full = await find_user_full(user["user_id"])
+    balances = full.get("balances", {})
+    if balances.get(data.currency, 0) < data.amount:
+        raise HTTPException(status_code=400, detail="Solde insuffisant")
+
+    balances[data.currency] = round(balances.get(data.currency, 0) - data.amount, 4)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"balances": balances}})
+
+    txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+    reference = f"WDR-{uuid.uuid4().hex[:8].upper()}"
+    txn = {
+        "txn_id": txn_id,
+        "type": "withdraw",
+        "user_id": user["user_id"],
+        "participants": [user["user_id"]],
+        "amount": data.amount,
+        "currency": data.currency,
+        "method": data.method,
+        "account_name": data.account_name or user.get("name"),
+        "account_ref": data.account_ref,
+        "note": data.note or "",
+        "reference": reference,
+        "fees": 0.0,
+        "status": "pending",
+        "created_at": now_utc(),
+    }
+    await db.transactions.insert_one(txn)
+    await db.notifications.insert_one({
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"],
+        "type": "withdraw",
+        "txn_id": txn_id,
+        "title": "Retrait en traitement",
+        "body": f"Reference {reference}: {data.amount} {data.currency} reserves pour retrait.",
+        "read": False,
+        "created_at": now_utc(),
+    })
+    txn.pop("_id", None)
+    return {"ok": True, "transaction": txn, "balances": balances}
 
 
 # ============ Rate Alerts ============
@@ -711,16 +842,18 @@ async def vault_create(data: VaultCreateIn, user: dict = Depends(get_current_use
     }
     await db.vaults.insert_one(doc)
     doc.pop("_id", None)
-    await db.transactions.insert_one({
+    txn = {
         "txn_id": f"txn_{uuid.uuid4().hex[:12]}",
         "type": "vault_lock",
         "user_id": user["user_id"],
+        "participants": [user["user_id"]],
         "amount": data.amount,
         "currency": data.currency,
         "status": "completed",
         "vault_id": vault_id,
         "created_at": now_utc(),
-    })
+    }
+    await db.transactions.insert_one(txn)
     await db.notifications.insert_one({
         "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
         "user_id": user["user_id"],
@@ -729,7 +862,8 @@ async def vault_create(data: VaultCreateIn, user: dict = Depends(get_current_use
         "read": False,
         "created_at": now_utc(),
     })
-    return {"ok": True, "vault": doc, "balances": balances}
+    txn.pop("_id", None)
+    return {"ok": True, "vault": doc, "balances": balances, "transaction": txn}
 
 
 @api.get("/vault")
@@ -770,17 +904,19 @@ async def vault_withdraw(vault_id: str, user: dict = Depends(get_current_user)):
         {"vault_id": vault_id},
         {"$set": {"status": "withdrawn", "withdrawn_at": now_utc(), "penalty": penalty, "returned": amount_back}},
     )
-    await db.transactions.insert_one({
+    txn = {
         "txn_id": f"txn_{uuid.uuid4().hex[:12]}",
         "type": "vault_withdraw",
         "user_id": user["user_id"],
+        "participants": [user["user_id"]],
         "amount": amount_back,
         "currency": v["currency"],
         "status": "completed",
         "vault_id": vault_id,
         "penalty": penalty,
         "created_at": now_utc(),
-    })
+    }
+    await db.transactions.insert_one(txn)
     await db.notifications.insert_one({
         "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
         "user_id": user["user_id"],
@@ -791,7 +927,8 @@ async def vault_withdraw(vault_id: str, user: dict = Depends(get_current_user)):
         "read": False,
         "created_at": now_utc(),
     })
-    return {"ok": True, "amount_returned": amount_back, "penalty": penalty, "balances": balances}
+    txn.pop("_id", None)
+    return {"ok": True, "amount_returned": amount_back, "penalty": penalty, "balances": balances, "transaction": txn}
 
 
 # ============ Admin ============

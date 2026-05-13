@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl } from "react-native";
 import { useRouter } from "expo-router";
-import { GradientBg, GlassCard, GhostButton } from "../src/ui";
+import { GradientBg, GlassCard } from "../src/ui";
 import { Colors } from "../src/theme";
 import { isFirebaseDirectMode, api } from "../src/auth";
 import { subscribeFirebaseNotifications } from "../src/firebaseDirect";
+import { setNotificationBadgeCount } from "../src/notifs";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, { FadeInRight } from "react-native-reanimated";
@@ -22,6 +23,7 @@ export default function Notifications() {
   };
 
   useEffect(() => {
+    setNotificationBadgeCount(0).catch(() => undefined);
     if (isFirebaseDirectMode) {
       return subscribeFirebaseNotifications(setItems);
     }
@@ -36,6 +38,7 @@ export default function Notifications() {
 
   const markAll = async () => {
     await api.post("/notifications/read-all", {});
+    await setNotificationBadgeCount(0);
     await load();
   };
 

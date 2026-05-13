@@ -1,9 +1,10 @@
 // API client + Auth context
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { firebaseDirectRequest } from "./firebaseDirect";
+import { firebaseDirectRequest, subscribeFirebaseNotifications } from "./firebaseDirect";
 import { syncWebPushToken } from "./webPush";
-import { ensureNotificationsPermission } from "./notifs";
+import { ensureNotificationsPermission, notify, setNotificationBadgeCount } from "./notifs";
 
 const BASE = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/+$/, "");
 const API = `${BASE}/api`;
@@ -113,6 +114,40 @@ const AuthCtx = createContext<Ctx>({} as any);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const lastNotificationIds = React.useRef<Set<string>>(new Set());
+  const notificationWatcherReady = React.useRef(false);
+
+  const handleRealtimeNotifications = useCallback((items: any[]) => {
+    const list = items || [];
+    const unread = list.filter((item) => !item.read).length;
+    setNotificationBadgeCount(AppState.currentState === "active" ? 0 : unread).catch(() => undefined);
+
+    const ids = new Set<string>(list.map((item) => item.notif_id as string).filter(Boolean));
+    if (!notificationWatcherReady.current) {
+      lastNotificationIds.current = ids;
+      notificationWatcherReady.current = true;
+      const latestUnread = list.find((item) => !item.read && item.transfer_role === "receiver");
+      if (latestUnread) {
+        notify(latestUnread.title, latestUnread.body, {
+          notif_id: latestUnread.notif_id,
+          txn_id: latestUnread.txn_id,
+          type: latestUnread.type,
+        }).catch(() => undefined);
+      }
+      return;
+    }
+
+    for (const item of list) {
+      if (!item.read && item.notif_id && !lastNotificationIds.current.has(item.notif_id)) {
+        notify(item.title, item.body, {
+          notif_id: item.notif_id,
+          txn_id: item.txn_id,
+          type: item.type,
+        }).catch(() => undefined);
+      }
+    }
+    lastNotificationIds.current = ids;
+  }, []);
 
   const refresh = useCallback(async () => {
     const token = await loadToken();
@@ -137,6 +172,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     })();
   }, [refresh]);
+
+  useEffect(() => {
+    lastNotificationIds.current = new Set();
+    notificationWatcherReady.current = false;
+    if (!user) {
+      setNotificationBadgeCount(0).catch(() => undefined);
+      return;
+    }
+
+    if (isFirebaseDirectMode) {
+      return subscribeFirebaseNotifications(handleRealtimeNotifications);
+    }
+
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const r = await api.get("/notifications");
+        if (!stopped) handleRealtimeNotifications(r.items || []);
+      } catch {}
+    };
+    tick();
+    const timer = setInterval(tick, 5000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [user, handleRealtimeNotifications]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") setNotificationBadgeCount(0).catch(() => undefined);
+    });
+    return () => sub.remove();
+  }, []);
 
   const login = async (email: string, password: string) => {
     const r = await api.post("/auth/login", { email, password });

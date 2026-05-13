@@ -13,7 +13,7 @@ export default function History() {
   const { user } = useAuth();
   const [items, setItems] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<"all" | "transfer" | "convert" | "admin">("all");
+  const [filter, setFilter] = useState<"all" | "transfer" | "convert" | "cash" | "vault" | "admin">("all");
 
   const load = useCallback(async () => {
     try {
@@ -37,6 +37,8 @@ export default function History() {
   const filtered = items.filter((t) => {
     if (filter === "all") return true;
     if (filter === "admin") return t.type === "admin_credit" || t.type === "admin_debit";
+    if (filter === "cash") return t.type === "deposit" || t.type === "withdraw";
+    if (filter === "vault") return t.type === "vault_lock" || t.type === "vault_withdraw";
     return t.type === filter;
   });
 
@@ -48,10 +50,10 @@ export default function History() {
           <Text style={{ color: Colors.textSoft, marginTop: 4 }}>{items.length} transactions</Text>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 8 }}>
-          {(["all", "transfer", "convert", "admin"] as const).map((f) => (
+          {(["all", "transfer", "convert", "cash", "vault", "admin"] as const).map((f) => (
             <Pressable key={f} testID={`filter-${f}`} onPress={() => setFilter(f)} style={[styles.chip, filter === f && styles.chipActive]}>
               <Text style={[styles.chipText, filter === f && { color: "#000", fontWeight: "900" }]}>
-                {f === "all" ? "Tout" : f === "transfer" ? "Transferts" : f === "convert" ? "Conversions" : "Admin"}
+                {f === "all" ? "Tout" : f === "transfer" ? "Transferts" : f === "convert" ? "Conversions" : f === "cash" ? "Depot/Retrait" : f === "vault" ? "Coffre" : "Admin"}
               </Text>
             </Pressable>
           ))}
@@ -96,6 +98,26 @@ function TxnItem({ t, index, userId, onPress }: any) {
     color = Colors.danger;
     label = "Débit admin";
     amountText = `-${formatMoney(t.amount, t.currency)}`;
+  } else if (t.type === "deposit") {
+    icon = "add-circle";
+    color = Colors.green;
+    label = `Depot ${t.reference || ""}`.trim();
+    amountText = `+${formatMoney(t.amount, t.currency)}`;
+  } else if (t.type === "withdraw") {
+    icon = "cash-outline";
+    color = Colors.yellow;
+    label = `Retrait ${t.reference || ""}`.trim();
+    amountText = `-${formatMoney(t.amount, t.currency)}`;
+  } else if (t.type === "vault_lock") {
+    icon = "lock-closed";
+    color = Colors.purple;
+    label = "Coffre verrouille";
+    amountText = `-${formatMoney(t.amount, t.currency)}`;
+  } else if (t.type === "vault_withdraw") {
+    icon = "lock-open";
+    color = Colors.green;
+    label = "Retrait coffre";
+    amountText = `+${formatMoney(t.amount, t.currency)}`;
   }
 
   return (
@@ -110,6 +132,7 @@ function TxnItem({ t, index, userId, onPress }: any) {
               <Text style={{ color: "#fff", fontWeight: "800" }} numberOfLines={1}>{label}</Text>
               <Text style={{ color: Colors.textSoft, fontSize: 12, marginTop: 2 }}>
                 {new Date(t.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
+                {t.status === "pending" ? " · En traitement" : ""}
               </Text>
             </View>
             <Text style={{ color, fontWeight: "900", fontSize: 13, fontFamily: "monospace" }}>{amountText}</Text>

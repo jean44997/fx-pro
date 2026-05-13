@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput, Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
-import { GradientBg, GlassCard, NeoCard, PrimaryButton, GhostButton } from "../src/ui";
+import { GradientBg, GlassCard, NeoCard, PrimaryButton } from "../src/ui";
 import { Colors, formatMoney } from "../src/theme";
 import { useAuth, api } from "../src/auth";
 import { CurrencyPickerButton } from "../src/CurrencyPicker";
@@ -42,7 +42,7 @@ export default function Vault() {
     if (n > bal) return Alert.alert("Solde insuffisant", `Solde ${currency}: ${formatMoney(bal, currency)}`);
     setLoading(true);
     try {
-      await api.post("/vault", {
+      const r = await api.post("/vault", {
         amount: n,
         currency,
         unlock_at: unlockDate.toISOString(),
@@ -52,6 +52,7 @@ export default function Vault() {
       await load();
       setAmount("");
       setLabel("");
+      if (r.transaction?.txn_id) router.push({ pathname: "/receipt/[id]", params: { id: r.transaction.txn_id } });
       Alert.alert("Coffre créé 🔒", `${n} ${currency} verrouillés jusqu'au ${unlockDate.toLocaleDateString("fr-FR")}`);
     } catch (e: any) {
       Alert.alert("Erreur", e.message);
@@ -72,6 +73,7 @@ export default function Vault() {
             const r = await api.post(`/vault/${v.vault_id}/withdraw`, {});
             await refresh();
             await load();
+            if (r.transaction?.txn_id) router.push({ pathname: "/receipt/[id]", params: { id: r.transaction.txn_id } });
             Alert.alert("Retiré", `+${r.amount_returned} ${v.currency}${r.penalty ? ` (pénalité ${r.penalty})` : ""}`);
           } catch (e: any) {
             Alert.alert("Erreur", e.message);

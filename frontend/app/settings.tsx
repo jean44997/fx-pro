@@ -74,6 +74,7 @@ export default function Settings() {
           <GlassCard>
             <Text style={styles.sectionLabel}>Sécurité & Légal</Text>
             <NavRow icon="shield-checkmark" label="KYC" onPress={() => router.push("/kyc")} testID="nav-kyc" />
+            <NavRow icon="help-circle" label="Aide & FAQ" onPress={() => router.push("/help")} testID="nav-help" />
             <NavRow icon="document-text" label="Conditions d'utilisation" onPress={() => router.push("/terms")} testID="nav-cgu" />
             <NavRow icon="lock-closed" label="Politique de confidentialité" onPress={() => router.push("/privacy")} testID="nav-privacy" />
           </GlassCard>
