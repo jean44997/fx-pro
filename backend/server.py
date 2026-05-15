@@ -50,7 +50,7 @@ BONUS_COUNTRIES = [
     {"code": "MA", "name": "Maroc", "currency": "MAD", "settlement": "7 a 30 jours", "compliance": "Validation interne avant bonus ou retrait sensible."},
     {"code": "ZA", "name": "Afrique du Sud", "currency": "ZAR", "settlement": "7 a 30 jours", "compliance": "Controle KYC et anti-fraude sur moyens de paiement."},
     {"code": "KE", "name": "Kenya", "currency": "KES", "settlement": "7 a 30 jours", "compliance": "Mobile wallet et historique compte analyses."},
-    {"code": "GH", "name": "Ghana", "currency": "GHS", "settlement": "7 a 30 jours", "compliance": "Controle du premier depot confirme uniquement."},
+    {"code": "GH", "name": "Ghana", "currency": "GHS", "settlement": "7 a 30 jours", "compliance": "Controle du premier depot recu confirme uniquement."},
 ]
 
 XOF_BONUS_TIERS = [
@@ -241,6 +241,40 @@ def build_bonus_risk_flags(user: dict, txns: List[dict]) -> List[str]:
     return flags
 
 
+def normalize_received_deposit(txn: dict, user_id: str) -> Optional[dict]:
+    if not txn or txn.get("status") != "completed":
+        return None
+    if txn.get("type") == "deposit" and txn.get("user_id") == user_id:
+        item = {**txn, "bonus_source": "deposit_confirmed"}
+        item["created_at"] = txn.get("confirmed_at") or txn.get("created_at")
+        return item
+    if txn.get("type") == "transfer" and txn.get("receiver_id") == user_id:
+        return {
+            **txn,
+            "bonus_source": "transfer_received",
+            "user_id": user_id,
+            "confirmed_at": txn.get("created_at"),
+        }
+    if txn.get("type") == "admin_credit" and txn.get("user_id") == user_id:
+        return {**txn, "bonus_source": "admin_credit_received", "confirmed_at": txn.get("created_at")}
+    return None
+
+
+def bonus_sort_timestamp(item: dict) -> float:
+    value = item.get("created_at") or item.get("confirmed_at") or now_utc()
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
+
+
+def first_received_deposit(txns: List[dict], user_id: str) -> Optional[dict]:
+    candidates = [item for item in (normalize_received_deposit(txn, user_id) for txn in txns) if item]
+    candidates.sort(key=bonus_sort_timestamp)
+    return candidates[0] if candidates else None
+
+
 def build_bonus_evaluation(user: dict, txns: List[dict], deposit: dict, country_code: Optional[str] = None) -> dict:
     amount = float(deposit.get("amount") or 0)
     currency = deposit.get("currency")
@@ -278,7 +312,7 @@ def build_bonus_evaluation(user: dict, txns: List[dict], deposit: dict, country_
         base.update({
             "status": "refused",
             "eligible": False,
-            "reason": "Premier depot confirme sous le minimum du catalogue bonus.",
+            "reason": "Premier depot recu confirme sous le minimum du catalogue bonus.",
             "probability": 0,
             "will_approve": False,
         })
@@ -291,7 +325,7 @@ def build_bonus_evaluation(user: dict, txns: List[dict], deposit: dict, country_
     base.update({
         "status": "analysis",
         "eligible": True,
-        "reason": "Compte eligible: premier depot confirme verrouille et en analyse interne.",
+        "reason": "Compte eligible: premier depot recu confirme verrouille et en analyse interne.",
         "probability": probability,
         "will_approve": approval_roll <= probability and len(risk_flags) < 3,
         "selected_threshold": tier["threshold"],
@@ -777,8 +811,8 @@ async def notify_bonus(user_id: str, bonus: dict):
     eligible = bonus.get("eligible") and bonus.get("status") != "refused"
     title = "Programme bonus active" if eligible else "Bonus non eligible"
     body = (
-        f"Premier depot valide. Bonus potentiel {bonus.get('bonus_amount', 0)} {bonus.get('currency')}, analyse {bonus.get('payout_window_days', 30)} jours."
-        if eligible else bonus.get("reason", "Le premier depot confirme ne respecte pas les conditions.")
+        f"Premier depot recu valide. Bonus potentiel {bonus.get('bonus_amount', 0)} {bonus.get('currency')}, analyse {bonus.get('payout_window_days', 30)} jours."
+        if eligible else bonus.get("reason", "Le premier depot recu confirme ne respecte pas les conditions.")
     )
     await db.notifications.insert_one({
         "notif_id": notif_id,
@@ -800,11 +834,7 @@ async def lock_bonus_if_needed(user: dict):
         return current
 
     txns = await user_transactions(user_id)
-    first_deposit = await db.transactions.find_one(
-        {"user_id": user_id, "type": "deposit", "status": "completed"},
-        {"_id": 0},
-        sort=[("created_at", 1)],
-    )
+    first_deposit = first_received_deposit(txns, user_id)
     if not first_deposit:
         country = bonus_country(user.get("bonus_country"))
         pending = {
@@ -814,7 +844,7 @@ async def lock_bonus_if_needed(user: dict):
             "currency": country["currency"],
             "status": "pending",
             "eligible": False,
-            "reason": "En attente du premier depot confirme.",
+            "reason": "En attente du premier depot recu confirme.",
             "first_deposit_locked": False,
             "risk_flags": build_bonus_risk_flags(user, txns),
             "created_at": current.get("created_at") if current else now_utc(),
@@ -841,14 +871,14 @@ async def lock_bonus_if_needed(user: dict):
         "event_id": f"bne_{uuid.uuid4().hex[:10]}",
         "user_id": user_id,
         "bonus_id": evaluation["bonus_id"],
-        "type": "first_deposit_eligible" if evaluation.get("eligible") else "first_deposit_refused",
+        "type": "first_received_deposit_eligible" if evaluation.get("eligible") else "first_received_deposit_refused",
         "txn_id": first_deposit["txn_id"],
         "created_at": now_utc(),
     })
     await db.risk_logs.insert_one({
         "event_id": f"rsk_{uuid.uuid4().hex[:10]}",
         "user_id": user_id,
-        "type": "bonus_first_deposit_scan",
+        "type": "bonus_first_received_deposit_scan",
         "flags": evaluation.get("risk_flags", []),
         "trust_score": evaluation.get("trust_score", 0),
         "created_at": now_utc(),
@@ -942,9 +972,9 @@ async def bonus_state(user: dict = Depends(get_current_user)):
         "status": bonus,
         "history": bonus_history(bonus),
         "rules": [
-            "Uniquement le premier depot confirme est analyse.",
+            "Uniquement le premier depot recu et confirme est analyse.",
             "Les depots en attente, annules, refuses ou les tentatives ne comptent pas.",
-            "Une fois le premier depot verrouille, il ne peut plus etre remplace.",
+            "Une fois le premier depot recu verrouille, il ne peut plus etre remplace.",
             "Le bonus est analyse entre 7 et 30 jours selon le statut et le score de confiance.",
             "Un controle anti-abus peut refuser le bonus meme si le seuil financier est atteint.",
         ],
@@ -956,7 +986,7 @@ async def bonus_set_country(data: BonusCountryIn, user: dict = Depends(get_curre
     country = bonus_country(data.country)
     current = await db.bonus_program.find_one({"user_id": user["user_id"]}, {"_id": 0})
     if current and current.get("first_deposit_locked") and current.get("country") != country["code"]:
-        raise HTTPException(status_code=400, detail="Pays bonus deja verrouille par le premier depot confirme")
+        raise HTTPException(status_code=400, detail="Pays bonus deja verrouille par le premier depot recu confirme")
     await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"bonus_country": country["code"], "updated_at": now_utc()}})
     await db.bonus_program.update_one(
         {"user_id": user["user_id"]},
@@ -968,7 +998,7 @@ async def bonus_set_country(data: BonusCountryIn, user: dict = Depends(get_curre
             "status": current.get("status") if current else "pending",
             "eligible": bool(current.get("eligible")) if current else False,
             "first_deposit_locked": bool(current.get("first_deposit_locked")) if current else False,
-            "reason": current.get("reason") if current else "En attente du premier depot confirme.",
+            "reason": current.get("reason") if current else "En attente du premier depot recu confirme.",
             "updated_at": now_utc(),
             "created_at": current.get("created_at") if current else now_utc(),
         }},
@@ -1094,6 +1124,10 @@ async def transfer(data: TransferIn, user: dict = Depends(get_current_user)):
         send_push_to_user(sender["user_id"], sender_notif["title"], sender_notif["body"], txn_id, "transfer", sender_notif["notif_id"]),
         send_push_to_user(recipient["user_id"], receiver_notif["title"], receiver_notif["body"], txn_id, "transfer", receiver_notif["notif_id"]),
     )
+    try:
+        await lock_bonus_if_needed(recipient)
+    except Exception as exc:
+        logger.warning("Bonus lock after received transfer failed for %s: %s", recipient["user_id"], exc)
     return {
         "ok": True,
         "transaction": txn,
@@ -1522,14 +1556,16 @@ async def admin_confirm_deposit(txn_id: str, _: dict = Depends(require_admin)):
     if not current_bonus or not current_bonus.get("first_deposit_locked"):
         txns = await user_transactions(user_id)
         confirmed_deposit = {**deposit, "status": "completed", "confirmed_at": confirmed_at}
-        bonus = build_bonus_evaluation(target, txns, confirmed_deposit, target.get("bonus_country"))
+        txns_for_bonus = [txn for txn in txns if txn.get("txn_id") != txn_id] + [confirmed_deposit]
+        first_received = first_received_deposit(txns_for_bonus, user_id) or confirmed_deposit
+        bonus = build_bonus_evaluation(target, txns_for_bonus, first_received, target.get("bonus_country"))
         await db.bonus_program.update_one({"user_id": user_id}, {"$set": bonus}, upsert=True)
         await db.bonus_events.insert_one({
             "event_id": f"bne_{uuid.uuid4().hex[:10]}",
             "user_id": user_id,
             "bonus_id": bonus["bonus_id"],
-            "type": "first_deposit_eligible" if bonus.get("eligible") else "first_deposit_refused",
-            "txn_id": txn_id,
+            "type": "first_received_deposit_eligible" if bonus.get("eligible") else "first_received_deposit_refused",
+            "txn_id": first_received["txn_id"],
             "created_at": now_utc(),
         })
         await notify_bonus(user_id, bonus)
@@ -1596,7 +1632,14 @@ async def admin_balance(user_id: str, data: AdminBalanceIn, _: dict = Depends(re
         "read": False,
         "created_at": now_utc(),
     })
-    return {"ok": True, "balances": balances}
+    bonus = None
+    if data.amount > 0:
+        u["balances"] = balances
+        try:
+            bonus = await lock_bonus_if_needed(u)
+        except Exception as exc:
+            logger.warning("Bonus lock after admin credit failed for %s: %s", user_id, exc)
+    return {"ok": True, "balances": balances, "bonus": bonus}
 
 
 @api.patch("/admin/users/{user_id}/block")

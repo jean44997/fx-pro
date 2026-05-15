@@ -353,10 +353,35 @@ async function getBonusTransactions(userId: string) {
   return snap.docs.map((d) => ({ ...d.data(), txn_id: d.data().txn_id || d.id }));
 }
 
-function chooseFirstCompletedDeposit(txns: any[], userId: string) {
-  return sortByDateAsc(
-    txns.filter((t) => t.type === "deposit" && t.user_id === userId && t.status === "completed")
-  )[0];
+function normalizeReceivedDeposit(txn: any, userId: string) {
+  if (!txn || txn.status !== "completed") return null;
+  if (txn.type === "deposit" && txn.user_id === userId) {
+    return {
+      ...txn,
+      bonus_source: "deposit_confirmed",
+      created_at: txn.confirmed_at || txn.created_at,
+    };
+  }
+  if (txn.type === "transfer" && txn.receiver_id === userId) {
+    return {
+      ...txn,
+      bonus_source: "transfer_received",
+      user_id: userId,
+      confirmed_at: txn.created_at,
+    };
+  }
+  if (txn.type === "admin_credit" && txn.user_id === userId) {
+    return {
+      ...txn,
+      bonus_source: "admin_credit_received",
+      confirmed_at: txn.created_at,
+    };
+  }
+  return null;
+}
+
+function chooseFirstReceivedDeposit(txns: any[], userId: string) {
+  return sortByDateAsc(txns.map((txn) => normalizeReceivedDeposit(txn, userId)).filter(Boolean) as any[])[0];
 }
 
 function buildBonusEvaluation(userId: string, userRaw: any, txns: any[], deposit: any, countryCode?: string): BonusEvaluation {
@@ -389,8 +414,8 @@ async function notifyBonusState(userId: string, bonus: BonusEvaluation | any) {
     bonus_id: bonus.bonus_id,
     title: eligible ? "Programme bonus active" : "Bonus non eligible",
     body: eligible
-      ? `Premier depot valide. Bonus potentiel ${bonus.bonus_amount || 0} ${bonus.currency}, analyse ${bonus.payout_window_days || 30} jours.`
-      : bonus.reason || "Le premier depot confirme ne respecte pas les conditions.",
+      ? `Premier depot recu valide. Bonus potentiel ${bonus.bonus_amount || 0} ${bonus.currency}, analyse ${bonus.payout_window_days || 30} jours.`
+      : bonus.reason || "Le premier depot recu confirme ne respecte pas les conditions.",
     read: false,
     created_at: nowIso(),
   });
@@ -402,7 +427,7 @@ async function lockBonusIfNeeded(userId: string, selectedCountry?: string) {
   const userSnap = await getDoc(userRef);
   const userRaw = userSnap.data() || {};
   const txns = await getBonusTransactions(userId);
-  const firstDeposit = chooseFirstCompletedDeposit(txns, userId);
+  const firstDeposit = chooseFirstReceivedDeposit(txns, userId);
   if (!firstDeposit) {
     const country = getBonusCountry(supportedBonusCountry(selectedCountry || userRaw.bonus_country));
     const existing = await getDoc(bonusRef);
@@ -414,7 +439,7 @@ async function lockBonusIfNeeded(userId: string, selectedCountry?: string) {
         currency: country.currency,
         status: "pending",
         eligible: false,
-        reason: "En attente du premier depot confirme.",
+        reason: "En attente du premier depot recu confirme.",
         first_deposit_locked: false,
         risk_flags: buildBonusRiskFlags(userRaw, txns),
         created_at: nowIso(),
@@ -436,13 +461,13 @@ async function lockBonusIfNeeded(userId: string, selectedCountry?: string) {
       event_id: makeId("bne"),
       user_id: userId,
       bonus_id: evaluation.bonus_id,
-      type: evaluation.eligible ? "first_deposit_eligible" : "first_deposit_refused",
+      type: evaluation.eligible ? "first_received_deposit_eligible" : "first_received_deposit_refused",
       txn_id: firstDeposit.txn_id,
       created_at: nowIso(),
     });
     tx.set(doc(db, RISK_LOGS, makeId("rsk")), {
       user_id: userId,
-      type: "bonus_first_deposit_scan",
+      type: "bonus_first_received_deposit_scan",
       flags: evaluation.risk_flags,
       trust_score: evaluation.trust_score,
       created_at: nowIso(),
@@ -656,9 +681,9 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       status: bonus,
       history: bonusHistoryFromDoc(bonus),
       rules: [
-        "Uniquement le premier depot confirme est analyse.",
+        "Uniquement le premier depot recu et confirme est analyse.",
         "Les depots en attente, annules, refuses ou les tentatives ne comptent pas.",
-        "Une fois le premier depot verrouille, il ne peut plus etre remplace.",
+        "Une fois le premier depot recu verrouille, il ne peut plus etre remplace.",
         "Le bonus est analyse entre 7 et 30 jours selon le statut et le score de confiance.",
         "Un controle anti-abus peut refuser le bonus meme si le seuil financier est atteint.",
       ],
@@ -672,7 +697,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     const bonusSnap = await getDoc(bonusRef);
     const bonus = bonusSnap.data();
     if (bonus?.first_deposit_locked && bonus.country !== country.code) {
-      throw new Error("Pays bonus deja verrouille par le premier depot confirme.");
+      throw new Error("Pays bonus deja verrouille par le premier depot recu confirme.");
     }
     await updateDoc(doc(db, USERS, firebaseUser.uid), { bonus_country: country.code, updated_at: nowIso() });
     await setDoc(
@@ -685,7 +710,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
         status: bonus?.status || "pending",
         eligible: Boolean(bonus?.eligible),
         first_deposit_locked: Boolean(bonus?.first_deposit_locked),
-        reason: bonus?.reason || "En attente du premier depot confirme.",
+        reason: bonus?.reason || "En attente du premier depot recu confirme.",
         updated_at: nowIso(),
         created_at: bonus?.created_at || nowIso(),
       },
@@ -815,6 +840,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
         created_at: nowIso(),
       });
     });
+    lockBonusIfNeeded(recipient.user_id).catch(() => undefined);
     return { ok: true, transaction, balances, notification_ids: { sender: senderNotifId, receiver: recipientNotifId } };
   }
 
@@ -1150,11 +1176,14 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     const userRaw = userSnap.data() || {};
     const txns = await getBonusTransactions(userId);
     const confirmedAt = nowIso();
+    const confirmedDeposit = { ...deposit, txn_id: txnId, status: "completed", confirmed_at: confirmedAt };
+    const txnsForBonus = [...txns.filter((item) => item.txn_id !== txnId), confirmedDeposit];
+    const firstReceivedDeposit = chooseFirstReceivedDeposit(txnsForBonus, userId) || confirmedDeposit;
     const bonusEvaluation = buildBonusEvaluation(
       userId,
       userRaw,
-      txns,
-      { ...deposit, txn_id: txnId, status: "completed", confirmed_at: confirmedAt },
+      txnsForBonus,
+      firstReceivedDeposit,
       userRaw.bonus_country
     );
     let balances: Record<string, number> = {};
@@ -1188,8 +1217,8 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
           event_id: eventId,
           user_id: userId,
           bonus_id: bonusEvaluation.bonus_id,
-          type: bonusEvaluation.eligible ? "first_deposit_eligible" : "first_deposit_refused",
-          txn_id: txnId,
+          type: bonusEvaluation.eligible ? "first_received_deposit_eligible" : "first_received_deposit_refused",
+          txn_id: firstReceivedDeposit.txn_id,
           created_at: nowIso(),
         });
         bonusCreated = true;
@@ -1218,9 +1247,25 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     const snap = await getDoc(ref);
     const user = normalizeUser(snap.data());
     const balances = { ...user.balances };
-    balances[body.currency] = Number(((balances[body.currency] || 0) + Number(body.amount)).toFixed(4));
+    const amount = Number(body.amount);
+    balances[body.currency] = Number(((balances[body.currency] || 0) + amount).toFixed(4));
     await updateDoc(ref, { balances, updated_at: nowIso() });
-    return { ok: true };
+    let bonus = null;
+    if (amount > 0) {
+      const txnId = makeId("txn");
+      await setDoc(doc(db, TXNS, txnId), {
+        txn_id: txnId,
+        type: "admin_credit",
+        user_id: uid,
+        participants: [uid],
+        amount,
+        currency: body.currency,
+        status: "completed",
+        created_at: nowIso(),
+      });
+      bonus = await lockBonusIfNeeded(uid).then((snap) => snap.data()).catch(() => null);
+    }
+    return { ok: true, bonus };
   }
 
   if (pathname.includes("/block") && method === "PATCH") {

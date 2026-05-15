@@ -76,7 +76,7 @@ export const BONUS_COUNTRIES: BonusCountry[] = [
   { code: "MA", name: "Maroc", currency: "MAD", settlement: "7 a 30 jours", compliance: "Validation interne avant bonus ou retrait sensible." },
   { code: "ZA", name: "Afrique du Sud", currency: "ZAR", settlement: "7 a 30 jours", compliance: "Controle KYC et anti-fraude sur moyens de paiement." },
   { code: "KE", name: "Kenya", currency: "KES", settlement: "7 a 30 jours", compliance: "Mobile wallet et historique compte analyses." },
-  { code: "GH", name: "Ghana", currency: "GHS", settlement: "7 a 30 jours", compliance: "Controle du premier depot confirme uniquement." },
+  { code: "GH", name: "Ghana", currency: "GHS", settlement: "7 a 30 jours", compliance: "Controle du premier depot recu confirme uniquement." },
 ];
 
 const XOF_TIERS: BonusTier[] = [
@@ -261,7 +261,7 @@ export function createBonusEvaluation(input: BonusEvaluationInput): BonusEvaluat
       currency: input.currency,
       status: "refused",
       eligible: false,
-      reason: "Premier depot confirme sous le minimum du catalogue bonus.",
+      reason: "Premier depot recu confirme sous le minimum du catalogue bonus.",
       loyalty_status: loyalty,
       trust_score: trustScore,
       probability: 0,
@@ -291,7 +291,7 @@ export function createBonusEvaluation(input: BonusEvaluationInput): BonusEvaluat
     currency: input.currency,
     status: "analysis",
     eligible: true,
-    reason: "Compte eligible: premier depot confirme verrouille et en analyse interne.",
+    reason: "Compte eligible: premier depot recu confirme verrouille et en analyse interne.",
     loyalty_status: loyalty,
     trust_score: trustScore,
     probability: Number(probability.toFixed(4)),

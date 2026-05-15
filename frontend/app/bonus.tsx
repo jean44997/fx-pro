@@ -7,6 +7,12 @@ import Animated, { FadeInRight, FadeInUp } from "react-native-reanimated";
 import { GradientBg, GlassCard, NeoCard, PrimaryButton } from "../src/ui";
 import { Colors, formatMoney } from "../src/theme";
 import { api, useAuth } from "../src/auth";
+import {
+  BONUS_COUNTRIES,
+  getBonusCatalog,
+  getBonusCountry,
+  getMinimumBonusDeposit,
+} from "../src/bonusCatalog";
 
 const STATUS_META: Record<string, { label: string; color: string; icon: any }> = {
   pending: { label: "En attente du premier depot", color: Colors.textSoft, icon: "time-outline" },
@@ -20,7 +26,7 @@ export default function BonusScreen() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [savingCountry, setSavingCountry] = useState<string | null>(null);
 
@@ -36,12 +42,13 @@ export default function BonusScreen() {
         router.replace("/(auth)/login");
         return;
       }
+      setSyncing(true);
       try {
         await load();
       } catch (e: any) {
         Alert.alert("Bonus indisponible", e.message || "Reessayez.");
       } finally {
-        setLoading(false);
+        setSyncing(false);
       }
     })();
   }, [authLoading, load, router, user]);
@@ -67,13 +74,14 @@ export default function BonusScreen() {
     }
   };
 
-  const status = data?.status || {};
+  const displayData = data || buildLocalBonusData(user);
+  const status = displayData?.status || {};
   const meta = STATUS_META[status.status || "pending"] || STATUS_META.pending;
   const progress = useMemo(() => computeProgress(status), [status]);
   const locked = Boolean(status.first_deposit_locked);
-  const country = data?.country;
+  const country = displayData?.country;
 
-  if (loading || authLoading || !user) {
+  if (authLoading || !user) {
     return (
       <GradientBg>
         <SafeAreaView style={styles.center}>
@@ -108,7 +116,7 @@ export default function BonusScreen() {
                   <Ionicons name="gift" size={24} color={Colors.cyan} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.heroKicker}>Programme premier depot</Text>
+                  <Text style={styles.heroKicker}>Programme premier depot recu</Text>
                   <Text style={styles.heroTitle}>{meta.label}</Text>
                 </View>
                 <View style={[styles.statusPill, { borderColor: meta.color }]}>
@@ -128,13 +136,19 @@ export default function BonusScreen() {
 
               {locked ? (
                 <Text style={styles.heroNote}>
-                  Premier depot verrouille: {formatMoney(Number(status.first_deposit_amount || 0), status.first_deposit_currency || country?.currency || "XOF")}.
+                  Premier depot recu verrouille: {formatMoney(Number(status.first_deposit_amount || 0), status.first_deposit_currency || country?.currency || "XOF")}.
                 </Text>
               ) : (
                 <Text style={styles.heroNote}>
-                  Le bonus s'active uniquement apres le premier depot confirme. Minimum actuel: {formatMoney(data?.minimum_deposit || 0, country?.currency || "XOF")}.
+                  Le bonus s'active uniquement apres le premier depot recu et confirme sur votre compte. Minimum actuel: {formatMoney(displayData?.minimum_deposit || 0, country?.currency || "XOF")}.
                 </Text>
               )}
+              {syncing ? (
+                <View style={styles.syncRow}>
+                  <ActivityIndicator size="small" color={Colors.cyan} />
+                  <Text style={styles.syncText}>Synchronisation securisee...</Text>
+                </View>
+              ) : null}
             </NeoCard>
           </Animated.View>
 
@@ -152,7 +166,7 @@ export default function BonusScreen() {
               ) : null}
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }}>
-              {(data?.countries || []).map((item: any) => {
+              {(displayData?.countries || []).map((item: any) => {
                 const active = item.code === country?.code;
                 return (
                   <Pressable
@@ -176,7 +190,7 @@ export default function BonusScreen() {
             <Text style={styles.sectionLabel}>Catalogue bonus</Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catalogRow}>
-            {(data?.catalog || []).map((tier: any, index: number) => {
+            {(displayData?.catalog || []).map((tier: any, index: number) => {
               const selected = status.selected_threshold === tier.threshold;
               return (
                 <Animated.View key={`${tier.threshold}-${tier.bonus}`} entering={FadeInRight.delay(index * 40)}>
@@ -196,7 +210,7 @@ export default function BonusScreen() {
 
           <GlassCard testID="bonus-rules-card">
             <Text style={styles.section}>Regles d'eligibilite</Text>
-            {(data?.rules || []).map((rule: string) => (
+            {(displayData?.rules || []).map((rule: string) => (
               <View key={rule} style={styles.ruleRow}>
                 <Ionicons name="checkmark-circle" size={15} color={Colors.green} />
                 <Text style={styles.ruleText}>{rule}</Text>
@@ -221,10 +235,10 @@ export default function BonusScreen() {
 
           <GlassCard testID="bonus-history-card">
             <Text style={styles.section}>Historique bonus</Text>
-            {(data?.history || []).length ? (
-              data.history.map((item: any, index: number) => <Timeline key={`${item.label}-${index}`} item={item} last={index === data.history.length - 1} />)
+            {(displayData?.history || []).length ? (
+              displayData.history.map((item: any, index: number) => <Timeline key={`${item.label}-${index}`} item={item} last={index === displayData.history.length - 1} />)
             ) : (
-              <Text style={styles.empty}>Aucun premier depot confirme pour le moment.</Text>
+              <Text style={styles.empty}>Aucun premier depot recu confirme pour le moment.</Text>
             )}
           </GlassCard>
 
@@ -232,9 +246,9 @@ export default function BonusScreen() {
             <View style={{ paddingHorizontal: 16, marginTop: 4 }}>
               <PrimaryButton
                 testID="bonus-go-deposit"
-                title="Faire mon premier depot"
-                icon={<Ionicons name="add-circle" size={18} color="#000" />}
-                onPress={() => router.push({ pathname: "/deposit", params: { currency: country?.currency || "XOF" } })}
+                title="Recevoir mon premier depot"
+                icon={<Ionicons name="qr-code" size={18} color="#000" />}
+                onPress={() => router.push("/receive-qr")}
               />
             </View>
           ) : null}
@@ -242,6 +256,36 @@ export default function BonusScreen() {
       </SafeAreaView>
     </GradientBg>
   );
+}
+
+function buildLocalBonusData(user: any) {
+  const country = getBonusCountry(user?.bonus_country || "CI");
+  const catalog = getBonusCatalog(country.code, country.currency);
+  return {
+    countries: BONUS_COUNTRIES,
+    country,
+    catalog,
+    minimum_deposit: getMinimumBonusDeposit(country.code, country.currency),
+    status: {
+      bonus_id: user?.user_id ? `bonus_${user.user_id}` : "bonus_local",
+      user_id: user?.user_id,
+      country: country.code,
+      currency: country.currency,
+      status: "pending",
+      eligible: false,
+      reason: "En attente du premier depot recu confirme.",
+      first_deposit_locked: false,
+      risk_flags: [],
+    },
+    history: [],
+    rules: [
+      "Uniquement le premier depot recu et confirme est analyse.",
+      "Les demandes en attente, annulees, refusees ou les tentatives ne comptent pas.",
+      "Une fois le premier depot recu verrouille, il ne peut plus etre remplace.",
+      "Le bonus est analyse entre 7 et 30 jours selon le statut et le score de confiance.",
+      "Un controle anti-abus peut refuser le bonus meme si le seuil financier est atteint.",
+    ],
+  };
 }
 
 function computeProgress(status: any) {
@@ -308,6 +352,8 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 10, fontWeight: "900" },
   progressTrack: { height: 8, borderRadius: 999, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.09)", marginTop: 18 },
   progressFill: { height: 8, borderRadius: 999 },
+  syncRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12 },
+  syncText: { color: Colors.cyan, fontSize: 12, fontWeight: "800" },
   heroStats: { flexDirection: "row", gap: 8, marginTop: 14 },
   stat: { flex: 1, borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 8, backgroundColor: "rgba(255,255,255,0.04)" },
   statLabel: { color: Colors.textSoft, fontSize: 10, textTransform: "uppercase" },
