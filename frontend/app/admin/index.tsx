@@ -46,6 +46,16 @@ export default function AdminDashboard() {
     }
   };
 
+  const confirmDeposit = async (txnId: string) => {
+    try {
+      await api.post(`/admin/transactions/${txnId}/confirm-deposit`, {});
+      Alert.alert("Depot confirme", "Solde credite et analyse bonus declenchee.");
+      await load();
+    } catch (e: any) {
+      Alert.alert("Erreur", e.message);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await load();
@@ -139,9 +149,18 @@ export default function AdminDashboard() {
             <GlassCard>
               <Text style={styles.sectionLabel}>Activité récente</Text>
               {stats.recent_transactions.map((t: any) => (
-                <View key={t.txn_id} style={{ flexDirection: "row", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" }}>
-                  <Text style={{ color: "#fff", flex: 1, fontSize: 12 }} numberOfLines={1}>{t.type} · {t.txn_id.slice(-8)}</Text>
-                  <Text style={{ color: Colors.cyan, fontSize: 12 }}>{t.amount ? formatMoney(t.amount, t.currency || t.from_currency || "EUR") : ""}</Text>
+                <View key={t.txn_id} style={styles.txnRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }} numberOfLines={1}>{t.type} - {t.txn_id.slice(-8)}</Text>
+                    <Text style={{ color: Colors.textSoft, fontSize: 10, marginTop: 2 }}>{t.status || "completed"}</Text>
+                  </View>
+                  <Text style={{ color: Colors.cyan, fontSize: 12, fontWeight: "800" }}>{t.amount ? formatMoney(t.amount, t.currency || t.from_currency || "EUR") : ""}</Text>
+                  {t.type === "deposit" && t.status === "pending" ? (
+                    <Pressable testID={`confirm-deposit-${t.txn_id}`} onPress={() => confirmDeposit(t.txn_id)} style={styles.confirmBtn}>
+                      <Ionicons name="checkmark" size={13} color="#000" />
+                      <Text style={styles.confirmText}>Valider</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               ))}
             </GlassCard>
@@ -178,4 +197,7 @@ const styles = StyleSheet.create({
   search: { flex: 1, color: "#fff", fontSize: 14 },
   userRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
   avatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: Colors.cyan, backgroundColor: "rgba(0,255,255,0.08)" },
+  txnRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+  confirmBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 6, borderRadius: 999, backgroundColor: Colors.green },
+  confirmText: { color: "#000", fontWeight: "900", fontSize: 10 },
 });

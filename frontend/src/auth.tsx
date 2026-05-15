@@ -26,6 +26,10 @@ export type User = {
   picture?: string | null;
   auth_provider?: string;
   favorite_pairs?: [string, string][];
+  bonus_country?: string;
+  kyc_level?: string;
+  trust_score?: number;
+  login_count?: number;
 };
 
 let _token: string | null = null;

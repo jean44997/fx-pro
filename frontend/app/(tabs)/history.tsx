@@ -13,7 +13,7 @@ export default function History() {
   const { user } = useAuth();
   const [items, setItems] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<"all" | "transfer" | "convert" | "cash" | "vault" | "admin">("all");
+  const [filter, setFilter] = useState<"all" | "transfer" | "convert" | "cash" | "vault" | "bonus" | "admin">("all");
 
   const load = useCallback(async () => {
     try {
@@ -39,6 +39,7 @@ export default function History() {
     if (filter === "admin") return t.type === "admin_credit" || t.type === "admin_debit";
     if (filter === "cash") return t.type === "deposit" || t.type === "withdraw";
     if (filter === "vault") return t.type === "vault_lock" || t.type === "vault_withdraw";
+    if (filter === "bonus") return t.type === "bonus_credit";
     return t.type === filter;
   });
 
@@ -50,10 +51,10 @@ export default function History() {
           <Text style={{ color: Colors.textSoft, marginTop: 4 }}>{items.length} transactions</Text>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 8 }}>
-          {(["all", "transfer", "convert", "cash", "vault", "admin"] as const).map((f) => (
+          {(["all", "transfer", "convert", "cash", "vault", "bonus", "admin"] as const).map((f) => (
             <Pressable key={f} testID={`filter-${f}`} onPress={() => setFilter(f)} style={[styles.chip, filter === f && styles.chipActive]}>
               <Text style={[styles.chipText, filter === f && { color: "#000", fontWeight: "900" }]}>
-                {f === "all" ? "Tout" : f === "transfer" ? "Transferts" : f === "convert" ? "Conversions" : f === "cash" ? "Depot/Retrait" : f === "vault" ? "Coffre" : "Admin"}
+                {f === "all" ? "Tout" : f === "transfer" ? "Transferts" : f === "convert" ? "Conversions" : f === "cash" ? "Depot/Retrait" : f === "vault" ? "Coffre" : f === "bonus" ? "Bonus" : "Admin"}
               </Text>
             </Pressable>
           ))}
@@ -117,6 +118,11 @@ function TxnItem({ t, index, userId, onPress }: any) {
     icon = "lock-open";
     color = Colors.green;
     label = "Retrait coffre";
+    amountText = `+${formatMoney(t.amount, t.currency)}`;
+  } else if (t.type === "bonus_credit") {
+    icon = "gift";
+    color = Colors.cyan;
+    label = `Bonus ${t.reference || ""}`.trim();
     amountText = `+${formatMoney(t.amount, t.currency)}`;
   }
 

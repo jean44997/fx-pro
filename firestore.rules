@@ -29,7 +29,8 @@ service cloud.firestore {
     match /fxpro_transactions/{txnId} {
       allow read: if signedIn() && request.auth.uid in resource.data.participants;
       allow create: if signedIn() && request.auth.uid in request.resource.data.participants;
-      allow update, delete: if false;
+      allow update: if isAdmin();
+      allow delete: if false;
     }
 
     match /fxpro_notifications/{notifId} {
@@ -45,6 +46,24 @@ service cloud.firestore {
     match /fxpro_vaults/{vaultId} {
       allow read, update, delete: if signedIn() && resource.data.user_id == request.auth.uid;
       allow create: if signedIn() && request.resource.data.user_id == request.auth.uid;
+    }
+
+    match /fxpro_bonus/{userId} {
+      allow read: if isSelf(userId) || isAdmin();
+      allow create, update: if isSelf(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /fxpro_bonus_events/{eventId} {
+      allow read: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
+      allow create: if signedIn() && (request.resource.data.user_id == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /fxpro_risk_logs/{eventId} {
+      allow read: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
+      allow create: if signedIn() && (request.resource.data.user_id == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
     }
 
     match /fxpro_push_tokens/{userId} {

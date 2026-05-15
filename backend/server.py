@@ -16,6 +16,9 @@ import asyncio
 import bcrypt
 import jwt
 import httpx
+import hashlib
+import math
+from pymongo import ReturnDocument
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -31,6 +34,103 @@ SUPPORTED_CURRENCIES = [
     "AUD", "INR", "BRL", "ZAR", "KES", "GHS", "SEK", "AED",
 ]
 
+BONUS_MIN_WINDOW_DAYS = 7
+BONUS_MAX_WINDOW_DAYS = 30
+DEFAULT_BONUS_COUNTRY = "CI"
+
+BONUS_COUNTRIES = [
+    {"code": "CI", "name": "Cote d'Ivoire", "currency": "XOF", "settlement": "7 a 30 jours", "compliance": "Mobile Money, carte, virement et validation KYC conseillee."},
+    {"code": "SN", "name": "Senegal", "currency": "XOF", "settlement": "7 a 30 jours", "compliance": "Compte personnel requis, paiement trace uniquement."},
+    {"code": "CM", "name": "Cameroun", "currency": "XAF", "settlement": "7 a 30 jours", "compliance": "Mobile Money et virement bancaire sous controle interne."},
+    {"code": "GA", "name": "Gabon", "currency": "XAF", "settlement": "7 a 30 jours", "compliance": "Verification anti-abus avant attribution."},
+    {"code": "FR", "name": "France", "currency": "EUR", "settlement": "7 a 30 jours", "compliance": "SEPA/carte, controle KYC renforce pour gros montants."},
+    {"code": "US", "name": "Etats-Unis", "currency": "USD", "settlement": "7 a 30 jours", "compliance": "Carte ou virement, controle d'identite recommande."},
+    {"code": "GB", "name": "Royaume-Uni", "currency": "GBP", "settlement": "7 a 30 jours", "compliance": "Compte bancaire au nom du titulaire requis."},
+    {"code": "NG", "name": "Nigeria", "currency": "NGN", "settlement": "7 a 30 jours", "compliance": "Verification compte, appareil et historique d'activite."},
+    {"code": "MA", "name": "Maroc", "currency": "MAD", "settlement": "7 a 30 jours", "compliance": "Validation interne avant bonus ou retrait sensible."},
+    {"code": "ZA", "name": "Afrique du Sud", "currency": "ZAR", "settlement": "7 a 30 jours", "compliance": "Controle KYC et anti-fraude sur moyens de paiement."},
+    {"code": "KE", "name": "Kenya", "currency": "KES", "settlement": "7 a 30 jours", "compliance": "Mobile wallet et historique compte analyses."},
+    {"code": "GH", "name": "Ghana", "currency": "GHS", "settlement": "7 a 30 jours", "compliance": "Controle du premier depot confirme uniquement."},
+]
+
+XOF_BONUS_TIERS = [
+    {"threshold": 10000, "bonus": 3000, "label": "Starter", "rarity": "Acces limite", "baseProbability": 0.30},
+    {"threshold": 20000, "bonus": 8000, "label": "Momentum", "rarity": "Priorite basse", "baseProbability": 0.40},
+    {"threshold": 30000, "bonus": 13000, "label": "Prime", "rarity": "Selection active", "baseProbability": 0.50},
+    {"threshold": 50000, "bonus": 22000, "label": "Elite 50K", "rarity": "Traitement renforce", "baseProbability": 0.62},
+    {"threshold": 100000, "bonus": 50000, "label": "Gold 100K", "rarity": "Acces rare", "baseProbability": 0.75},
+    {"threshold": 250000, "bonus": 140000, "label": "VIP 250K", "rarity": "Fenetre prioritaire", "baseProbability": 0.88},
+]
+
+BONUS_CATALOG = {
+    "XOF": XOF_BONUS_TIERS,
+    "XAF": XOF_BONUS_TIERS,
+    "EUR": [
+        {"threshold": 25, "bonus": 8, "label": "Starter", "rarity": "Acces limite", "baseProbability": 0.30},
+        {"threshold": 50, "bonus": 20, "label": "Momentum", "rarity": "Priorite basse", "baseProbability": 0.40},
+        {"threshold": 100, "bonus": 45, "label": "Prime", "rarity": "Selection active", "baseProbability": 0.52},
+        {"threshold": 250, "bonus": 125, "label": "Elite", "rarity": "Traitement renforce", "baseProbability": 0.66},
+        {"threshold": 500, "bonus": 280, "label": "Gold", "rarity": "Acces rare", "baseProbability": 0.78},
+        {"threshold": 1000, "bonus": 620, "label": "VIP", "rarity": "Fenetre prioritaire", "baseProbability": 0.90},
+    ],
+    "USD": [
+        {"threshold": 25, "bonus": 7, "label": "Starter", "rarity": "Acces limite", "baseProbability": 0.30},
+        {"threshold": 50, "bonus": 18, "label": "Momentum", "rarity": "Priorite basse", "baseProbability": 0.40},
+        {"threshold": 100, "bonus": 42, "label": "Prime", "rarity": "Selection active", "baseProbability": 0.52},
+        {"threshold": 250, "bonus": 120, "label": "Elite", "rarity": "Traitement renforce", "baseProbability": 0.66},
+        {"threshold": 500, "bonus": 260, "label": "Gold", "rarity": "Acces rare", "baseProbability": 0.78},
+        {"threshold": 1000, "bonus": 600, "label": "VIP", "rarity": "Fenetre prioritaire", "baseProbability": 0.90},
+    ],
+    "GBP": [
+        {"threshold": 20, "bonus": 6, "label": "Starter", "rarity": "Acces limite", "baseProbability": 0.30},
+        {"threshold": 40, "bonus": 15, "label": "Momentum", "rarity": "Priorite basse", "baseProbability": 0.40},
+        {"threshold": 85, "bonus": 35, "label": "Prime", "rarity": "Selection active", "baseProbability": 0.52},
+        {"threshold": 200, "bonus": 95, "label": "Elite", "rarity": "Traitement renforce", "baseProbability": 0.66},
+        {"threshold": 400, "bonus": 210, "label": "Gold", "rarity": "Acces rare", "baseProbability": 0.78},
+        {"threshold": 850, "bonus": 500, "label": "VIP", "rarity": "Fenetre prioritaire", "baseProbability": 0.90},
+    ],
+    "NGN": [
+        {"threshold": 20000, "bonus": 6000, "label": "Starter", "rarity": "Acces limite", "baseProbability": 0.28},
+        {"threshold": 50000, "bonus": 18000, "label": "Momentum", "rarity": "Priorite basse", "baseProbability": 0.39},
+        {"threshold": 100000, "bonus": 45000, "label": "Prime", "rarity": "Selection active", "baseProbability": 0.51},
+        {"threshold": 250000, "bonus": 130000, "label": "Elite", "rarity": "Traitement renforce", "baseProbability": 0.64},
+        {"threshold": 500000, "bonus": 280000, "label": "Gold", "rarity": "Acces rare", "baseProbability": 0.77},
+        {"threshold": 1000000, "bonus": 650000, "label": "VIP", "rarity": "Fenetre prioritaire", "baseProbability": 0.88},
+    ],
+    "MAD": [
+        {"threshold": 250, "bonus": 75, "label": "Starter", "rarity": "Acces limite", "baseProbability": 0.30},
+        {"threshold": 500, "bonus": 200, "label": "Momentum", "rarity": "Priorite basse", "baseProbability": 0.40},
+        {"threshold": 1000, "bonus": 450, "label": "Prime", "rarity": "Selection active", "baseProbability": 0.52},
+        {"threshold": 2500, "bonus": 1250, "label": "Elite", "rarity": "Traitement renforce", "baseProbability": 0.66},
+        {"threshold": 5000, "bonus": 2800, "label": "Gold", "rarity": "Acces rare", "baseProbability": 0.78},
+        {"threshold": 10000, "bonus": 6200, "label": "VIP", "rarity": "Fenetre prioritaire", "baseProbability": 0.90},
+    ],
+    "ZAR": [
+        {"threshold": 500, "bonus": 150, "label": "Starter", "rarity": "Acces limite", "baseProbability": 0.30},
+        {"threshold": 1000, "bonus": 400, "label": "Momentum", "rarity": "Priorite basse", "baseProbability": 0.40},
+        {"threshold": 2000, "bonus": 900, "label": "Prime", "rarity": "Selection active", "baseProbability": 0.52},
+        {"threshold": 5000, "bonus": 2500, "label": "Elite", "rarity": "Traitement renforce", "baseProbability": 0.66},
+        {"threshold": 10000, "bonus": 5600, "label": "Gold", "rarity": "Acces rare", "baseProbability": 0.78},
+        {"threshold": 20000, "bonus": 12400, "label": "VIP", "rarity": "Fenetre prioritaire", "baseProbability": 0.90},
+    ],
+    "KES": [
+        {"threshold": 3500, "bonus": 1000, "label": "Starter", "rarity": "Acces limite", "baseProbability": 0.30},
+        {"threshold": 7000, "bonus": 2800, "label": "Momentum", "rarity": "Priorite basse", "baseProbability": 0.40},
+        {"threshold": 14000, "bonus": 6200, "label": "Prime", "rarity": "Selection active", "baseProbability": 0.52},
+        {"threshold": 35000, "bonus": 17500, "label": "Elite", "rarity": "Traitement renforce", "baseProbability": 0.66},
+        {"threshold": 70000, "bonus": 39000, "label": "Gold", "rarity": "Acces rare", "baseProbability": 0.78},
+        {"threshold": 140000, "bonus": 86000, "label": "VIP", "rarity": "Fenetre prioritaire", "baseProbability": 0.90},
+    ],
+    "GHS": [
+        {"threshold": 300, "bonus": 90, "label": "Starter", "rarity": "Acces limite", "baseProbability": 0.30},
+        {"threshold": 650, "bonus": 250, "label": "Momentum", "rarity": "Priorite basse", "baseProbability": 0.40},
+        {"threshold": 1300, "bonus": 580, "label": "Prime", "rarity": "Selection active", "baseProbability": 0.52},
+        {"threshold": 3200, "bonus": 1600, "label": "Elite", "rarity": "Traitement renforce", "baseProbability": 0.66},
+        {"threshold": 6500, "bonus": 3600, "label": "Gold", "rarity": "Acces rare", "baseProbability": 0.78},
+        {"threshold": 13000, "bonus": 8000, "label": "VIP", "rarity": "Fenetre prioritaire", "baseProbability": 0.90},
+    ],
+}
+
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 
@@ -44,6 +144,186 @@ logger = logging.getLogger("fxpro")
 # ============ Helpers ============
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def clamp(value: float, min_value: float = 0, max_value: float = 100) -> float:
+    return max(min_value, min(max_value, value))
+
+
+def bonus_country(code: Optional[str] = None, currency: Optional[str] = None) -> dict:
+    if code:
+        for item in BONUS_COUNTRIES:
+            if item["code"] == code:
+                return item
+    if currency:
+        for item in BONUS_COUNTRIES:
+            if item["currency"] == currency:
+                return item
+    return next(item for item in BONUS_COUNTRIES if item["code"] == DEFAULT_BONUS_COUNTRY)
+
+
+def bonus_catalog(country_code: Optional[str] = None, currency: Optional[str] = None) -> List[dict]:
+    country = bonus_country(country_code, currency)
+    return BONUS_CATALOG.get(currency or country["currency"], BONUS_CATALOG["USD"])
+
+
+def select_bonus_tier(amount: float, country_code: Optional[str], currency: str) -> Optional[dict]:
+    tiers = bonus_catalog(country_code, currency)
+    eligible = [tier for tier in tiers if amount >= tier["threshold"]]
+    return eligible[-1] if eligible else None
+
+
+def stable_random(seed: str) -> float:
+    digest = hashlib.sha256(seed.encode()).hexdigest()
+    return int(digest[:10], 16) % 1000000 / 1000000
+
+
+def compute_trust_score(user: dict, txns: List[dict], risk_flags: List[str]) -> int:
+    created_at = user.get("created_at") or now_utc()
+    if isinstance(created_at, str):
+        created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    age_days = max(0, (now_utc() - created_at).days)
+    login_count = float(user.get("login_count", 1) or 1)
+    volume = sum(abs(float(t.get("amount") or t.get("received") or 0)) for t in txns if t.get("status") in ["completed", "credited"])
+    volume_score = clamp(math.log10(max(1, volume)) * 10, 0, 20)
+    kyc = 18 if user.get("kyc_status") == "verified" else 8 if user.get("kyc_status") == "review" else 0
+    penalty = min(32, len(risk_flags) * 8)
+    score = 24 + clamp(age_days, 0, 365) / 10 + clamp(login_count, 0, 80) / 6 + clamp(len(txns), 0, 80) / 5 + volume_score + kyc - penalty
+    return int(round(clamp(score)))
+
+
+def loyalty_status(score: int, volume: float) -> str:
+    if score >= 86 and volume >= 100000:
+        return "VIP"
+    if score >= 78:
+        return "Platinum"
+    if score >= 66:
+        return "Gold"
+    if score >= 52:
+        return "Silver"
+    return "Standard"
+
+
+def payout_window_days(seed: str, status: str) -> int:
+    ranges = {
+        "Standard": (21, 30),
+        "Silver": (16, 26),
+        "Gold": (12, 22),
+        "Platinum": (9, 18),
+        "VIP": (7, 14),
+    }
+    min_days, max_days = ranges.get(status, (21, 30))
+    roll = stable_random(seed + ":payout-window")
+    value = int(min_days + roll * (max_days - min_days + 1))
+    return max(BONUS_MIN_WINDOW_DAYS, min(BONUS_MAX_WINDOW_DAYS, value))
+
+
+def build_bonus_risk_flags(user: dict, txns: List[dict]) -> List[str]:
+    flags = []
+    pending_deposits = len([t for t in txns if t.get("type") == "deposit" and t.get("status") == "pending"])
+    refused_deposits = len([t for t in txns if t.get("type") == "deposit" and t.get("status") in ["failed", "cancelled", "refused"]])
+    micro_deposits = len([t for t in txns if t.get("type") == "deposit" and 0 < float(t.get("amount", 0)) < 1000])
+    withdrawals = len([t for t in txns if t.get("type") == "withdraw"])
+    if pending_deposits >= 4:
+        flags.append("pending_deposit_spam")
+    if refused_deposits >= 2:
+        flags.append("refused_deposit_pattern")
+    if micro_deposits >= 3:
+        flags.append("micro_deposit_testing")
+    if withdrawals >= 5 and len(txns) < 12:
+        flags.append("fast_withdrawal_pattern")
+    if user.get("kyc_status") != "verified":
+        flags.append("kyc_not_verified")
+    if user.get("is_blocked"):
+        flags.append("blocked_account")
+    return flags
+
+
+def build_bonus_evaluation(user: dict, txns: List[dict], deposit: dict, country_code: Optional[str] = None) -> dict:
+    amount = float(deposit.get("amount") or 0)
+    currency = deposit.get("currency")
+    country = bonus_country(country_code or user.get("bonus_country"), currency)
+    tier = select_bonus_tier(amount, country["code"], currency)
+    risk_flags = build_bonus_risk_flags(user, txns)
+    volume = sum(abs(float(t.get("amount") or t.get("received") or 0)) for t in txns if t.get("status") in ["completed", "credited"])
+    trust = compute_trust_score(user, txns, risk_flags)
+    status = loyalty_status(trust, volume)
+    seed = f"{user['user_id']}:{deposit['txn_id']}:{amount}:{currency}"
+    approval_roll = round(stable_random(seed + ":approval"), 4)
+    confirmed_at = deposit.get("confirmed_at") or deposit.get("created_at") or now_utc()
+    if isinstance(confirmed_at, str):
+        confirmed_at = datetime.fromisoformat(confirmed_at.replace("Z", "+00:00"))
+    if confirmed_at.tzinfo is None:
+        confirmed_at = confirmed_at.replace(tzinfo=timezone.utc)
+    base = {
+        "bonus_id": f"bonus_{user['user_id']}",
+        "user_id": user["user_id"],
+        "country": country["code"],
+        "currency": currency,
+        "loyalty_status": status,
+        "trust_score": trust,
+        "approval_roll": approval_roll,
+        "first_deposit_locked": True,
+        "first_deposit_txn_id": deposit["txn_id"],
+        "first_deposit_amount": amount,
+        "first_deposit_currency": currency,
+        "first_deposit_confirmed_at": confirmed_at,
+        "risk_flags": risk_flags,
+        "created_at": now_utc(),
+        "updated_at": now_utc(),
+    }
+    if not tier:
+        base.update({
+            "status": "refused",
+            "eligible": False,
+            "reason": "Premier depot confirme sous le minimum du catalogue bonus.",
+            "probability": 0,
+            "will_approve": False,
+        })
+        return base
+    status_boost = {"Standard": 0, "Silver": 0.05, "Gold": 0.10, "Platinum": 0.15, "VIP": 0.20}.get(status, 0)
+    probability = round(clamp(tier["baseProbability"] + trust / 1000 + status_boost, 0.08, 0.96), 4)
+    days = payout_window_days(seed, status)
+    credit_at = confirmed_at + timedelta(days=days)
+    review_at = confirmed_at + timedelta(days=max(BONUS_MIN_WINDOW_DAYS, days - 1))
+    base.update({
+        "status": "analysis",
+        "eligible": True,
+        "reason": "Compte eligible: premier depot confirme verrouille et en analyse interne.",
+        "probability": probability,
+        "will_approve": approval_roll <= probability and len(risk_flags) < 3,
+        "selected_threshold": tier["threshold"],
+        "bonus_amount": tier["bonus"],
+        "payout_window_days": days,
+        "review_at": review_at,
+        "estimated_credit_at": credit_at,
+    })
+    return base
+
+
+def next_bonus_status(current: Optional[dict]) -> Optional[str]:
+    if not current or current.get("status") in ["credited", "refused"]:
+        return current.get("status") if current else None
+    now = now_utc()
+    review_at = current.get("review_at")
+    credit_at = current.get("estimated_credit_at")
+    if isinstance(review_at, str):
+        review_at = datetime.fromisoformat(review_at.replace("Z", "+00:00"))
+    if isinstance(credit_at, str):
+        credit_at = datetime.fromisoformat(credit_at.replace("Z", "+00:00"))
+    if review_at and review_at.tzinfo is None:
+        review_at = review_at.replace(tzinfo=timezone.utc)
+    if credit_at and credit_at.tzinfo is None:
+        credit_at = credit_at.replace(tzinfo=timezone.utc)
+    if current.get("status") == "analysis" and review_at and now >= review_at:
+        return "approved" if current.get("will_approve") else "refused"
+    if current.get("status") == "approved" and credit_at and now >= credit_at:
+        return "credited"
+    if current.get("status") == "analysis" and credit_at and now >= credit_at:
+        return "credited" if current.get("will_approve") else "refused"
+    return current.get("status")
 
 
 def hash_password(pw: str) -> str:
@@ -232,6 +512,10 @@ class CashOperationIn(BaseModel):
     note: Optional[str] = None
 
 
+class BonusCountryIn(BaseModel):
+    country: str
+
+
 class UserSearchIn(BaseModel):
     query: str
 
@@ -260,6 +544,9 @@ async def register(data: RegisterIn):
         "auth_provider": "jwt",
         "push_token": None,
         "favorite_pairs": [["EUR", "XOF"], ["EUR", "USD"]],
+        "bonus_country": DEFAULT_BONUS_COUNTRY,
+        "trust_score": 24,
+        "login_count": 1,
         "created_at": now_utc(),
     }
     await db.users.insert_one(doc)
@@ -278,6 +565,9 @@ async def login(data: LoginIn):
     if user.get("is_blocked"):
         raise HTTPException(status_code=403, detail="Account blocked")
     token = make_jwt(user["user_id"], user.get("role", "user"))
+    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"login_count": 1}, "$set": {"last_login_at": now_utc()}})
+    user["login_count"] = int(user.get("login_count", 0)) + 1
+    user["last_login_at"] = now_utc()
     user.pop("password_hash", None)
     return {"token": token, "user": user}
 
@@ -319,10 +609,14 @@ async def google_session(data: GoogleSessionIn):
             "auth_provider": "google",
             "push_token": None,
             "favorite_pairs": [["EUR", "XOF"], ["EUR", "USD"]],
+            "bonus_country": DEFAULT_BONUS_COUNTRY,
+            "trust_score": 24,
+            "login_count": 1,
             "created_at": now_utc(),
         })
 
     # Store session
+    await db.users.update_one({"user_id": user_id}, {"$inc": {"login_count": 1}, "$set": {"last_login_at": now_utc()}})
     await db.user_sessions.insert_one({
         "user_id": user_id,
         "session_token": info["session_token"],
@@ -444,6 +738,244 @@ async def rates_history(pair: str = "EUR_XOF"):
         })
     history.append({"t": now_utc().isoformat(), "v": round(current, 6)})
     return {"pair": pair, "current": current, "points": history}
+
+
+# ============ Bonus program ============
+def bonus_history(doc: Optional[dict]) -> List[dict]:
+    if not doc or not doc.get("first_deposit_locked"):
+        return []
+    items = [{
+        "label": "Premier depot verrouille",
+        "status": "done",
+        "date": doc.get("first_deposit_confirmed_at"),
+        "body": f"{doc.get('first_deposit_amount')} {doc.get('first_deposit_currency')}",
+    }]
+    if doc.get("status") in ["analysis", "approved", "credited"]:
+        items.append({"label": "Analyse interne", "status": "active" if doc.get("status") == "analysis" else "done", "date": doc.get("review_at"), "body": doc.get("reason")})
+    if doc.get("status") in ["approved", "credited"]:
+        items.append({"label": "Bonus approuve", "status": "active" if doc.get("status") == "approved" else "done", "date": doc.get("reviewed_at") or doc.get("review_at"), "body": f"{doc.get('bonus_amount', 0)} {doc.get('currency')}"})
+    if doc.get("status") == "credited":
+        items.append({"label": "Bonus credite", "status": "done", "date": doc.get("credited_at"), "body": f"{doc.get('bonus_amount', 0)} {doc.get('currency')}"})
+    if doc.get("status") == "refused":
+        items.append({"label": "Bonus refuse", "status": "blocked", "date": doc.get("reviewed_at") or doc.get("updated_at"), "body": doc.get("reason")})
+    return items
+
+
+async def user_transactions(user_id: str) -> List[dict]:
+    return await db.transactions.find({
+        "$or": [
+            {"user_id": user_id},
+            {"sender_id": user_id},
+            {"receiver_id": user_id},
+            {"participants": user_id},
+        ]
+    }, {"_id": 0}).sort("created_at", -1).limit(500).to_list(500)
+
+
+async def notify_bonus(user_id: str, bonus: dict):
+    notif_id = f"ntf_{uuid.uuid4().hex[:10]}"
+    eligible = bonus.get("eligible") and bonus.get("status") != "refused"
+    title = "Programme bonus active" if eligible else "Bonus non eligible"
+    body = (
+        f"Premier depot valide. Bonus potentiel {bonus.get('bonus_amount', 0)} {bonus.get('currency')}, analyse {bonus.get('payout_window_days', 30)} jours."
+        if eligible else bonus.get("reason", "Le premier depot confirme ne respecte pas les conditions.")
+    )
+    await db.notifications.insert_one({
+        "notif_id": notif_id,
+        "user_id": user_id,
+        "type": "bonus",
+        "bonus_id": bonus.get("bonus_id"),
+        "title": title,
+        "body": body,
+        "read": False,
+        "created_at": now_utc(),
+    })
+    await send_push_to_user(user_id, title, body, type_="bonus", notif_id=notif_id)
+
+
+async def lock_bonus_if_needed(user: dict):
+    user_id = user["user_id"]
+    current = await db.bonus_program.find_one({"user_id": user_id}, {"_id": 0})
+    if current and current.get("first_deposit_locked"):
+        return current
+
+    txns = await user_transactions(user_id)
+    first_deposit = await db.transactions.find_one(
+        {"user_id": user_id, "type": "deposit", "status": "completed"},
+        {"_id": 0},
+        sort=[("created_at", 1)],
+    )
+    if not first_deposit:
+        country = bonus_country(user.get("bonus_country"))
+        pending = {
+            "bonus_id": f"bonus_{user_id}",
+            "user_id": user_id,
+            "country": country["code"],
+            "currency": country["currency"],
+            "status": "pending",
+            "eligible": False,
+            "reason": "En attente du premier depot confirme.",
+            "first_deposit_locked": False,
+            "risk_flags": build_bonus_risk_flags(user, txns),
+            "created_at": current.get("created_at") if current else now_utc(),
+            "updated_at": now_utc(),
+        }
+        await db.bonus_program.update_one({"user_id": user_id}, {"$set": pending}, upsert=True)
+        return pending
+
+    evaluation = build_bonus_evaluation(user, txns, first_deposit, user.get("bonus_country"))
+    updated = await db.bonus_program.find_one_and_update(
+        {
+            "user_id": user_id,
+            "$or": [
+                {"first_deposit_locked": {"$exists": False}},
+                {"first_deposit_locked": False},
+            ],
+        },
+        {"$set": evaluation, "$setOnInsert": {"bonus_id": evaluation["bonus_id"], "user_id": user_id}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+        projection={"_id": 0},
+    )
+    await db.bonus_events.insert_one({
+        "event_id": f"bne_{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "bonus_id": evaluation["bonus_id"],
+        "type": "first_deposit_eligible" if evaluation.get("eligible") else "first_deposit_refused",
+        "txn_id": first_deposit["txn_id"],
+        "created_at": now_utc(),
+    })
+    await db.risk_logs.insert_one({
+        "event_id": f"rsk_{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "type": "bonus_first_deposit_scan",
+        "flags": evaluation.get("risk_flags", []),
+        "trust_score": evaluation.get("trust_score", 0),
+        "created_at": now_utc(),
+    })
+    await notify_bonus(user_id, evaluation)
+    return updated
+
+
+async def advance_bonus_if_needed(user_id: str):
+    current = await db.bonus_program.find_one({"user_id": user_id}, {"_id": 0})
+    next_status = next_bonus_status(current)
+    if not current or not next_status or next_status == current.get("status"):
+        return current
+
+    patch = {"status": next_status, "updated_at": now_utc()}
+    if next_status in ["approved", "refused"]:
+        patch["reviewed_at"] = now_utc()
+    if next_status == "refused":
+        patch["reason"] = current.get("reason") or "Bonus refuse apres analyse de securite."
+
+    if next_status == "credited" and not current.get("credited_at"):
+        amount = float(current.get("bonus_amount") or 0)
+        currency = current.get("currency")
+        txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+        patch["credited_at"] = now_utc()
+        patch["bonus_txn_id"] = txn_id
+        await db.users.update_one({"user_id": user_id}, {"$inc": {f"balances.{currency}": amount}})
+        txn = {
+            "txn_id": txn_id,
+            "type": "bonus_credit",
+            "user_id": user_id,
+            "participants": [user_id],
+            "amount": amount,
+            "currency": currency,
+            "status": "completed",
+            "bonus_id": current.get("bonus_id"),
+            "reference": f"BON-{txn_id[-8:].upper()}",
+            "created_at": now_utc(),
+        }
+        await db.transactions.insert_one(txn)
+        notif_id = f"ntf_{uuid.uuid4().hex[:10]}"
+        title = "Bonus credite"
+        body = f"+{amount} {currency} credites sur votre portefeuille FX Pro."
+        await db.notifications.insert_one({
+            "notif_id": notif_id,
+            "user_id": user_id,
+            "type": "bonus",
+            "txn_id": txn_id,
+            "bonus_id": current.get("bonus_id"),
+            "title": title,
+            "body": body,
+            "read": False,
+            "created_at": now_utc(),
+        })
+        await send_push_to_user(user_id, title, body, txn_id=txn_id, type_="bonus", notif_id=notif_id)
+    elif next_status in ["approved", "refused"]:
+        title = "Bonus approuve" if next_status == "approved" else "Bonus refuse"
+        body = (
+            f"{current.get('bonus_amount', 0)} {current.get('currency')} reserves. Credit estime: {current.get('estimated_credit_at')}."
+            if next_status == "approved" else patch.get("reason")
+        )
+        notif_id = f"ntf_{uuid.uuid4().hex[:10]}"
+        await db.notifications.insert_one({
+            "notif_id": notif_id,
+            "user_id": user_id,
+            "type": "bonus",
+            "bonus_id": current.get("bonus_id"),
+            "title": title,
+            "body": body,
+            "read": False,
+            "created_at": now_utc(),
+        })
+        await send_push_to_user(user_id, title, body, type_="bonus", notif_id=notif_id)
+
+    await db.bonus_program.update_one({"user_id": user_id}, {"$set": patch})
+    return await db.bonus_program.find_one({"user_id": user_id}, {"_id": 0})
+
+
+@api.get("/bonus")
+async def bonus_state(user: dict = Depends(get_current_user)):
+    bonus = await lock_bonus_if_needed(user)
+    bonus = await advance_bonus_if_needed(user["user_id"]) or bonus
+    country = bonus_country(bonus.get("country") or user.get("bonus_country"), bonus.get("currency"))
+    currency = bonus.get("currency") or country["currency"]
+    catalog = bonus_catalog(country["code"], currency)
+    return {
+        "countries": BONUS_COUNTRIES,
+        "country": country,
+        "catalog": catalog,
+        "minimum_deposit": catalog[0]["threshold"] if catalog else 0,
+        "status": bonus,
+        "history": bonus_history(bonus),
+        "rules": [
+            "Uniquement le premier depot confirme est analyse.",
+            "Les depots en attente, annules, refuses ou les tentatives ne comptent pas.",
+            "Une fois le premier depot verrouille, il ne peut plus etre remplace.",
+            "Le bonus est analyse entre 7 et 30 jours selon le statut et le score de confiance.",
+            "Un controle anti-abus peut refuser le bonus meme si le seuil financier est atteint.",
+        ],
+    }
+
+
+@api.patch("/bonus/country")
+async def bonus_set_country(data: BonusCountryIn, user: dict = Depends(get_current_user)):
+    country = bonus_country(data.country)
+    current = await db.bonus_program.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if current and current.get("first_deposit_locked") and current.get("country") != country["code"]:
+        raise HTTPException(status_code=400, detail="Pays bonus deja verrouille par le premier depot confirme")
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"bonus_country": country["code"], "updated_at": now_utc()}})
+    await db.bonus_program.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "bonus_id": f"bonus_{user['user_id']}",
+            "user_id": user["user_id"],
+            "country": country["code"],
+            "currency": country["currency"],
+            "status": current.get("status") if current else "pending",
+            "eligible": bool(current.get("eligible")) if current else False,
+            "first_deposit_locked": bool(current.get("first_deposit_locked")) if current else False,
+            "reason": current.get("reason") if current else "En attente du premier depot confirme.",
+            "updated_at": now_utc(),
+            "created_at": current.get("created_at") if current else now_utc(),
+        }},
+        upsert=True,
+    )
+    fresh = await find_user_by_id(user["user_id"])
+    return await bonus_state(fresh)
 
 
 # ============ Convert (in-wallet) ============
@@ -774,7 +1306,7 @@ async def toggle_favorite(payload: Dict[str, str], user: dict = Depends(get_curr
 # ============ Profile ============
 @api.patch("/profile")
 async def update_profile(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
-    allowed = {"name", "phone", "picture", "kyc_status"}
+    allowed = {"name", "phone", "picture", "kyc_status", "kyc_level", "kyc_verified_at", "trust_score"}
     upd = {k: v for k, v in payload.items() if k in allowed}
     if upd:
         await db.users.update_one({"user_id": user["user_id"]}, {"$set": upd})
@@ -949,6 +1481,62 @@ async def vault_withdraw(vault_id: str, user: dict = Depends(get_current_user)):
 
 
 # ============ Admin ============
+@api.post("/admin/transactions/{txn_id}/confirm-deposit")
+async def admin_confirm_deposit(txn_id: str, _: dict = Depends(require_admin)):
+    deposit = await db.transactions.find_one({"txn_id": txn_id}, {"_id": 0})
+    if not deposit:
+        raise HTTPException(status_code=404, detail="Depot introuvable")
+    if deposit.get("type") != "deposit":
+        raise HTTPException(status_code=400, detail="Seuls les depots peuvent etre confirmes")
+    if deposit.get("status") == "completed":
+        return {"ok": True, "transaction": deposit}
+    if deposit.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="Depot non confirmable")
+
+    user_id = deposit["user_id"]
+    target = await find_user_full(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    balances = target.get("balances", {})
+    balances[deposit["currency"]] = round(balances.get(deposit["currency"], 0) + float(deposit["amount"]), 4)
+    confirmed_at = now_utc()
+    await db.users.update_one({"user_id": user_id}, {"$set": {"balances": balances, "updated_at": confirmed_at}})
+    await db.transactions.update_one({"txn_id": txn_id}, {"$set": {"status": "completed", "confirmed_at": confirmed_at, "updated_at": confirmed_at}})
+    notif_id = f"ntf_{uuid.uuid4().hex[:10]}"
+    title = "Depot confirme"
+    body = f"{deposit['amount']} {deposit['currency']} credites. Reference {deposit.get('reference') or txn_id}."
+    await db.notifications.insert_one({
+        "notif_id": notif_id,
+        "user_id": user_id,
+        "type": "deposit",
+        "txn_id": txn_id,
+        "title": title,
+        "body": body,
+        "read": False,
+        "created_at": now_utc(),
+    })
+    await send_push_to_user(user_id, title, body, txn_id=txn_id, type_="deposit", notif_id=notif_id)
+
+    current_bonus = await db.bonus_program.find_one({"user_id": user_id}, {"_id": 0})
+    bonus = None
+    if not current_bonus or not current_bonus.get("first_deposit_locked"):
+        txns = await user_transactions(user_id)
+        confirmed_deposit = {**deposit, "status": "completed", "confirmed_at": confirmed_at}
+        bonus = build_bonus_evaluation(target, txns, confirmed_deposit, target.get("bonus_country"))
+        await db.bonus_program.update_one({"user_id": user_id}, {"$set": bonus}, upsert=True)
+        await db.bonus_events.insert_one({
+            "event_id": f"bne_{uuid.uuid4().hex[:10]}",
+            "user_id": user_id,
+            "bonus_id": bonus["bonus_id"],
+            "type": "first_deposit_eligible" if bonus.get("eligible") else "first_deposit_refused",
+            "txn_id": txn_id,
+            "created_at": now_utc(),
+        })
+        await notify_bonus(user_id, bonus)
+
+    return {"ok": True, "balances": balances, "bonus": bonus}
+
+
 @api.get("/admin/stats")
 async def admin_stats(_: dict = Depends(require_admin)):
     users_count = await db.users.count_documents({})
@@ -1033,6 +1621,9 @@ async def startup_seed():
     await db.users.create_index("user_id", unique=True)
     await db.user_sessions.create_index("session_token", unique=True)
     await db.transactions.create_index("created_at")
+    await db.bonus_program.create_index("user_id", unique=True)
+    await db.bonus_events.create_index("created_at")
+    await db.risk_logs.create_index("created_at")
 
     # Seed admin
     admin = await db.users.find_one({"email": "admin@fxpro.com"})
@@ -1055,6 +1646,9 @@ async def startup_seed():
             "auth_provider": "jwt",
             "push_token": None,
             "favorite_pairs": [["EUR", "XOF"]],
+            "bonus_country": DEFAULT_BONUS_COUNTRY,
+            "trust_score": 90,
+            "login_count": 5,
             "qr_code": "FXPRO:user_admin000001:ADMINQR1",
             "created_at": now_utc(),
         })
@@ -1081,6 +1675,9 @@ async def startup_seed():
             "auth_provider": "jwt",
             "push_token": None,
             "favorite_pairs": [["EUR", "XOF"], ["EUR", "USD"]],
+            "bonus_country": DEFAULT_BONUS_COUNTRY,
+            "trust_score": 72,
+            "login_count": 3,
             "qr_code": "FXPRO:user_demo00000001:DEMOQR99",
             "created_at": now_utc(),
         })

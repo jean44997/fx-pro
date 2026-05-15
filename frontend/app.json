@@ -8,6 +8,9 @@
     "scheme": "fxpro",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
+    "androidStatusBar": {
+      "backgroundColor": "#000000"
+    },
     "ios": {
       "bundleIdentifier": "com.fxpro2026.app",
       "buildNumber": "1",
@@ -29,7 +32,7 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000"
+        "backgroundColor": "#000000"
       },
       "permissions": [
         "CAMERA",
@@ -47,7 +50,7 @@
     },
     "web": {
       "bundler": "metro",
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png",
       "name": "FX Pro 2026",
       "shortName": "FX Pro",
@@ -64,7 +67,7 @@
           "image": "./assets/images/splash-image.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#000"
+          "backgroundColor": "#000000"
         }
       ],
       [

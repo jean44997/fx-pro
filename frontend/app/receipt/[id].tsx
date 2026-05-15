@@ -149,6 +149,13 @@ export default function Receipt() {
               {(t.type === "admin_credit" || t.type === "admin_debit") && (
                 <Row label="Montant" value={`${formatMoney(t.amount, t.currency)}`} highlight />
               )}
+              {t.type === "bonus_credit" && (
+                <>
+                  <Row label="Montant" value={`${formatMoney(t.amount, t.currency)}`} highlight />
+                  <Row label="Reference" value={t.reference || t.bonus_id || t.txn_id} />
+                  {t.bonus_id ? <Row label="Bonus" value={t.bonus_id} /> : null}
+                </>
+              )}
               <Row label="Statut" value={statusLabel(t.status)} />
               <Row label="Date" value={new Date(t.created_at).toLocaleString("fr-FR")} />
             </NeoCard>
@@ -175,6 +182,7 @@ function typeLabel(t: string) {
     vault_withdraw: "Retrait coffre",
     admin_credit: "Crédit admin",
     admin_debit: "Débit admin",
+    bonus_credit: "Bonus credite",
   } as any)[t] || t;
 }
 
@@ -220,6 +228,9 @@ function buildReceiptText(t: any) {
     lines.push(`Montant: ${formatMoney(t.amount, t.currency)}`);
     if (t.vault_id) lines.push(`Coffre: ${t.vault_id}`);
     if (t.penalty) lines.push(`Penalite: ${formatMoney(t.penalty, t.currency)}`);
+  } else if (t.type === "bonus_credit") {
+    lines.push(`Montant: ${formatMoney(t.amount, t.currency)}`);
+    lines.push(`Bonus: ${t.bonus_id || ""}`);
   }
   lines.push("============================");
   return lines.join("\n");

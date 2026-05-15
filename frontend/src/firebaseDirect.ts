@@ -30,6 +30,15 @@ import {
 import { deleteObject, getDownloadURL, getStorage, ref as storageRef, uploadString } from "firebase/storage";
 import { firebaseConfig } from "./firebaseConfig";
 import type { User } from "./auth";
+import {
+  BONUS_COUNTRIES,
+  createBonusEvaluation,
+  getBonusCatalog,
+  getBonusCountry,
+  getMinimumBonusDeposit,
+  nextBonusStatus,
+  type BonusEvaluation,
+} from "./bonusCatalog";
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -41,6 +50,9 @@ const TXNS = "fxpro_transactions";
 const NOTIFS = "fxpro_notifications";
 const ALERTS = "fxpro_alerts";
 const VAULTS = "fxpro_vaults";
+const BONUS = "fxpro_bonus";
+const BONUS_EVENTS = "fxpro_bonus_events";
+const RISK_LOGS = "fxpro_risk_logs";
 const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_XOF", "EUR_USD"];
 const MAX_INLINE_PROFILE_PICTURE_CHARS = 700000;
 
@@ -165,6 +177,10 @@ function normalizeUser(data: any = {}): User {
     picture: data.picture || null,
     auth_provider: data.auth_provider || "firebase",
     favorite_pairs: normalizeFavoritePairs(data.favorite_pairs),
+    bonus_country: data.bonus_country || "CI",
+    kyc_level: data.kyc_level || (data.kyc_status === "verified" ? "standard" : "basic"),
+    trust_score: Number(data.trust_score || 0),
+    login_count: Number(data.login_count || 0),
   };
 }
 
@@ -201,6 +217,9 @@ async function ensureUserDoc(firebaseUser: FirebaseUser, extra: Partial<User> = 
       picture: firebaseUser.photoURL || null,
       auth_provider: "firebase",
       favorite_pairs: DEFAULT_FAVORITE_PAIR_KEYS,
+      bonus_country: "CI",
+      trust_score: 24,
+      login_count: 1,
       qr_code: `FXPRO:${firebaseUser.uid}:${makeId("QR").toUpperCase()}`,
       created_at: nowIso(),
       updated_at: nowIso(),
@@ -269,6 +288,244 @@ function historyForPair(pair: string, rate: number) {
 
 function sortByDateDesc(items: any[]) {
   return items.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+}
+
+function sortByDateAsc(items: any[]) {
+  return items.sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+}
+
+function toIso(value: any) {
+  if (!value) return nowIso();
+  if (typeof value === "string") return value;
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  if (value instanceof Date) return value.toISOString();
+  return nowIso();
+}
+
+function supportedBonusCountry(rawCountry?: string, rawCurrency?: string) {
+  if (rawCountry && BONUS_COUNTRIES.some((item) => item.code === rawCountry)) return rawCountry;
+  const byCurrency = BONUS_COUNTRIES.find((item) => item.currency === rawCurrency);
+  return byCurrency?.code || "CI";
+}
+
+function buildBonusRiskFlags(userRaw: any, txns: any[]) {
+  const flags: string[] = [];
+  const pendingDeposits = txns.filter((t) => t.type === "deposit" && t.status === "pending").length;
+  const refusedDeposits = txns.filter((t) => t.type === "deposit" && ["failed", "cancelled", "refused"].includes(t.status)).length;
+  const microDeposits = txns.filter((t) => t.type === "deposit" && Number(t.amount) > 0 && Number(t.amount) < 1000).length;
+  const withdrawals = txns.filter((t) => t.type === "withdraw").length;
+  if (pendingDeposits >= 4) flags.push("pending_deposit_spam");
+  if (refusedDeposits >= 2) flags.push("refused_deposit_pattern");
+  if (microDeposits >= 3) flags.push("micro_deposit_testing");
+  if (withdrawals >= 5 && txns.length < 12) flags.push("fast_withdrawal_pattern");
+  if (userRaw?.kyc_status !== "verified") flags.push("kyc_not_verified");
+  if (userRaw?.is_blocked) flags.push("blocked_account");
+  return flags;
+}
+
+function bonusHistoryFromDoc(bonus: any) {
+  if (!bonus?.first_deposit_locked) return [];
+  const items = [
+    {
+      label: "Premier depot verrouille",
+      status: "done",
+      date: bonus.first_deposit_confirmed_at,
+      body: `${bonus.first_deposit_amount} ${bonus.first_deposit_currency}`,
+    },
+  ];
+  if (bonus.status === "analysis" || bonus.status === "approved" || bonus.status === "credited") {
+    items.push({ label: "Analyse interne", status: bonus.status === "analysis" ? "active" : "done", date: bonus.review_at, body: bonus.reason });
+  }
+  if (bonus.status === "approved" || bonus.status === "credited") {
+    items.push({ label: "Bonus approuve", status: bonus.status === "approved" ? "active" : "done", date: bonus.reviewed_at || bonus.review_at, body: `${bonus.bonus_amount || 0} ${bonus.currency}` });
+  }
+  if (bonus.status === "credited") {
+    items.push({ label: "Bonus credite", status: "done", date: bonus.credited_at, body: `${bonus.bonus_amount || 0} ${bonus.currency}` });
+  }
+  if (bonus.status === "refused") {
+    items.push({ label: "Bonus refuse", status: "blocked", date: bonus.reviewed_at || bonus.updated_at, body: bonus.reason });
+  }
+  return items;
+}
+
+async function getBonusTransactions(userId: string) {
+  const snap = await getDocs(query(collection(db, TXNS), where("participants", "array-contains", userId)));
+  return snap.docs.map((d) => ({ ...d.data(), txn_id: d.data().txn_id || d.id }));
+}
+
+function chooseFirstCompletedDeposit(txns: any[], userId: string) {
+  return sortByDateAsc(
+    txns.filter((t) => t.type === "deposit" && t.user_id === userId && t.status === "completed")
+  )[0];
+}
+
+function buildBonusEvaluation(userId: string, userRaw: any, txns: any[], deposit: any, countryCode?: string): BonusEvaluation {
+  const completed = txns.filter((t) => ["completed", "credited"].includes(t.status));
+  const volume = completed.reduce((sum, t) => sum + Math.abs(Number(t.amount || t.received || 0)), 0);
+  const riskFlags = buildBonusRiskFlags(userRaw, txns);
+  return createBonusEvaluation({
+    userId,
+    depositId: deposit.txn_id,
+    amount: Number(deposit.amount || 0),
+    currency: deposit.currency,
+    countryCode: supportedBonusCountry(countryCode || userRaw?.bonus_country, deposit.currency),
+    createdAt: toIso(deposit.confirmed_at || deposit.created_at),
+    accountAgeDays: userRaw?.created_at ? Math.max(0, Math.floor((Date.now() - new Date(toIso(userRaw.created_at)).getTime()) / 86400000)) : 0,
+    loginCount: Number(userRaw?.login_count || 1),
+    transactionCount: txns.length,
+    transactionVolume: volume,
+    kycStatus: userRaw?.kyc_status,
+    riskFlags,
+  });
+}
+
+async function notifyBonusState(userId: string, bonus: BonusEvaluation | any) {
+  const notifId = makeId("ntf");
+  const eligible = bonus.eligible && bonus.status !== "refused";
+  await setDoc(doc(db, NOTIFS, notifId), {
+    notif_id: notifId,
+    user_id: userId,
+    type: "bonus",
+    bonus_id: bonus.bonus_id,
+    title: eligible ? "Programme bonus active" : "Bonus non eligible",
+    body: eligible
+      ? `Premier depot valide. Bonus potentiel ${bonus.bonus_amount || 0} ${bonus.currency}, analyse ${bonus.payout_window_days || 30} jours.`
+      : bonus.reason || "Le premier depot confirme ne respecte pas les conditions.",
+    read: false,
+    created_at: nowIso(),
+  });
+}
+
+async function lockBonusIfNeeded(userId: string, selectedCountry?: string) {
+  const userRef = doc(db, USERS, userId);
+  const bonusRef = doc(db, BONUS, userId);
+  const userSnap = await getDoc(userRef);
+  const userRaw = userSnap.data() || {};
+  const txns = await getBonusTransactions(userId);
+  const firstDeposit = chooseFirstCompletedDeposit(txns, userId);
+  if (!firstDeposit) {
+    const country = getBonusCountry(supportedBonusCountry(selectedCountry || userRaw.bonus_country));
+    const existing = await getDoc(bonusRef);
+    if (!existing.exists()) {
+      await setDoc(bonusRef, {
+        bonus_id: `bonus_${userId}`,
+        user_id: userId,
+        country: country.code,
+        currency: country.currency,
+        status: "pending",
+        eligible: false,
+        reason: "En attente du premier depot confirme.",
+        first_deposit_locked: false,
+        risk_flags: buildBonusRiskFlags(userRaw, txns),
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      });
+    }
+    return getDoc(bonusRef);
+  }
+
+  const evaluation = buildBonusEvaluation(userId, userRaw, txns, firstDeposit, selectedCountry);
+  let created = false;
+  await runTransaction(db, async (tx) => {
+    const current = await tx.get(bonusRef);
+    const data = current.data();
+    if (data?.first_deposit_locked) return;
+    const payload = { ...evaluation, created_at: data?.created_at || evaluation.created_at, updated_at: nowIso() };
+    tx.set(bonusRef, payload, { merge: true });
+    tx.set(doc(db, BONUS_EVENTS, makeId("bne")), {
+      event_id: makeId("bne"),
+      user_id: userId,
+      bonus_id: evaluation.bonus_id,
+      type: evaluation.eligible ? "first_deposit_eligible" : "first_deposit_refused",
+      txn_id: firstDeposit.txn_id,
+      created_at: nowIso(),
+    });
+    tx.set(doc(db, RISK_LOGS, makeId("rsk")), {
+      user_id: userId,
+      type: "bonus_first_deposit_scan",
+      flags: evaluation.risk_flags,
+      trust_score: evaluation.trust_score,
+      created_at: nowIso(),
+    });
+    created = true;
+  });
+  if (created) await notifyBonusState(userId, evaluation);
+  return getDoc(bonusRef);
+}
+
+async function advanceBonusIfNeeded(userId: string) {
+  const bonusRef = doc(db, BONUS, userId);
+  const snap = await getDoc(bonusRef);
+  const bonus = snap.data();
+  const status = nextBonusStatus(bonus);
+  if (!bonus || !status || status === bonus.status) return snap;
+
+  let creditNotification: any = null;
+  await runTransaction(db, async (tx) => {
+    const fresh = await tx.get(bonusRef);
+    const current = fresh.data();
+    const next = nextBonusStatus(current);
+    if (!current || !next || next === current.status) return;
+    const patch: any = { status: next, updated_at: nowIso() };
+    if (next === "approved") patch.reviewed_at = nowIso();
+    if (next === "refused") {
+      patch.reviewed_at = nowIso();
+      patch.reason = current.reason || "Bonus refuse apres analyse de securite.";
+    }
+    if (next === "credited" && !current.credited_at) {
+      const userRef = doc(db, USERS, userId);
+      const userSnap = await tx.get(userRef);
+      const user = normalizeUser(userSnap.data());
+      const balances = { ...user.balances };
+      const amount = Number(current.bonus_amount || 0);
+      const currency = current.currency;
+      balances[currency] = Number(((balances[currency] || 0) + amount).toFixed(4));
+      const txnId = makeId("txn");
+      const notifId = makeId("ntf");
+      patch.credited_at = nowIso();
+      patch.bonus_txn_id = txnId;
+      tx.update(userRef, { balances, updated_at: nowIso() });
+      tx.set(doc(db, TXNS, txnId), {
+        txn_id: txnId,
+        type: "bonus_credit",
+        user_id: userId,
+        participants: [userId],
+        amount,
+        currency,
+        status: "completed",
+        bonus_id: current.bonus_id,
+        reference: `BON-${txnId.slice(-8).toUpperCase()}`,
+        created_at: nowIso(),
+      });
+      creditNotification = {
+        notif_id: notifId,
+        user_id: userId,
+        type: "bonus",
+        txn_id: txnId,
+        bonus_id: current.bonus_id,
+        title: "Bonus credite",
+        body: `+${amount} ${currency} credites sur votre portefeuille FX Pro.`,
+        read: false,
+        created_at: nowIso(),
+      };
+      tx.set(doc(db, NOTIFS, notifId), creditNotification);
+    }
+    tx.update(bonusRef, patch);
+  });
+  if (!creditNotification && status === "refused") {
+    const notifId = makeId("ntf");
+    await setDoc(doc(db, NOTIFS, notifId), {
+      notif_id: notifId,
+      user_id: userId,
+      type: "bonus",
+      bonus_id: bonus.bonus_id,
+      title: "Bonus refuse",
+      body: bonus.reason || "Le compte ne respecte pas les conditions finales du programme bonus.",
+      read: false,
+      created_at: nowIso(),
+    });
+  }
+  return getDoc(bonusRef);
 }
 
 async function uploadProfilePicture(userId: string, picture?: string | null) {
@@ -381,6 +638,60 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     const rates = (await getRates()).rates;
     const rate = rates[from] && rates[to] ? rates[to] / rates[from] : 1;
     return { points: historyForPair(pair, rate) };
+  }
+
+  if (pathname === "/bonus" && method === "GET") {
+    const firebaseUser = await requireFirebaseUser();
+    const userSnap = await getDoc(doc(db, USERS, firebaseUser.uid));
+    const rawUser = userSnap.data() || {};
+    await lockBonusIfNeeded(firebaseUser.uid, rawUser.bonus_country);
+    const bonusSnap = await advanceBonusIfNeeded(firebaseUser.uid);
+    const bonus = bonusSnap.data() || {};
+    const country = getBonusCountry(supportedBonusCountry(bonus.country || rawUser.bonus_country, bonus.currency));
+    return {
+      countries: BONUS_COUNTRIES,
+      country,
+      catalog: getBonusCatalog(country.code, bonus.currency || country.currency),
+      minimum_deposit: getMinimumBonusDeposit(country.code, bonus.currency || country.currency),
+      status: bonus,
+      history: bonusHistoryFromDoc(bonus),
+      rules: [
+        "Uniquement le premier depot confirme est analyse.",
+        "Les depots en attente, annules, refuses ou les tentatives ne comptent pas.",
+        "Une fois le premier depot verrouille, il ne peut plus etre remplace.",
+        "Le bonus est analyse entre 7 et 30 jours selon le statut et le score de confiance.",
+        "Un controle anti-abus peut refuser le bonus meme si le seuil financier est atteint.",
+      ],
+    };
+  }
+
+  if (pathname === "/bonus/country" && method === "PATCH") {
+    const firebaseUser = await requireFirebaseUser();
+    const country = getBonusCountry(body.country);
+    const bonusRef = doc(db, BONUS, firebaseUser.uid);
+    const bonusSnap = await getDoc(bonusRef);
+    const bonus = bonusSnap.data();
+    if (bonus?.first_deposit_locked && bonus.country !== country.code) {
+      throw new Error("Pays bonus deja verrouille par le premier depot confirme.");
+    }
+    await updateDoc(doc(db, USERS, firebaseUser.uid), { bonus_country: country.code, updated_at: nowIso() });
+    await setDoc(
+      bonusRef,
+      {
+        bonus_id: `bonus_${firebaseUser.uid}`,
+        user_id: firebaseUser.uid,
+        country: country.code,
+        currency: country.currency,
+        status: bonus?.status || "pending",
+        eligible: Boolean(bonus?.eligible),
+        first_deposit_locked: Boolean(bonus?.first_deposit_locked),
+        reason: bonus?.reason || "En attente du premier depot confirme.",
+        updated_at: nowIso(),
+        created_at: bonus?.created_at || nowIso(),
+      },
+      { merge: true }
+    );
+    return firebaseDirectRequest("/bonus", { method: "GET" });
   }
 
   if (pathname === "/convert" && method === "POST") {
@@ -818,6 +1129,74 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       });
     });
     return { ok: true, amount_returned: amountReturned, transaction };
+  }
+
+  if (pathname.startsWith("/admin/transactions/") && pathname.endsWith("/confirm-deposit") && method === "POST") {
+    const admin = await currentProfile();
+    if (admin.role !== "admin") throw new Error("Admin uniquement");
+    const txnId = pathname.split("/")[3];
+    const txnRef = doc(db, TXNS, txnId);
+    const txnSnap = await getDoc(txnRef);
+    if (!txnSnap.exists()) throw new Error("Depot introuvable");
+    const deposit = txnSnap.data();
+    if (deposit.type !== "deposit") throw new Error("Seuls les depots peuvent etre confirmes");
+    if (deposit.status === "completed") return { ok: true, transaction: deposit };
+    if (deposit.status !== "pending") throw new Error("Depot non confirmable");
+
+    const userId = deposit.user_id;
+    const userRef = doc(db, USERS, userId);
+    const bonusRef = doc(db, BONUS, userId);
+    const userSnap = await getDoc(userRef);
+    const userRaw = userSnap.data() || {};
+    const txns = await getBonusTransactions(userId);
+    const confirmedAt = nowIso();
+    const bonusEvaluation = buildBonusEvaluation(
+      userId,
+      userRaw,
+      txns,
+      { ...deposit, txn_id: txnId, status: "completed", confirmed_at: confirmedAt },
+      userRaw.bonus_country
+    );
+    let balances: Record<string, number> = {};
+    let bonusCreated = false;
+    await runTransaction(db, async (tx) => {
+      const freshTxn = await tx.get(txnRef);
+      const freshDeposit = freshTxn.data();
+      if (!freshDeposit || freshDeposit.status !== "pending") throw new Error("Depot deja traite");
+      const freshUser = await tx.get(userRef);
+      const bonusSnap = await tx.get(bonusRef);
+      const normalized = normalizeUser(freshUser.data());
+      balances = { ...normalized.balances };
+      balances[freshDeposit.currency] = Number(((balances[freshDeposit.currency] || 0) + Number(freshDeposit.amount)).toFixed(4));
+      tx.update(userRef, { balances, updated_at: nowIso() });
+      tx.update(txnRef, { status: "completed", confirmed_at: confirmedAt, updated_at: nowIso() });
+      const notifId = makeId("ntf");
+      tx.set(doc(db, NOTIFS, notifId), {
+        notif_id: notifId,
+        user_id: userId,
+        type: "deposit",
+        txn_id: txnId,
+        title: "Depot confirme",
+        body: `${freshDeposit.amount} ${freshDeposit.currency} credites. Reference ${freshDeposit.reference || txnId}.`,
+        read: false,
+        created_at: nowIso(),
+      });
+      if (!bonusSnap.data()?.first_deposit_locked) {
+        tx.set(bonusRef, { ...bonusEvaluation, updated_at: nowIso() }, { merge: true });
+        const eventId = makeId("bne");
+        tx.set(doc(db, BONUS_EVENTS, eventId), {
+          event_id: eventId,
+          user_id: userId,
+          bonus_id: bonusEvaluation.bonus_id,
+          type: bonusEvaluation.eligible ? "first_deposit_eligible" : "first_deposit_refused",
+          txn_id: txnId,
+          created_at: nowIso(),
+        });
+        bonusCreated = true;
+      }
+    });
+    if (bonusCreated) await notifyBonusState(userId, bonusEvaluation);
+    return { ok: true, balances, bonus: bonusEvaluation };
   }
 
   if (pathname === "/admin/stats") {

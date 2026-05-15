@@ -154,6 +154,10 @@ export default function Home() {
                   <Ionicons name="qr-code" size={18} color={Colors.green} />
                   <Text style={styles.quickText}>Recevoir</Text>
                 </Pressable>
+                <Pressable testID="quick-bonus" onPress={() => router.push("/bonus")} style={styles.quickBtn}>
+                  <Ionicons name="gift" size={18} color={Colors.yellow} />
+                  <Text style={styles.quickText}>Bonus</Text>
+                </Pressable>
               </View>
             </NeoCard>
           </Animated.View>
