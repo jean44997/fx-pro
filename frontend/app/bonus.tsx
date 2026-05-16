@@ -9,6 +9,8 @@ import { Colors, formatMoney } from "../src/theme";
 import { api, useAuth } from "../src/auth";
 import {
   BONUS_COUNTRIES,
+  type BonusCountry,
+  type BonusTier,
   getBonusCatalog,
   getBonusCountry,
   getMinimumBonusDeposit,
@@ -27,8 +29,12 @@ type LiveActivity = {
   title: string;
   body: string;
   country: string;
+  currency: string;
   tag: string;
   color: string;
+  amountLabel?: string;
+  meta?: string;
+  confidence?: number;
   real?: boolean;
 };
 
@@ -189,20 +195,32 @@ export default function BonusScreen() {
             </View>
             <Animated.View key={activeActivity.id} entering={FadeInRight.duration(320)} style={styles.liveCard}>
               <View style={[styles.liveIcon, { borderColor: activeActivity.color }]}>
-                <Ionicons name={activeActivity.real ? "shield-checkmark" : "flash"} size={18} color={activeActivity.color} />
+                <Ionicons name={activeActivity.real ? "shield-checkmark" : "pulse"} size={18} color={activeActivity.color} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={styles.liveTitle} numberOfLines={2}>{activeActivity.title}</Text>
-                <Text style={styles.liveBody} numberOfLines={2}>{activeActivity.body}</Text>
+                <Text style={styles.liveBody} numberOfLines={3}>{activeActivity.body}</Text>
                 <View style={styles.liveMetaRow}>
                   <Text style={[styles.liveTag, { color: activeActivity.color }]}>{activeActivity.tag}</Text>
                   <Text style={styles.liveCountry}>{activeActivity.country}</Text>
+                  <Text style={styles.liveCurrency}>{activeActivity.currency}</Text>
                 </View>
+                {activeActivity.amountLabel || activeActivity.meta ? (
+                  <View style={styles.liveSignalRow}>
+                    {activeActivity.amountLabel ? <Text style={styles.liveAmount}>{activeActivity.amountLabel}</Text> : null}
+                    {activeActivity.meta ? <Text style={styles.liveMeta} numberOfLines={1}>{activeActivity.meta}</Text> : null}
+                  </View>
+                ) : null}
+                {typeof activeActivity.confidence === "number" ? (
+                  <View style={styles.liveConfidenceTrack}>
+                    <View style={[styles.liveConfidenceFill, { width: `${activeActivity.confidence}%`, backgroundColor: activeActivity.color }]} />
+                  </View>
+                ) : null}
               </View>
             </Animated.View>
             <View style={styles.liveDots}>
-              {liveActivities.slice(0, 5).map((item, index) => {
-                const active = index === activityIndex % liveActivities.length || (activityIndex % liveActivities.length > 4 && index === 4);
+              {liveActivities.slice(0, 6).map((item, index) => {
+                const active = index === activityIndex % liveActivities.length || (activityIndex % liveActivities.length > 5 && index === 5);
                 return <View key={item.id} style={[styles.liveStep, active && { backgroundColor: activeActivity.color, width: 18 }]} />;
               })}
             </View>
@@ -346,7 +364,8 @@ function buildLocalBonusData(user: any) {
 
 function buildLiveActivities(status: any, history: any[], country: any): LiveActivity[] {
   const countryName = country?.name || "France";
-  const currency = status?.currency || country?.currency || "XOF";
+  const currency = status?.first_deposit_currency || status?.currency || country?.currency || "XOF";
+  const countryLabel = formatCountryCurrency(countryName, currency);
   const realItems: LiveActivity[] = [];
 
   if (status?.status === "credited") {
@@ -354,9 +373,13 @@ function buildLiveActivities(status: any, history: any[], country: any): LiveAct
       id: "real-credited",
       title: "Votre bonus vient d'etre credite",
       body: `${formatMoney(Number(status.bonus_amount || 0), currency)} disponibles dans votre portefeuille FX Pro.`,
-      country: countryName,
+      country: countryLabel,
+      currency,
       tag: "Evenement reel",
       color: Colors.cyan,
+      amountLabel: formatMoney(Number(status.bonus_amount || 0), currency),
+      meta: "Credit confirme et portefeuille synchronise",
+      confidence: 100,
       real: true,
     });
   } else if (status?.status === "approved") {
@@ -364,9 +387,13 @@ function buildLiveActivities(status: any, history: any[], country: any): LiveAct
       id: "real-approved",
       title: "Votre bonus est approuve",
       body: `Credit estime: ${status.estimated_credit_at ? new Date(status.estimated_credit_at).toLocaleDateString("fr-FR") : "en cours"}.`,
-      country: countryName,
+      country: countryLabel,
+      currency,
       tag: "Evenement reel",
       color: Colors.green,
+      amountLabel: status.bonus_amount ? formatMoney(Number(status.bonus_amount), currency) : undefined,
+      meta: "Validation interne terminee",
+      confidence: 88,
       real: true,
     });
   } else if (status?.eligible && status?.first_deposit_locked) {
@@ -374,9 +401,13 @@ function buildLiveActivities(status: any, history: any[], country: any): LiveAct
       id: "real-eligible",
       title: "Votre compte est eligible au bonus",
       body: `Premier depot recu confirme: ${formatMoney(Number(status.first_deposit_amount || 0), status.first_deposit_currency || currency)}.`,
-      country: countryName,
+      country: countryLabel,
+      currency,
       tag: "Evenement reel",
       color: Colors.yellow,
+      amountLabel: status.bonus_amount ? formatMoney(Number(status.bonus_amount), currency) : undefined,
+      meta: "Analyse securisee en cours",
+      confidence: Math.max(35, Math.round((status.probability || 0.35) * 100)),
       real: true,
     });
   } else if (status?.status === "refused") {
@@ -384,9 +415,12 @@ function buildLiveActivities(status: any, history: any[], country: any): LiveAct
       id: "real-refused",
       title: "Analyse bonus terminee",
       body: status.reason || "Le premier depot recu confirme ne respecte pas les conditions.",
-      country: countryName,
+      country: countryLabel,
+      currency,
       tag: "Evenement reel",
       color: Colors.danger,
+      meta: "Decision verrouillee",
+      confidence: 100,
       real: true,
     });
   }
@@ -397,48 +431,134 @@ function buildLiveActivities(status: any, history: any[], country: any): LiveAct
       id: `real-history-${index}`,
       title: item.label,
       body: item.body,
-      country: countryName,
+      country: countryLabel,
+      currency,
       tag: "Compte synchronise",
       color: item.status === "blocked" ? Colors.danger : item.status === "active" ? Colors.yellow : Colors.green,
+      meta: "Historique de votre compte",
+      confidence: item.status === "blocked" ? 100 : 76,
       real: true,
     });
   });
 
-  const generated = Array.from({ length: 72 }, (_, index) => generatedLiveActivity(index));
+  const generated = buildGeneratedLiveActivities(country);
   return [...realItems, ...generated];
 }
 
-function generatedLiveActivity(index: number): LiveActivity {
-  const countries = [
-    "France", "Cote d'Ivoire", "Senegal", "Cameroun", "Maroc", "Ghana", "Nigeria", "Afrique du Sud",
-    "Kenya", "Gabon", "Royaume-Uni", "Etats-Unis", "Canada", "Suisse", "Belgique", "Togo",
-    "Benin", "Mali", "Rwanda", "Emirats arabes unis",
+function buildGeneratedLiveActivities(selectedCountry?: BonusCountry): LiveActivity[] {
+  const selectedCode = selectedCountry?.code;
+  const countryPool = [
+    ...BONUS_COUNTRIES.filter((item) => item.code === selectedCode),
+    ...BONUS_COUNTRIES.filter((item) => item.code !== selectedCode),
   ];
-  const openers = [
-    "Un utilisateur de", "Un compte verifie en", "Une cliente de", "Un membre Silver en", "Un profil Gold de",
-    "Un nouveau compte de", "Un portefeuille actif en", "Un membre VIP de", "Un utilisateur mobile de", "Un compte premium en",
+  const phases = [
+    {
+      tag: "Bonus recu",
+      title: "vient de recevoir un bonus",
+      detail: "credit confirme apres verification interne",
+      color: Colors.cyan,
+      confidenceBoost: 18,
+    },
+    {
+      tag: "Eligible",
+      title: "vient de passer eligible",
+      detail: "premier depot recu confirme et verrouille",
+      color: Colors.green,
+      confidenceBoost: 12,
+    },
+    {
+      tag: "Analyse live",
+      title: "entre en analyse prioritaire",
+      detail: "score de confiance et activite du compte pris en compte",
+      color: Colors.yellow,
+      confidenceBoost: 7,
+    },
+    {
+      tag: "Statut",
+      title: "gagne une priorite de traitement",
+      detail: "statut fidelite ameliore la fenetre de decision",
+      color: Colors.purple,
+      confidenceBoost: 10,
+    },
+    {
+      tag: "Securite",
+      title: "passe un controle anti-abus",
+      detail: "appareil, devise et historique coherents",
+      color: Colors.magenta,
+      confidenceBoost: 5,
+    },
+    {
+      tag: "Selection",
+      title: "apparait dans une fenetre bonus rare",
+      detail: "distribution programmee entre 7 et 30 jours",
+      color: Colors.green,
+      confidenceBoost: 14,
+    },
   ];
-  const actions = [
-    "vient de recevoir un bonus", "vient de passer eligible", "a obtenu une analyse positive", "a debloque une fenetre bonus",
-    "vient d'etre selectionne", "a recu une validation interne", "vient de confirmer son premier depot recu",
-    "a gagne une priorite bonus", "vient de recevoir une alerte bonus", "a obtenu un statut bonus actif",
+  const profiles = [
+    "Un utilisateur verifie",
+    "Un portefeuille actif",
+    "Un membre Silver",
+    "Un profil Gold",
+    "Un compte premium",
+    "Un utilisateur mobile",
+    "Un client VIP",
+    "Un compte stable",
   ];
-  const amounts = ["3 000 XOF", "8 000 XOF", "13 000 XOF", "22 000 XOF", "50 000 XOF", "140 000 XOF", "20 EUR", "42 USD", "18 000 NGN", "400 ZAR"];
-  const details = [
-    "traitement securise en cours", "controle anti-abus valide", "delai estime reduit", "score de confiance en hausse",
-    "validation KYC prise en compte", "activite reguliere detectee", "solde synchronise", "recompense en attente de credit",
-  ];
-  const colors = [Colors.cyan, Colors.green, Colors.yellow, Colors.purple, Colors.magenta];
-  const country = countries[index % countries.length];
-  const title = `${openers[index % openers.length]} ${country} ${actions[(index * 3) % actions.length]}`;
+
+  return countryPool.flatMap((country, countryIndex) => {
+    const catalog = getBonusCatalog(country.code, country.currency);
+    return catalog.flatMap((tier: BonusTier, tierIndex: number) => {
+      const primary = phases[(countryIndex + tierIndex) % phases.length];
+      const secondary = phases[(countryIndex * 2 + tierIndex + 3) % phases.length];
+      return [
+        createGeneratedLiveActivity(country, tier, primary, countryIndex, tierIndex, 0, profiles),
+        createGeneratedLiveActivity(country, tier, secondary, countryIndex, tierIndex, 1, profiles),
+      ];
+    });
+  });
+}
+
+function createGeneratedLiveActivity(
+  country: BonusCountry,
+  tier: BonusTier,
+  phase: { tag: string; title: string; detail: string; color: string; confidenceBoost: number },
+  countryIndex: number,
+  tierIndex: number,
+  variant: number,
+  profiles: string[]
+): LiveActivity {
+  const profile = profiles[(countryIndex + tierIndex + variant) % profiles.length];
+  const window = estimateLiveWindow(tier, countryIndex, tierIndex);
+  const confidence = Math.min(96, Math.max(28, Math.round(tier.baseProbability * 100) + phase.confidenceBoost + tierIndex * 2));
+  const threshold = formatMoney(tier.threshold, country.currency);
+  const bonus = formatMoney(tier.bonus, country.currency);
+  const countryLabel = formatCountryCurrency(country.name, country.currency);
+  const amountLabel = variant === 0 ? `Depot ${threshold}` : `Bonus ${bonus}`;
+
   return {
-    id: `generated-${index}`,
-    title,
-    body: `${amounts[(index * 5) % amounts.length]} potentiel - ${details[(index * 7) % details.length]}.`,
-    country,
-    tag: index % 3 === 0 ? "Bonus recu" : index % 3 === 1 ? "Eligible" : "Analyse live",
-    color: colors[index % colors.length],
+    id: `generated-${country.code}-${tier.threshold}-${phase.tag}-${variant}`,
+    title: `${profile} en ${country.name} ${phase.title}`,
+    body: `${threshold} recu confirme - bonus potentiel ${bonus}. ${phase.detail}.`,
+    country: countryLabel,
+    currency: country.currency,
+    tag: phase.tag,
+    color: phase.color,
+    amountLabel,
+    meta: `${country.currency} coherent - fenetre estimee ${window}`,
+    confidence,
   };
+}
+
+function estimateLiveWindow(tier: BonusTier, countryIndex: number, tierIndex: number) {
+  const base = Math.max(7, 30 - Math.round(tier.baseProbability * 18));
+  const min = Math.max(7, Math.min(24, base - tierIndex - (countryIndex % 3)));
+  const max = Math.min(30, min + 6 + (countryIndex % 4));
+  return `${min}-${max}j`;
+}
+
+function formatCountryCurrency(countryName: string, currency: string) {
+  return `${countryName} - ${currency}`;
 }
 
 function computeProgress(status: any) {
@@ -523,6 +643,12 @@ const styles = StyleSheet.create({
   liveMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   liveTag: { fontSize: 10, fontWeight: "900", textTransform: "uppercase" },
   liveCountry: { color: Colors.textMuted, fontSize: 10, fontWeight: "800" },
+  liveCurrency: { color: "#fff", fontSize: 10, fontWeight: "900", borderRadius: 999, overflow: "hidden", paddingHorizontal: 7, paddingVertical: 2, backgroundColor: "rgba(255,255,255,0.09)" },
+  liveSignalRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, minHeight: 22 },
+  liveAmount: { color: "#000", fontSize: 10, fontWeight: "900", borderRadius: 999, overflow: "hidden", paddingHorizontal: 8, paddingVertical: 4, backgroundColor: Colors.cyan },
+  liveMeta: { color: Colors.textMuted, fontSize: 10, fontWeight: "700", flex: 1 },
+  liveConfidenceTrack: { height: 4, borderRadius: 999, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.1)", marginTop: 8 },
+  liveConfidenceFill: { height: 4, borderRadius: 999 },
   liveDots: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 12 },
   liveStep: { width: 6, height: 6, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.22)" },
   sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
