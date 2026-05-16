@@ -53,7 +53,7 @@ const VAULTS = "fxpro_vaults";
 const BONUS = "fxpro_bonus";
 const BONUS_EVENTS = "fxpro_bonus_events";
 const RISK_LOGS = "fxpro_risk_logs";
-const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_XOF", "EUR_USD"];
+const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_USD", "EUR_XOF"];
 const MAX_INLINE_PROFILE_PICTURE_CHARS = 700000;
 
 const INITIAL_BALANCES: Record<string, number> = {
@@ -285,7 +285,7 @@ async function getRates() {
   if (ratesCache?.fetched_at && Date.now() - ratesCache.fetched_at < RATE_CACHE_MS) return ratesCache.payload;
   try {
     const body = await fetchJsonWithTimeout(LIVE_RATES_URL);
-    if (body?.rates?.EUR) {
+    if (body?.result === "success" && body?.rates?.EUR) {
       const liveRates: Record<string, number> = { ...FALLBACK_RATES };
       for (const code of Object.keys(FALLBACK_RATES)) {
         if (typeof body.rates[code] === "number") liveRates[code] = Number(body.rates[code]);
@@ -711,7 +711,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   if (pathname === "/rates") return getRates();
 
   if (pathname === "/rates/history") {
-    const pair = (url.searchParams.get("pair") || "EUR_XOF").toUpperCase();
+    const pair = (url.searchParams.get("pair") || "EUR_USD").toUpperCase();
     const [from, to] = pair.split("_");
     const payload = await getRates();
     const rates = payload.rates;

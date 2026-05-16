@@ -587,7 +587,7 @@ async def register(data: RegisterIn):
         "picture": None,
         "auth_provider": "jwt",
         "push_token": None,
-        "favorite_pairs": [["EUR", "XOF"], ["EUR", "USD"]],
+        "favorite_pairs": [["EUR", "USD"], ["EUR", "XOF"]],
         "bonus_country": DEFAULT_BONUS_COUNTRY,
         "trust_score": 24,
         "login_count": 1,
@@ -652,7 +652,7 @@ async def google_session(data: GoogleSessionIn):
             "picture": info.get("picture"),
             "auth_provider": "google",
             "push_token": None,
-            "favorite_pairs": [["EUR", "XOF"], ["EUR", "USD"]],
+            "favorite_pairs": [["EUR", "USD"], ["EUR", "XOF"]],
             "bonus_country": DEFAULT_BONUS_COUNTRY,
             "trust_score": 24,
             "login_count": 1,
@@ -731,11 +731,14 @@ async def get_active_rates(base: str = "EUR") -> Dict[str, Any]:
     # Admin override has priority if exists & not stale older than override
     doc = await db.exchange_rates.find_one({"base": base}, {"_id": 0})
     if doc:
-        # If older than the cache window and source=live, refresh.
+        # Keep admin overrides stable, but refresh stale live/fallback rates.
         updated = doc.get("updated_at")
         if updated and updated.tzinfo is None:
             updated = updated.replace(tzinfo=timezone.utc)
-        if doc.get("source") == "live" and updated and (now_utc() - updated) > timedelta(minutes=RATE_CACHE_MINUTES):
+        source = doc.get("source")
+        stale = not updated or (now_utc() - updated) > timedelta(minutes=RATE_CACHE_MINUTES)
+        should_refresh = source != "admin" and (source != "live" or stale)
+        if should_refresh:
             live_payload = await fetch_live_rate_payload(base)
             if live_payload:
                 doc.update(live_payload)
@@ -1767,7 +1770,7 @@ async def startup_seed():
             "picture": None,
             "auth_provider": "jwt",
             "push_token": None,
-            "favorite_pairs": [["EUR", "XOF"]],
+            "favorite_pairs": [["EUR", "USD"], ["EUR", "XOF"]],
             "bonus_country": DEFAULT_BONUS_COUNTRY,
             "trust_score": 90,
             "login_count": 5,
@@ -1796,7 +1799,7 @@ async def startup_seed():
             "picture": None,
             "auth_provider": "jwt",
             "push_token": None,
-            "favorite_pairs": [["EUR", "XOF"], ["EUR", "USD"]],
+            "favorite_pairs": [["EUR", "USD"], ["EUR", "XOF"]],
             "bonus_country": DEFAULT_BONUS_COUNTRY,
             "trust_score": 72,
             "login_count": 3,

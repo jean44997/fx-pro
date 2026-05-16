@@ -1,4 +1,4 @@
-// Theme constants — Neo-brutalism + Glassmorphism + dark gradients
+// Theme constants - Neo-brutalism + Glassmorphism + dark gradients
 export const Colors = {
   bg: "#050505",
   bgSoft: "#0c0c10",
@@ -22,31 +22,31 @@ export const Colors = {
 };
 
 export const CURRENCIES: { code: string; name: string; flag: string; symbol: string }[] = [
-  { code: "EUR", name: "Euro", flag: "🇪🇺", symbol: "€" },
-  { code: "XOF", name: "Franc CFA (BCEAO)", flag: "🇸🇳", symbol: "F" },
-  { code: "XAF", name: "Franc CFA (BEAC)", flag: "🇨🇲", symbol: "F" },
-  { code: "USD", name: "US Dollar", flag: "🇺🇸", symbol: "$" },
-  { code: "GBP", name: "Pound Sterling", flag: "🇬🇧", symbol: "£" },
-  { code: "NGN", name: "Naira", flag: "🇳🇬", symbol: "₦" },
-  { code: "MAD", name: "Dirham marocain", flag: "🇲🇦", symbol: "DH" },
-  { code: "CAD", name: "Dollar canadien", flag: "🇨🇦", symbol: "$" },
-  { code: "CHF", name: "Franc suisse", flag: "🇨🇭", symbol: "Fr" },
-  { code: "JPY", name: "Yen", flag: "🇯🇵", symbol: "¥" },
-  { code: "CNY", name: "Yuan", flag: "🇨🇳", symbol: "¥" },
-  { code: "AUD", name: "Dollar australien", flag: "🇦🇺", symbol: "$" },
-  { code: "INR", name: "Roupie indienne", flag: "🇮🇳", symbol: "₹" },
-  { code: "BRL", name: "Real brésilien", flag: "🇧🇷", symbol: "R$" },
-  { code: "ZAR", name: "Rand sud-africain", flag: "🇿🇦", symbol: "R" },
-  { code: "KES", name: "Shilling kenyan", flag: "🇰🇪", symbol: "KSh" },
-  { code: "GHS", name: "Cedi ghanéen", flag: "🇬🇭", symbol: "₵" },
-  { code: "SEK", name: "Couronne suédoise", flag: "🇸🇪", symbol: "kr" },
-  { code: "AED", name: "Dirham EAU", flag: "🇦🇪", symbol: "د.إ" },
+  { code: "EUR", name: "Euro", flag: "EU", symbol: "EUR" },
+  { code: "XOF", name: "Franc CFA (BCEAO)", flag: "XOF", symbol: "XOF" },
+  { code: "XAF", name: "Franc CFA (BEAC)", flag: "XAF", symbol: "XAF" },
+  { code: "USD", name: "US Dollar", flag: "US", symbol: "USD" },
+  { code: "GBP", name: "Pound Sterling", flag: "GB", symbol: "GBP" },
+  { code: "NGN", name: "Naira", flag: "NG", symbol: "NGN" },
+  { code: "MAD", name: "Dirham marocain", flag: "MA", symbol: "MAD" },
+  { code: "CAD", name: "Dollar canadien", flag: "CA", symbol: "CAD" },
+  { code: "CHF", name: "Franc suisse", flag: "CH", symbol: "CHF" },
+  { code: "JPY", name: "Yen", flag: "JP", symbol: "JPY" },
+  { code: "CNY", name: "Yuan", flag: "CN", symbol: "CNY" },
+  { code: "AUD", name: "Dollar australien", flag: "AU", symbol: "AUD" },
+  { code: "INR", name: "Roupie indienne", flag: "IN", symbol: "INR" },
+  { code: "BRL", name: "Real bresilien", flag: "BR", symbol: "BRL" },
+  { code: "ZAR", name: "Rand sud-africain", flag: "ZA", symbol: "ZAR" },
+  { code: "KES", name: "Shilling kenyan", flag: "KE", symbol: "KES" },
+  { code: "GHS", name: "Cedi ghaneen", flag: "GH", symbol: "GHS" },
+  { code: "SEK", name: "Couronne suedoise", flag: "SE", symbol: "SEK" },
+  { code: "AED", name: "Dirham EAU", flag: "AE", symbol: "AED" },
 ];
 
 export const ZERO_DECIMALS = ["XOF", "XAF", "JPY", "NGN", "KES"];
 
 export const currencyMeta = (code: string) =>
-  CURRENCIES.find((c) => c.code === code) || { code, name: code, flag: "🏳️", symbol: code };
+  CURRENCIES.find((c) => c.code === code) || { code, name: code, flag: "--", symbol: code };
 
 export const formatMoney = (amount: number, code: string) => {
   const m = currencyMeta(code);
