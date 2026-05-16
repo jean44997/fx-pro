@@ -100,6 +100,11 @@ const FALLBACK_RATES: Record<string, number> = {
   AED: 3.95,
 };
 
+const LIVE_RATES_URL = "https://open.er-api.com/v6/latest/EUR";
+const HISTORY_RATES_URL = "https://api.frankfurter.dev/v2/rates";
+const RATE_CACHE_MS = 5 * 60 * 1000;
+let ratesCache: any = null;
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -265,25 +270,73 @@ async function findUserByQr(code: string) {
   return { id: first.id, ...normalizeUser(first.data()), qr_code: first.data().qr_code };
 }
 
-async function getRates() {
+async function fetchJsonWithTimeout(url: string, timeoutMs = 7000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch("https://open.er-api.com/v6/latest/EUR");
-    const body = await res.json();
-    if (body?.rates?.EUR) {
-      return { rates: { ...FALLBACK_RATES, ...body.rates, EUR: 1 }, updated_at: nowIso() };
-    }
-  } catch {}
-  return { rates: FALLBACK_RATES, updated_at: nowIso() };
+    const res = await fetch(url, { signal: controller.signal });
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-function historyForPair(pair: string, rate: number) {
+async function getRates() {
+  if (ratesCache?.fetched_at && Date.now() - ratesCache.fetched_at < RATE_CACHE_MS) return ratesCache.payload;
+  try {
+    const body = await fetchJsonWithTimeout(LIVE_RATES_URL);
+    if (body?.rates?.EUR) {
+      const liveRates: Record<string, number> = { ...FALLBACK_RATES };
+      for (const code of Object.keys(FALLBACK_RATES)) {
+        if (typeof body.rates[code] === "number") liveRates[code] = Number(body.rates[code]);
+      }
+      liveRates.EUR = 1;
+      const payload = {
+        rates: liveRates,
+        updated_at: body.time_last_update_utc || nowIso(),
+        next_update_at: body.time_next_update_utc || null,
+        source: "live",
+        provider: body.provider || "ExchangeRate-API",
+      };
+      ratesCache = { fetched_at: Date.now(), payload };
+      return payload;
+    }
+  } catch {}
+  const payload = { rates: FALLBACK_RATES, updated_at: nowIso(), source: "fallback", provider: "FX Pro fallback" };
+  ratesCache = { fetched_at: Date.now(), payload };
+  return payload;
+}
+
+function fallbackHistoryForPair(pair: string, rate: number) {
   return Array.from({ length: 30 }, (_, i) => {
-    const wobble = Math.sin(i / 3) * 0.006 + Math.cos(i / 5) * 0.004;
     return {
       t: new Date(Date.now() - (29 - i) * 86400000).toISOString(),
-      v: Number((rate * (1 + wobble)).toFixed(6)),
+      v: Number(rate.toFixed(6)),
     };
   });
+}
+
+async function getRateHistory(pair: string, currentRate: number) {
+  const [from, to] = pair.split("_");
+  const start = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const end = new Date().toISOString().slice(0, 10);
+  try {
+    const url = `${HISTORY_RATES_URL}?from=${start}&to=${end}&base=${from}&quotes=${to}`;
+    const body = await fetchJsonWithTimeout(url, 4500);
+    const rows: { t: string; v: number }[] = [];
+    if (Array.isArray(body)) {
+      body.forEach((item) => {
+        if (item?.quote === to && item?.rate != null) rows.push({ t: item.date, v: Number(Number(item.rate).toFixed(6)) });
+      });
+    } else if (body?.rates && typeof body.rates === "object") {
+      Object.entries(body.rates).forEach(([dateKey, value]: [string, any]) => {
+        if (value?.[to] != null) rows.push({ t: dateKey, v: Number(Number(value[to]).toFixed(6)) });
+      });
+    }
+    const points = rows.filter((row) => row.t && Number.isFinite(row.v)).sort((a, b) => a.t.localeCompare(b.t));
+    if (points.length >= 2) return { points: points.slice(-31), source: "frankfurter" };
+  } catch {}
+  return { points: fallbackHistoryForPair(pair, currentRate), source: "latest-live" };
 }
 
 function sortByDateDesc(items: any[]) {
@@ -412,9 +465,9 @@ async function notifyBonusState(userId: string, bonus: BonusEvaluation | any) {
     user_id: userId,
     type: "bonus",
     bonus_id: bonus.bonus_id,
-    title: eligible ? "Programme bonus active" : "Bonus non eligible",
+    title: eligible ? "Bonus eligible" : "Bonus non eligible",
     body: eligible
-      ? `Premier depot recu valide. Bonus potentiel ${bonus.bonus_amount || 0} ${bonus.currency}, analyse ${bonus.payout_window_days || 30} jours.`
+      ? `Premier depot recu confirme. Bonus potentiel ${bonus.bonus_amount || 0} ${bonus.currency} en analyse pendant ${bonus.payout_window_days || 30} jours.`
       : bonus.reason || "Le premier depot recu confirme ne respecte pas les conditions.",
     read: false,
     created_at: nowIso(),
@@ -658,11 +711,14 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   if (pathname === "/rates") return getRates();
 
   if (pathname === "/rates/history") {
-    const pair = url.searchParams.get("pair") || "EUR_XOF";
+    const pair = (url.searchParams.get("pair") || "EUR_XOF").toUpperCase();
     const [from, to] = pair.split("_");
-    const rates = (await getRates()).rates;
+    const payload = await getRates();
+    const rates = payload.rates;
     const rate = rates[from] && rates[to] ? rates[to] / rates[from] : 1;
-    return { points: historyForPair(pair, rate) };
+    const history = await getRateHistory(pair, rate);
+    const lastPoint = history.points[history.points.length - 1];
+    return { pair, current: lastPoint?.v || rate, points: history.points, source: history.source, updated_at: payload.updated_at };
   }
 
   if (pathname === "/bonus" && method === "GET") {

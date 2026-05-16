@@ -54,11 +54,11 @@ export default function Receipt() {
 
   const downloadReceipt = async () => {
     if (!t) return;
-    const text = buildReceiptText(t);
-    const fileName = `fxpro-recu-${t.txn_id}.txt`;
+    const html = buildReceiptHtml(t);
+    const fileName = `fxpro-recu-${t.txn_id}.html`;
     try {
       if (Platform.OS === "web") {
-        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+        const blob = new Blob([html], { type: "text/html;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -68,9 +68,9 @@ export default function Receipt() {
         return;
       }
       const uri = `${FileSystem.documentDirectory}${fileName}`;
-      await FileSystem.writeAsStringAsync(uri, text, { encoding: FileSystem.EncodingType.UTF8 });
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { dialogTitle: "Reçu FX Pro" });
-      else await Share.share({ message: text, title: "Reçu FX Pro" });
+      await FileSystem.writeAsStringAsync(uri, html, { encoding: FileSystem.EncodingType.UTF8 });
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { dialogTitle: "Recu FX Pro", mimeType: "text/html" });
+      else await Share.share({ message: buildReceiptText(t), title: "Recu FX Pro" });
     } catch (e: any) {
       Alert.alert("Téléchargement impossible", e.message || "Réessayez.");
     }
@@ -93,6 +93,8 @@ export default function Receipt() {
     );
   }
 
+  const primary = getPrimaryAmount(t);
+
   return (
     <GradientBg>
       <SafeAreaView style={{ flex: 1 }}>
@@ -113,6 +115,14 @@ export default function Receipt() {
 
           <Animated.View entering={FadeInDown.delay(150)}>
             <NeoCard color={t.status === "completed" ? Colors.cyan : Colors.yellow}>
+              <View style={styles.amountHero}>
+                <Text style={styles.amountLabel}>Montant principal</Text>
+                <Text style={styles.amountValue} adjustsFontSizeToFit numberOfLines={1}>{primary}</Text>
+                <View style={[styles.statusPill, { borderColor: t.status === "completed" ? Colors.green : Colors.yellow }]}>
+                  <Ionicons name={t.status === "completed" ? "shield-checkmark" : "hourglass"} size={14} color={t.status === "completed" ? Colors.green : Colors.yellow} />
+                  <Text style={styles.statusPillText}>{statusLabel(t.status)}</Text>
+                </View>
+              </View>
               <Row label="Type" value={typeLabel(t.type)} />
               {t.type === "convert" && (
                 <>
@@ -200,9 +210,14 @@ function statusLabel(status?: string) {
   return ({ completed: "Confirmée", pending: "En traitement", failed: "Échouée" } as any)[status || ""] || status || "Inconnu";
 }
 
+function getPrimaryAmount(t: any) {
+  if (t.type === "convert") return formatMoney(t.received || 0, t.to_currency || t.currency || "EUR");
+  return formatMoney(t.amount || 0, t.currency || t.from_currency || "EUR");
+}
+
 function buildReceiptText(t: any) {
   const lines = [
-    "===== RECU FX PRO 2026 =====",
+    "FX PRO 2026 - RECU SECURISE",
     `ID: ${t.txn_id}`,
     `Reference: ${t.reference || t.txn_id}`,
     `Type: ${typeLabel(t.type)}`,
@@ -232,8 +247,83 @@ function buildReceiptText(t: any) {
     lines.push(`Montant: ${formatMoney(t.amount, t.currency)}`);
     lines.push(`Bonus: ${t.bonus_id || ""}`);
   }
-  lines.push("============================");
+  lines.push(`Signature: FXP-${String(t.txn_id || "").slice(-10).toUpperCase()}`);
   return lines.join("\n");
+}
+
+function escapeHtml(value: any) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function receiptRows(t: any) {
+  const rows = [
+    ["ID transaction", t.txn_id],
+    ["Reference", t.reference || t.txn_id],
+    ["Type", typeLabel(t.type)],
+    ["Statut", statusLabel(t.status)],
+    ["Date", new Date(t.created_at).toLocaleString("fr-FR")],
+  ];
+  if (t.type === "transfer") {
+    rows.push(["De", t.sender_email || ""], ["Vers", t.receiver_email || ""]);
+    if (t.note) rows.push(["Note", t.note]);
+  } else if (t.type === "convert") {
+    rows.push(["De", formatMoney(t.amount, t.from_currency)], ["Vers", formatMoney(t.received, t.to_currency)], ["Taux", `1 ${t.from_currency} = ${t.rate?.toFixed(6)} ${t.to_currency}`]);
+  } else if (t.type === "deposit" || t.type === "withdraw") {
+    rows.push(["Methode", methodLabel(t.method)], [t.type === "deposit" ? "Source" : "Destination", t.account_ref || ""], ["Frais", formatMoney(t.fees || 0, t.currency)]);
+  } else if (t.type === "bonus_credit") {
+    rows.push(["Bonus", t.bonus_id || ""], ["Reference bonus", t.reference || ""]);
+  }
+  return rows;
+}
+
+function buildReceiptHtml(t: any) {
+  const rows = receiptRows(t)
+    .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`)
+    .join("");
+  const statusColor = t.status === "completed" ? "#39FF14" : "#FFD700";
+  return `<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Recu FX Pro ${escapeHtml(t.txn_id)}</title>
+  <style>
+    body{margin:0;background:#050505;color:#fff;font-family:Inter,Arial,sans-serif;padding:24px}
+    .receipt{max-width:680px;margin:0 auto;background:#111118;border:1px solid rgba(255,255,255,.16);border-radius:22px;overflow:hidden;box-shadow:0 20px 80px rgba(0,255,255,.12)}
+    .head{padding:28px;background:linear-gradient(135deg,rgba(0,255,255,.18),rgba(157,76,221,.22));border-bottom:1px solid rgba(255,255,255,.12)}
+    .brand{font-size:13px;letter-spacing:2px;color:#A1A1AA;text-transform:uppercase;font-weight:800}
+    h1{margin:8px 0 0;font-size:30px;line-height:1.08}
+    .amount{margin-top:18px;font-size:34px;font-weight:900;color:#00FFFF;word-break:break-word}
+    .pill{display:inline-flex;margin-top:14px;border:1px solid ${statusColor};color:${statusColor};border-radius:999px;padding:8px 12px;font-size:12px;font-weight:900}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:15px 18px;border-bottom:1px solid rgba(255,255,255,.08);vertical-align:top}
+    th{text-align:left;color:#A1A1AA;text-transform:uppercase;letter-spacing:1px;font-size:11px;width:38%}
+    td{text-align:right;font-weight:800;word-break:break-word}
+    .foot{padding:18px;color:#6b6b75;font-size:12px;line-height:1.5}
+    .sig{color:#00FFFF;font-weight:900}
+  </style>
+</head>
+<body>
+  <main class="receipt">
+    <section class="head">
+      <div class="brand">FX Pro 2026</div>
+      <h1>Recu de transaction</h1>
+      <div class="amount">${escapeHtml(getPrimaryAmount(t))}</div>
+      <div class="pill">${escapeHtml(statusLabel(t.status))}</div>
+    </section>
+    <table>${rows}</table>
+    <section class="foot">
+      Document genere automatiquement. Verifiez toujours l'ID transaction avant partage.<br />
+      <span class="sig">Signature FXP-${escapeHtml(String(t.txn_id || "").slice(-10).toUpperCase())}</span>
+    </section>
+  </main>
+</body>
+</html>`;
 }
 
 function Row({ label, value, highlight }: any) {
@@ -252,7 +342,12 @@ const styles = StyleSheet.create({
   successText: { color: "#fff", fontSize: 18, fontWeight: "900", marginTop: 12 },
   txnId: { color: Colors.textSoft, marginTop: 6, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12 },
   reference: { color: Colors.cyan, marginTop: 6, fontSize: 12, fontWeight: "900" },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
-  rLbl: { color: Colors.textSoft, fontSize: 12, letterSpacing: 1, textTransform: "uppercase" },
-  rVal: { color: "#fff", fontWeight: "700", maxWidth: "60%", textAlign: "right" },
+  amountHero: { alignItems: "center", paddingVertical: 12, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.08)" },
+  amountLabel: { color: Colors.textMuted, fontSize: 11, letterSpacing: 1.6, textTransform: "uppercase", fontWeight: "800" },
+  amountValue: { color: Colors.cyan, fontSize: 30, fontWeight: "900", marginTop: 6, maxWidth: "100%" },
+  statusPill: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, marginTop: 10 },
+  statusPillText: { color: "#fff", fontSize: 11, fontWeight: "900" },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+  rLbl: { color: Colors.textSoft, fontSize: 12, letterSpacing: 1, textTransform: "uppercase", width: 112, flexShrink: 0 },
+  rVal: { color: "#fff", fontWeight: "700", flex: 1, minWidth: 0, textAlign: "right" },
 });

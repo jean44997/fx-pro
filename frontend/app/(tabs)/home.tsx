@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl, Dimensions } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import { GradientBg, GlassCard, NeoCard, PrimaryButton } from "../../src/ui";
 import { Colors, CURRENCIES, formatMoney } from "../../src/theme";
@@ -10,13 +10,14 @@ import Animated, { FadeIn, FadeInRight, FadeInUp } from "react-native-reanimated
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path, Defs, LinearGradient as SvgGrad, Stop, Circle } from "react-native-svg";
 
-const W = Dimensions.get("window").width;
-
 export default function Home() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
   const { user, refresh } = useAuth();
   const [rates, setRates] = useState<Record<string, number>>({});
   const [updated, setUpdated] = useState<string>("");
+  const [rateSource, setRateSource] = useState<string>("");
+  const [historySource, setHistorySource] = useState<string>("");
   const [history, setHistory] = useState<{ t: string; v: number }[]>([]);
   const [pair, setPair] = useState("EUR_XOF");
   const [refreshing, setRefreshing] = useState(false);
@@ -27,8 +28,10 @@ export default function Home() {
       const r = await api.get("/rates");
       setRates(r.rates);
       setUpdated(r.updated_at);
+      setRateSource(r.provider || r.source || "");
       const h = await api.get(`/rates/history?pair=${pair}`);
       setHistory(h.points);
+      setHistorySource(h.source || "");
       const n = await api.get("/notifications");
       setNotifCount((n.items || []).filter((x: any) => !x.read).length);
     } catch {}
@@ -76,18 +79,18 @@ export default function Home() {
   }, [user, rates]);
 
   const points = history.slice(-30);
-  const chartW = W - 64;
+  const chartW = Math.max(180, Math.min(width - 64, 680));
   const chartH = 110;
   const path = React.useMemo(() => {
     if (!points.length) return "";
     const vals = points.map((p) => p.v);
     const min = Math.min(...vals);
     const max = Math.max(...vals);
-    const range = max - min || 1;
+    const range = max - min;
     return points
       .map((p, i) => {
         const x = (i / (points.length - 1)) * chartW;
-        const y = chartH - ((p.v - min) / range) * chartH;
+        const y = range === 0 ? chartH / 2 : chartH - ((p.v - min) / range) * chartH;
         return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
       })
       .join(" ");
@@ -164,15 +167,15 @@ export default function Home() {
 
           {/* Chart */}
           <GlassCard testID="rate-chart-card">
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <View>
+            <View style={styles.chartHeader}>
+              <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={styles.sectionTitle}>Taux 30 jours</Text>
                 <Text style={styles.sectionSub}>{pair.replace("_", " / ")}</Text>
               </View>
-              <View style={{ alignItems: "flex-end" }}>
+              <View style={styles.chartValueBlock}>
                 <Text style={styles.bigVal}>{lastVal.toFixed(pair.endsWith("_XOF") || pair.endsWith("_XAF") || pair.endsWith("_JPY") ? 2 : 4)}</Text>
                 <Text style={{ color: trend >= 0 ? Colors.green : Colors.danger, fontSize: 12, fontWeight: "700" }}>
-                  {trend >= 0 ? "▲" : "▼"} {trendPct.toFixed(2)}%
+                  {trend >= 0 ? "+" : "-"} {Math.abs(trendPct).toFixed(2)}%
                 </Text>
               </View>
             </View>
@@ -193,8 +196,8 @@ export default function Home() {
                         const vals = points.map((p) => p.v);
                         const min = Math.min(...vals);
                         const max = Math.max(...vals);
-                        const range = max - min || 1;
-                        return chartH - ((lastVal - min) / range) * chartH;
+                        const range = max - min;
+                        return range === 0 ? chartH / 2 : chartH - ((lastVal - min) / range) * chartH;
                       })()}
                       r={4}
                       fill={Colors.cyan}
@@ -203,6 +206,10 @@ export default function Home() {
                 </Svg>
               )}
             </View>
+            <Text style={styles.sourceLine}>
+              {historySource === "frankfurter" ? "Graphique historique marche" : "Graphique base sur le dernier taux live"}
+              {rateSource ? ` - ${rateSource}` : ""}
+            </Text>
             {/* Pair switcher */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }}>
               {favoritePairs.map(([f, t]) => {
@@ -284,6 +291,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   quickText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  chartHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  chartValueBlock: { alignItems: "flex-end", flexShrink: 0 },
   sectionTitle: { color: "#fff", fontSize: 16, fontWeight: "900" },
   sectionSub: { color: Colors.textSoft, fontSize: 12, marginTop: 2 },
   sectionLabel: { color: Colors.textSoft, fontSize: 12, letterSpacing: 2, marginTop: 12, marginBottom: 4, textTransform: "uppercase" },
@@ -291,6 +300,7 @@ const styles = StyleSheet.create({
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: Colors.border, marginRight: 8, flexDirection: "row", alignItems: "center", gap: 4 },
   chipActive: { backgroundColor: Colors.cyan, borderColor: Colors.cyan, shadowColor: Colors.cyan, shadowOpacity: 0.6, shadowRadius: 12 },
   chipText: { color: "#fff", fontWeight: "700", fontSize: 12 },
+  sourceLine: { color: Colors.textMuted, fontSize: 11, marginTop: 8 },
   rateRow: {
     flexDirection: "row",
     justifyContent: "space-between",

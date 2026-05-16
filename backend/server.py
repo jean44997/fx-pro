@@ -34,6 +34,16 @@ SUPPORTED_CURRENCIES = [
     "AUD", "INR", "BRL", "ZAR", "KES", "GHS", "SEK", "AED",
 ]
 
+RATE_CACHE_MINUTES = int(os.environ.get("FX_RATE_CACHE_MINUTES", "30"))
+OPEN_ER_API_BASE = "https://open.er-api.com/v6/latest"
+FRANKFURTER_RATES_API = "https://api.frankfurter.dev/v2/rates"
+FALLBACK_RATES = {
+    "EUR": 1.0, "XOF": 655.957, "XAF": 655.957, "USD": 1.08, "GBP": 0.86,
+    "NGN": 1600.0, "MAD": 10.8, "CAD": 1.47, "CHF": 0.95, "JPY": 170.0,
+    "CNY": 7.8, "AUD": 1.65, "INR": 90.0, "BRL": 5.9, "ZAR": 20.0,
+    "KES": 140.0, "GHS": 13.0, "SEK": 11.4, "AED": 3.95,
+}
+
 BONUS_MIN_WINDOW_DAYS = 7
 BONUS_MAX_WINDOW_DAYS = 30
 DEFAULT_BONUS_COUNTRY = "CI"
@@ -675,47 +685,76 @@ async def logout(authorization: Optional[str] = Header(None)):
 
 
 # ============ Rates ============
-async def fetch_live_rates(base: str = "EUR") -> Dict[str, float]:
+def parse_rate_timestamp(value: Any) -> datetime:
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, timezone.utc)
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return now_utc()
+    return now_utc()
+
+
+async def fetch_live_rate_payload(base: str = "EUR") -> Dict[str, Any]:
+    code = base.upper()
     try:
         async with httpx.AsyncClient(timeout=8) as h:
-            r = await h.get(f"https://open.er-api.com/v6/latest/{base}")
+            r = await h.get(f"{OPEN_ER_API_BASE}/{code}")
         if r.status_code == 200:
             data = r.json()
             rates = data.get("rates", {})
-            return {c: float(rates[c]) for c in SUPPORTED_CURRENCIES if c in rates}
+            clean_rates = {c: float(rates[c]) for c in SUPPORTED_CURRENCIES if c in rates}
+            if code in SUPPORTED_CURRENCIES:
+                clean_rates[code] = 1.0
+            if clean_rates:
+                return {
+                    "base": code,
+                    "rates": clean_rates,
+                    "updated_at": parse_rate_timestamp(data.get("time_last_update_unix")),
+                    "source": "live",
+                    "provider": data.get("provider") or "ExchangeRate-API",
+                    "next_update_at": data.get("time_next_update_utc"),
+                }
     except Exception as e:
         logger.warning(f"Live rates fetch failed: {e}")
     return {}
 
 
+async def fetch_live_rates(base: str = "EUR") -> Dict[str, float]:
+    payload = await fetch_live_rate_payload(base)
+    return payload.get("rates", {})
+
+
 async def get_active_rates(base: str = "EUR") -> Dict[str, Any]:
+    base = base.upper()
     # Admin override has priority if exists & not stale older than override
     doc = await db.exchange_rates.find_one({"base": base}, {"_id": 0})
     if doc:
-        # If older than 30 min and source=live, refresh
+        # If older than the cache window and source=live, refresh.
         updated = doc.get("updated_at")
         if updated and updated.tzinfo is None:
             updated = updated.replace(tzinfo=timezone.utc)
-        if doc.get("source") == "live" and updated and (now_utc() - updated) > timedelta(minutes=30):
-            live = await fetch_live_rates(base)
-            if live:
-                doc["rates"] = live
-                doc["updated_at"] = now_utc()
+        if doc.get("source") == "live" and updated and (now_utc() - updated) > timedelta(minutes=RATE_CACHE_MINUTES):
+            live_payload = await fetch_live_rate_payload(base)
+            if live_payload:
+                doc.update(live_payload)
                 await db.exchange_rates.update_one(
                     {"base": base},
-                    {"$set": {"rates": live, "updated_at": now_utc(), "source": "live"}},
+                    {"$set": live_payload},
                     upsert=True,
                 )
         return doc
-    # First time — fetch live
-    live = await fetch_live_rates(base)
-    if not live:
-        # Fallback static
-        live = {
-            "EUR": 1.0, "XOF": 655.957, "XAF": 655.957, "USD": 1.08, "GBP": 0.85,
-            "NGN": 1620.0, "MAD": 10.85, "CAD": 1.46, "CHF": 0.95, "JPY": 162.5, "CNY": 7.78
-        }
-    doc = {"base": base, "rates": live, "updated_at": now_utc(), "source": "live"}
+    # First time: fetch live, then keep a labelled fallback if the provider is down.
+    live_payload = await fetch_live_rate_payload(base)
+    doc = live_payload or {
+        "base": base.upper(),
+        "rates": {c: FALLBACK_RATES[c] for c in SUPPORTED_CURRENCIES if c in FALLBACK_RATES},
+        "updated_at": now_utc(),
+        "source": "fallback",
+        "provider": "FX Pro fallback",
+        "next_update_at": None,
+    }
     await db.exchange_rates.insert_one(doc)
     doc.pop("_id", None)
     return doc
@@ -724,20 +763,27 @@ async def get_active_rates(base: str = "EUR") -> Dict[str, Any]:
 @api.get("/rates")
 async def rates(base: str = "EUR"):
     d = await get_active_rates(base)
-    return {"base": d["base"], "rates": d["rates"], "source": d.get("source", "live"), "updated_at": d["updated_at"]}
+    return {
+        "base": d["base"],
+        "rates": d["rates"],
+        "source": d.get("source", "live"),
+        "provider": d.get("provider", "ExchangeRate-API"),
+        "updated_at": d["updated_at"],
+        "next_update_at": d.get("next_update_at"),
+    }
 
 
 @api.post("/rates/refresh")
 async def refresh_rates(_: dict = Depends(require_admin)):
-    live = await fetch_live_rates("EUR")
-    if not live:
+    live_payload = await fetch_live_rate_payload("EUR")
+    if not live_payload:
         raise HTTPException(status_code=502, detail="Live rates unavailable")
     await db.exchange_rates.update_one(
         {"base": "EUR"},
-        {"$set": {"rates": live, "updated_at": now_utc(), "source": "live"}},
+        {"$set": live_payload},
         upsert=True,
     )
-    return {"ok": True, "rates": live}
+    return {"ok": True, **live_payload}
 
 
 @api.put("/rates/override")
@@ -750,28 +796,61 @@ async def override_rates(data: RateOverrideIn, _: dict = Depends(require_admin))
     return {"ok": True}
 
 
+async def fetch_rate_history(from_c: str, to_c: str, days: int = 30) -> List[dict]:
+    start = (now_utc() - timedelta(days=days)).date().isoformat()
+    end = now_utc().date().isoformat()
+    try:
+        async with httpx.AsyncClient(timeout=5) as h:
+            r = await h.get(
+                FRANKFURTER_RATES_API,
+                params={"from": start, "to": end, "base": from_c, "quotes": to_c},
+            )
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        rows: List[dict] = []
+        if isinstance(data, list):
+            for item in data:
+                if item.get("quote") == to_c and item.get("rate") is not None:
+                    rows.append({"t": item.get("date"), "v": round(float(item["rate"]), 6)})
+        elif isinstance(data, dict) and isinstance(data.get("rates"), dict):
+            for date_key, rate_map in data["rates"].items():
+                if isinstance(rate_map, dict) and rate_map.get(to_c) is not None:
+                    rows.append({"t": date_key, "v": round(float(rate_map[to_c]), 6)})
+        return sorted([row for row in rows if row.get("t")], key=lambda row: row["t"])
+    except Exception as e:
+        logger.warning("Rate history fetch failed for %s/%s: %s", from_c, to_c, e)
+        return []
+
+
+def fallback_rate_history(pair: str, current: float) -> List[dict]:
+    history = []
+    for i in range(30):
+        history.append({
+            "t": (now_utc() - timedelta(days=29 - i)).isoformat(),
+            "v": round(current, 6),
+        })
+    history.append({"t": now_utc().isoformat(), "v": round(current, 6)})
+    return history
+
+
 @api.get("/rates/history")
 async def rates_history(pair: str = "EUR_XOF"):
-    """Return synthetic 7-day history for chart (deterministic per pair)."""
-    from_c, to_c = pair.split("_")
+    """Return real reference history when available, with a labelled fallback."""
+    parts = pair.upper().split("_")
+    if len(parts) != 2:
+        raise HTTPException(status_code=400, detail="Invalid pair")
+    from_c, to_c = parts
     d = await get_active_rates("EUR")
     rates = d["rates"]
     if from_c not in rates or to_c not in rates:
         raise HTTPException(status_code=400, detail="Invalid pair")
     current = rates[to_c] / rates[from_c]
-    import math, hashlib
-    seed = int(hashlib.md5(pair.encode()).hexdigest()[:8], 16)
-    history = []
-    for i in range(30):
-        # gentle oscillation
-        delta = math.sin((seed + i) * 0.7) * 0.02 + math.cos((seed + i) * 0.3) * 0.01
-        value = current * (1 + delta)
-        history.append({
-            "t": (now_utc() - timedelta(days=29 - i)).isoformat(),
-            "v": round(value, 6),
-        })
-    history.append({"t": now_utc().isoformat(), "v": round(current, 6)})
-    return {"pair": pair, "current": current, "points": history}
+    history = await fetch_rate_history(from_c, to_c)
+    if len(history) >= 2:
+        current = history[-1]["v"]
+        return {"pair": pair, "current": current, "points": history[-31:], "source": "frankfurter"}
+    return {"pair": pair, "current": current, "points": fallback_rate_history(pair, current), "source": "latest-live"}
 
 
 # ============ Bonus program ============
@@ -809,9 +888,9 @@ async def user_transactions(user_id: str) -> List[dict]:
 async def notify_bonus(user_id: str, bonus: dict):
     notif_id = f"ntf_{uuid.uuid4().hex[:10]}"
     eligible = bonus.get("eligible") and bonus.get("status") != "refused"
-    title = "Programme bonus active" if eligible else "Bonus non eligible"
+    title = "Bonus eligible" if eligible else "Bonus non eligible"
     body = (
-        f"Premier depot recu valide. Bonus potentiel {bonus.get('bonus_amount', 0)} {bonus.get('currency')}, analyse {bonus.get('payout_window_days', 30)} jours."
+        f"Premier depot recu confirme. Bonus potentiel {bonus.get('bonus_amount', 0)} {bonus.get('currency')} en analyse pendant {bonus.get('payout_window_days', 30)} jours."
         if eligible else bonus.get("reason", "Le premier depot recu confirme ne respecte pas les conditions.")
     )
     await db.notifications.insert_one({

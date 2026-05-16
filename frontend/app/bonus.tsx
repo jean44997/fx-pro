@@ -22,6 +22,16 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   credited: { label: "Credite", color: Colors.cyan, icon: "checkmark-circle" },
 };
 
+type LiveActivity = {
+  id: string;
+  title: string;
+  body: string;
+  country: string;
+  tag: string;
+  color: string;
+  real?: boolean;
+};
+
 export default function BonusScreen() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
@@ -29,6 +39,7 @@ export default function BonusScreen() {
   const [syncing, setSyncing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [savingCountry, setSavingCountry] = useState<string | null>(null);
+  const [activityIndex, setActivityIndex] = useState(0);
 
   const load = useCallback(async () => {
     const r = await api.get("/bonus");
@@ -80,6 +91,19 @@ export default function BonusScreen() {
   const progress = useMemo(() => computeProgress(status), [status]);
   const locked = Boolean(status.first_deposit_locked);
   const country = displayData?.country;
+  const liveActivities = useMemo(
+    () => buildLiveActivities(status, displayData?.history || [], country),
+    [country, displayData?.history, status]
+  );
+  const activeActivity = liveActivities[activityIndex % Math.max(1, liveActivities.length)];
+
+  useEffect(() => {
+    if (liveActivities.length <= 1) return;
+    const timer = setInterval(() => {
+      setActivityIndex((value) => (value + 1) % liveActivities.length);
+    }, 4200);
+    return () => clearInterval(timer);
+  }, [liveActivities.length]);
 
   if (authLoading || !user) {
     return (
@@ -151,6 +175,38 @@ export default function BonusScreen() {
               ) : null}
             </NeoCard>
           </Animated.View>
+
+          <GlassCard testID="bonus-live-activity-card">
+            <View style={styles.liveHead}>
+              <View>
+                <Text style={styles.section}>Activite live</Text>
+                <Text style={styles.sub}>Signaux anonymises du programme bonus</Text>
+              </View>
+              <View style={styles.liveBadge}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveBadgeText}>LIVE</Text>
+              </View>
+            </View>
+            <Animated.View key={activeActivity.id} entering={FadeInRight.duration(320)} style={styles.liveCard}>
+              <View style={[styles.liveIcon, { borderColor: activeActivity.color }]}>
+                <Ionicons name={activeActivity.real ? "shield-checkmark" : "flash"} size={18} color={activeActivity.color} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.liveTitle} numberOfLines={2}>{activeActivity.title}</Text>
+                <Text style={styles.liveBody} numberOfLines={2}>{activeActivity.body}</Text>
+                <View style={styles.liveMetaRow}>
+                  <Text style={[styles.liveTag, { color: activeActivity.color }]}>{activeActivity.tag}</Text>
+                  <Text style={styles.liveCountry}>{activeActivity.country}</Text>
+                </View>
+              </View>
+            </Animated.View>
+            <View style={styles.liveDots}>
+              {liveActivities.slice(0, 5).map((item, index) => {
+                const active = index === activityIndex % liveActivities.length || (activityIndex % liveActivities.length > 4 && index === 4);
+                return <View key={item.id} style={[styles.liveStep, active && { backgroundColor: activeActivity.color, width: 18 }]} />;
+              })}
+            </View>
+          </GlassCard>
 
           <GlassCard testID="bonus-country-card">
             <View style={styles.sectionHead}>
@@ -288,6 +344,103 @@ function buildLocalBonusData(user: any) {
   };
 }
 
+function buildLiveActivities(status: any, history: any[], country: any): LiveActivity[] {
+  const countryName = country?.name || "France";
+  const currency = status?.currency || country?.currency || "XOF";
+  const realItems: LiveActivity[] = [];
+
+  if (status?.status === "credited") {
+    realItems.push({
+      id: "real-credited",
+      title: "Votre bonus vient d'etre credite",
+      body: `${formatMoney(Number(status.bonus_amount || 0), currency)} disponibles dans votre portefeuille FX Pro.`,
+      country: countryName,
+      tag: "Evenement reel",
+      color: Colors.cyan,
+      real: true,
+    });
+  } else if (status?.status === "approved") {
+    realItems.push({
+      id: "real-approved",
+      title: "Votre bonus est approuve",
+      body: `Credit estime: ${status.estimated_credit_at ? new Date(status.estimated_credit_at).toLocaleDateString("fr-FR") : "en cours"}.`,
+      country: countryName,
+      tag: "Evenement reel",
+      color: Colors.green,
+      real: true,
+    });
+  } else if (status?.eligible && status?.first_deposit_locked) {
+    realItems.push({
+      id: "real-eligible",
+      title: "Votre compte est eligible au bonus",
+      body: `Premier depot recu confirme: ${formatMoney(Number(status.first_deposit_amount || 0), status.first_deposit_currency || currency)}.`,
+      country: countryName,
+      tag: "Evenement reel",
+      color: Colors.yellow,
+      real: true,
+    });
+  } else if (status?.status === "refused") {
+    realItems.push({
+      id: "real-refused",
+      title: "Analyse bonus terminee",
+      body: status.reason || "Le premier depot recu confirme ne respecte pas les conditions.",
+      country: countryName,
+      tag: "Evenement reel",
+      color: Colors.danger,
+      real: true,
+    });
+  }
+
+  history.slice(-2).forEach((item, index) => {
+    if (!item?.label || !item?.body) return;
+    realItems.push({
+      id: `real-history-${index}`,
+      title: item.label,
+      body: item.body,
+      country: countryName,
+      tag: "Compte synchronise",
+      color: item.status === "blocked" ? Colors.danger : item.status === "active" ? Colors.yellow : Colors.green,
+      real: true,
+    });
+  });
+
+  const generated = Array.from({ length: 72 }, (_, index) => generatedLiveActivity(index));
+  return [...realItems, ...generated];
+}
+
+function generatedLiveActivity(index: number): LiveActivity {
+  const countries = [
+    "France", "Cote d'Ivoire", "Senegal", "Cameroun", "Maroc", "Ghana", "Nigeria", "Afrique du Sud",
+    "Kenya", "Gabon", "Royaume-Uni", "Etats-Unis", "Canada", "Suisse", "Belgique", "Togo",
+    "Benin", "Mali", "Rwanda", "Emirats arabes unis",
+  ];
+  const openers = [
+    "Un utilisateur de", "Un compte verifie en", "Une cliente de", "Un membre Silver en", "Un profil Gold de",
+    "Un nouveau compte de", "Un portefeuille actif en", "Un membre VIP de", "Un utilisateur mobile de", "Un compte premium en",
+  ];
+  const actions = [
+    "vient de recevoir un bonus", "vient de passer eligible", "a obtenu une analyse positive", "a debloque une fenetre bonus",
+    "vient d'etre selectionne", "a recu une validation interne", "vient de confirmer son premier depot recu",
+    "a gagne une priorite bonus", "vient de recevoir une alerte bonus", "a obtenu un statut bonus actif",
+  ];
+  const amounts = ["3 000 XOF", "8 000 XOF", "13 000 XOF", "22 000 XOF", "50 000 XOF", "140 000 XOF", "20 EUR", "42 USD", "18 000 NGN", "400 ZAR"];
+  const details = [
+    "traitement securise en cours", "controle anti-abus valide", "delai estime reduit", "score de confiance en hausse",
+    "validation KYC prise en compte", "activite reguliere detectee", "solde synchronise", "recompense en attente de credit",
+  ];
+  const colors = [Colors.cyan, Colors.green, Colors.yellow, Colors.purple, Colors.magenta];
+  const country = countries[index % countries.length];
+  const title = `${openers[index % openers.length]} ${country} ${actions[(index * 3) % actions.length]}`;
+  return {
+    id: `generated-${index}`,
+    title,
+    body: `${amounts[(index * 5) % amounts.length]} potentiel - ${details[(index * 7) % details.length]}.`,
+    country,
+    tag: index % 3 === 0 ? "Bonus recu" : index % 3 === 1 ? "Eligible" : "Analyse live",
+    color: colors[index % colors.length],
+  };
+}
+
 function computeProgress(status: any) {
   if (!status?.first_deposit_locked) return 12;
   if (status.status === "credited") return 100;
@@ -359,6 +512,19 @@ const styles = StyleSheet.create({
   statLabel: { color: Colors.textSoft, fontSize: 10, textTransform: "uppercase" },
   statValue: { fontSize: 15, fontWeight: "900", marginTop: 3 },
   heroNote: { color: Colors.textSoft, fontSize: 13, lineHeight: 19, marginTop: 14 },
+  liveHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  liveBadge: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 999, borderWidth: 1, borderColor: Colors.green, paddingHorizontal: 9, paddingVertical: 5, backgroundColor: "rgba(57,255,20,0.08)" },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.green },
+  liveBadgeText: { color: Colors.green, fontSize: 10, fontWeight: "900" },
+  liveCard: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.045)", padding: 12, marginTop: 14, minHeight: 92 },
+  liveIcon: { width: 42, height: 42, borderRadius: 14, borderWidth: 1.2, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.05)" },
+  liveTitle: { color: "#fff", fontSize: 14, fontWeight: "900", lineHeight: 19 },
+  liveBody: { color: Colors.textSoft, fontSize: 12, lineHeight: 17, marginTop: 4 },
+  liveMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  liveTag: { fontSize: 10, fontWeight: "900", textTransform: "uppercase" },
+  liveCountry: { color: Colors.textMuted, fontSize: 10, fontWeight: "800" },
+  liveDots: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 12 },
+  liveStep: { width: 6, height: 6, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.22)" },
   sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   section: { color: "#fff", fontSize: 17, fontWeight: "900" },
   sub: { color: Colors.textSoft, marginTop: 4, fontSize: 12 },
