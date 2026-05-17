@@ -166,6 +166,15 @@ export default function Receipt() {
                   {t.bonus_id ? <Row label="Bonus" value={t.bonus_id} /> : null}
                 </>
               )}
+              {t.type === "shop_purchase" && (
+                <>
+                  <Row label="Commande" value={t.reference || t.shop_order_id || t.txn_id} />
+                  <Row label="Total boutique" value={formatMoney(Number(t.order_total || t.amount || 0), t.order_currency || t.currency)} highlight />
+                  <Row label="Portefeuille debite" value={formatMoney(Number(t.amount || 0), t.currency)} />
+                  <Row label="Articles" value={`${t.item_count || t.items?.length || 0} article(s)`} />
+                  <Row label="Retrait" value="Agence FX Pro partenaire" />
+                </>
+              )}
               <Row label="Statut" value={statusLabel(t.status)} />
               <Row label="Date" value={new Date(t.created_at).toLocaleString("fr-FR")} />
             </NeoCard>
@@ -193,6 +202,7 @@ function typeLabel(t: string) {
     admin_credit: "Crédit admin",
     admin_debit: "Débit admin",
     bonus_credit: "Bonus credite",
+    shop_purchase: "Achat boutique",
   } as any)[t] || t;
 }
 
@@ -212,6 +222,7 @@ function statusLabel(status?: string) {
 
 function getPrimaryAmount(t: any) {
   if (t.type === "convert") return formatMoney(t.received || 0, t.to_currency || t.currency || "EUR");
+  if (t.type === "shop_purchase") return formatMoney(t.order_total || t.amount || 0, t.order_currency || t.currency || "EUR");
   return formatMoney(t.amount || 0, t.currency || t.from_currency || "EUR");
 }
 
@@ -246,6 +257,15 @@ function buildReceiptText(t: any) {
   } else if (t.type === "bonus_credit") {
     lines.push(`Montant: ${formatMoney(t.amount, t.currency)}`);
     lines.push(`Bonus: ${t.bonus_id || ""}`);
+  } else if (t.type === "shop_purchase") {
+    lines.push(`Commande: ${t.reference || t.shop_order_id || ""}`);
+    lines.push(`Total boutique: ${formatMoney(t.order_total || t.amount || 0, t.order_currency || t.currency)}`);
+    lines.push(`Portefeuille debite: ${formatMoney(t.amount || 0, t.currency)}`);
+    lines.push(`Articles: ${t.item_count || t.items?.length || 0}`);
+    if (Array.isArray(t.items)) {
+      t.items.slice(0, 8).forEach((item: any) => lines.push(`- ${item.quantity} x ${item.title}`));
+    }
+    lines.push("Retrait: agence FX Pro partenaire");
   }
   lines.push(`Signature: FXP-${String(t.txn_id || "").slice(-10).toUpperCase()}`);
   return lines.join("\n");
@@ -277,6 +297,14 @@ function receiptRows(t: any) {
     rows.push(["Methode", methodLabel(t.method)], [t.type === "deposit" ? "Source" : "Destination", t.account_ref || ""], ["Frais", formatMoney(t.fees || 0, t.currency)]);
   } else if (t.type === "bonus_credit") {
     rows.push(["Bonus", t.bonus_id || ""], ["Reference bonus", t.reference || ""]);
+  } else if (t.type === "shop_purchase") {
+    rows.push(
+      ["Commande", t.reference || t.shop_order_id || ""],
+      ["Total boutique", formatMoney(t.order_total || t.amount || 0, t.order_currency || t.currency)],
+      ["Portefeuille debite", formatMoney(t.amount || 0, t.currency)],
+      ["Articles", `${t.item_count || t.items?.length || 0}`],
+      ["Retrait", "Agence FX Pro partenaire"]
+    );
   }
   return rows;
 }

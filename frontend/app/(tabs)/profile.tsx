@@ -126,6 +126,7 @@ export default function Profile() {
     { icon: "lock-closed", label: "🔒 Coffre d'épargne", route: "/vault", testID: "menu-vault", color: Colors.purple },
     { icon: "add-circle", label: "Depot d'argent", route: "/deposit", testID: "menu-deposit", color: Colors.green },
     { icon: "cash", label: "Retrait d'argent", route: "/withdraw", testID: "menu-withdraw", color: Colors.yellow },
+    { icon: "bag-handle", label: "Boutique en ligne", route: "/shop", testID: "menu-shop", color: Colors.orange },
     { icon: "gift", label: "Bonus premier depot", route: "/bonus", testID: "menu-bonus", color: Colors.yellow },
     { icon: "qr-code", label: "Mon QR Code", route: "/receive-qr", testID: "menu-qr" },
     { icon: "key", label: "Changer le mot de passe", route: "/change-password", testID: "menu-password" },

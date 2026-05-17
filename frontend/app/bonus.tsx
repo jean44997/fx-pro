@@ -170,7 +170,7 @@ export default function BonusScreen() {
                 </Text>
               ) : (
                 <Text style={styles.heroNote}>
-                  Le bonus s'active uniquement apres le premier depot recu et confirme sur votre compte. Minimum actuel: {formatMoney(displayData?.minimum_deposit || 0, country?.currency || "XOF")}.
+                  Le bonus devient actif uniquement apres le premier depot recu et confirme sur votre compte. Minimum actuel: {formatMoney(displayData?.minimum_deposit || 0, country?.currency || "XOF")}.
                 </Text>
               )}
               {syncing ? (
@@ -283,7 +283,7 @@ export default function BonusScreen() {
           </ScrollView>
 
           <GlassCard testID="bonus-rules-card">
-            <Text style={styles.section}>Regles d'eligibilite</Text>
+            <Text style={styles.section}>Regles eligibilite</Text>
             {(displayData?.rules || []).map((rule: string) => (
               <View key={rule} style={styles.ruleRow}>
                 <Ionicons name="checkmark-circle" size={15} color={Colors.green} />

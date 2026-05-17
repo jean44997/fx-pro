@@ -39,6 +39,14 @@ import {
   nextBonusStatus,
   type BonusEvaluation,
 } from "./bonusCatalog";
+import {
+  buildShopCatalogPayload,
+  calculateShopCart,
+  fetchApilayerShopProducts,
+  normalizeShopCurrency,
+  SHOP_AGENCY_MESSAGE,
+  type ShopCartLine,
+} from "./shopCatalog";
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -53,6 +61,8 @@ const VAULTS = "fxpro_vaults";
 const BONUS = "fxpro_bonus";
 const BONUS_EVENTS = "fxpro_bonus_events";
 const RISK_LOGS = "fxpro_risk_logs";
+const SHOP_ORDERS = "fxpro_shop_orders";
+const APILAYER_SHOP_KEY = process.env.EXPO_PUBLIC_APILAYER_KEY || "";
 const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_USD", "EUR_XOF"];
 const MAX_INLINE_PROFILE_PICTURE_CHARS = 700000;
 
@@ -628,6 +638,21 @@ async function deleteProfilePicture(userId: string) {
   );
 }
 
+async function getShopCatalog(currency?: string, queryText?: string) {
+  const ratesPayload = await getRates();
+  const remoteProducts = await fetchApilayerShopProducts(APILAYER_SHOP_KEY, queryText || "premium snack");
+  return buildShopCatalogPayload({
+    remoteProducts,
+    currency: normalizeShopCurrency(currency),
+    rates: ratesPayload.rates || FALLBACK_RATES,
+  });
+}
+
+async function getUserShopOrders(userId: string) {
+  const snap = await getDocs(query(collection(db, SHOP_ORDERS), where("user_id", "==", userId)));
+  return { items: sortByDateDesc(snap.docs.map((d) => d.data())) };
+}
+
 export function subscribeFirebaseNotifications(
   onItems: (items: any[]) => void,
   onError?: (error: Error) => void
@@ -926,6 +951,122 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     const found = await findUserByQr(url.searchParams.get("code") || "");
     if (!found) throw new Error("Code QR introuvable");
     return { user_id: found.user_id, email: found.email, name: found.name };
+  }
+
+  if (pathname === "/shop/catalog") {
+    await requireFirebaseUser();
+    return getShopCatalog(url.searchParams.get("currency") || "XOF", url.searchParams.get("q") || "premium snack");
+  }
+
+  if (pathname === "/shop/orders") {
+    const firebaseUser = await requireFirebaseUser();
+    return getUserShopOrders(firebaseUser.uid);
+  }
+
+  if (pathname === "/shop/checkout" && method === "POST") {
+    const firebaseUser = await requireFirebaseUser();
+    const profile = await currentProfile();
+    const orderCurrency = normalizeShopCurrency(body.currency || "XOF");
+    const walletCurrency = normalizeShopCurrency(body.wallet_currency || orderCurrency);
+    const lines = Array.isArray(body.items) ? (body.items as ShopCartLine[]) : [];
+    const clientOrderId = String(body.client_order_id || "");
+
+    if (clientOrderId) {
+      const existing = await getDocs(
+        query(collection(db, SHOP_ORDERS), where("user_id", "==", firebaseUser.uid), where("client_order_id", "==", clientOrderId), limit(1))
+      );
+      if (!existing.empty) {
+        const order = existing.docs[0].data();
+        return { ok: true, duplicate: true, order, transaction: order.transaction };
+      }
+    }
+
+    const ratesPayload = await getRates();
+    const catalog = await getShopCatalog(orderCurrency, body.query || "premium snack");
+    const totals = calculateShopCart({
+      products: catalog.products,
+      lines,
+      orderCurrency,
+      walletCurrency,
+      rates: ratesPayload.rates || FALLBACK_RATES,
+    });
+
+    const orderId = makeId("ord");
+    const txnId = makeId("txn");
+    const notifId = makeId("ntf");
+    const reference = `SHOP-${makeId("ref").slice(-8).toUpperCase()}`;
+    const userRef = doc(db, USERS, firebaseUser.uid);
+    const orderRef = doc(db, SHOP_ORDERS, orderId);
+    const txnRef = doc(db, TXNS, txnId);
+    const notifRef = doc(db, NOTIFS, notifId);
+    let balances: Record<string, number> = {};
+    const createdAt = nowIso();
+    const transaction = {
+      txn_id: txnId,
+      type: "shop_purchase",
+      user_id: firebaseUser.uid,
+      participants: [firebaseUser.uid],
+      amount: totals.debit_amount,
+      currency: walletCurrency,
+      order_total: totals.total,
+      order_currency: orderCurrency,
+      shop_order_id: orderId,
+      reference,
+      items: totals.items,
+      item_count: totals.items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0),
+      pickup_status: "agency_pending",
+      status: "completed",
+      created_at: createdAt,
+    };
+    const order = {
+      order_id: orderId,
+      user_id: firebaseUser.uid,
+      client_order_id: clientOrderId || null,
+      reference,
+      status: "paid",
+      payment_status: "paid",
+      pickup_status: "agency_pending",
+      currency: orderCurrency,
+      wallet_currency: walletCurrency,
+      total: totals.total,
+      debit_amount: totals.debit_amount,
+      items: totals.items,
+      transaction,
+      customer_name: profile.name,
+      customer_email: profile.email,
+      agency_message: SHOP_AGENCY_MESSAGE,
+      note: String(body.note || "").slice(0, 180),
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+
+    await runTransaction(db, async (tx) => {
+      const userSnap = await tx.get(userRef);
+      const data = normalizeUser(userSnap.data());
+      balances = { ...data.balances };
+      const available = Number(balances[walletCurrency] || 0);
+      if (available < totals.debit_amount) {
+        throw new Error(
+          `Solde insuffisant: disponible ${available} ${walletCurrency}, commande ${totals.debit_amount} ${walletCurrency}. Rechargez via depot ou une agence FX Pro partenaire.`
+        );
+      }
+      balances[walletCurrency] = Number((available - totals.debit_amount).toFixed(4));
+      tx.update(userRef, { balances, updated_at: nowIso() });
+      tx.set(orderRef, order);
+      tx.set(txnRef, transaction);
+      tx.set(notifRef, {
+        notif_id: notifId,
+        user_id: firebaseUser.uid,
+        type: "shop_purchase",
+        txn_id: txnId,
+        order_id: orderId,
+        title: "Commande boutique confirmee",
+        body: `${reference}: ${totals.items.length} article(s), paiement ${totals.debit_amount} ${walletCurrency}. Retrait en agence FX Pro.`,
+        read: false,
+        created_at: createdAt,
+      });
+    });
+    return { ok: true, order, transaction, balances };
   }
 
   if (pathname === "/transactions") {

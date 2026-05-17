@@ -43,6 +43,25 @@ FALLBACK_RATES = {
     "CNY": 7.8, "AUD": 1.65, "INR": 90.0, "BRL": 5.9, "ZAR": 20.0,
     "KES": 140.0, "GHS": 13.0, "SEK": 11.4, "AED": 3.95,
 }
+APILAYER_SHOP_KEY = os.environ.get("APILAYER_SHOP_KEY") or os.environ.get("EXPO_PUBLIC_APILAYER_KEY", "")
+SHOP_AGENCY_MESSAGE = (
+    "FX Pro dispose d'agences et de points partenaires dans plusieurs pays. "
+    "Apres paiement, le recu de commande sert a recuperer le produit ou a organiser le retrait avec une agence."
+)
+SHOP_FALLBACK_PRODUCTS = [
+    {"id": "fxp_earbuds_pro", "title": "Ecouteurs Bluetooth Pro", "brand": "FX Select", "description": "Audio clair, boitier compact, autonomie longue duree et retrait disponible en agence partenaire.", "category": "Tech", "image": "https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 79.0, "rating": 4.8, "stock": 18, "tags": ["Audio", "Mobile", "Premium"], "source": "fallback"},
+    {"id": "fxp_watch_core", "title": "Montre connectee Core", "brand": "FX Select", "description": "Suivi activite, notifications, autonomie solide et design discret pour usage quotidien.", "category": "Tech", "image": "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 129.0, "rating": 4.7, "stock": 12, "tags": ["Wearable", "Sport", "Mobile"], "source": "fallback"},
+    {"id": "fxp_power_bank", "title": "Batterie externe 20 000 mAh", "brand": "Voltline", "description": "Charge rapide multi-port, format voyage et securite thermique integree.", "category": "Accessoires", "image": "https://images.unsplash.com/photo-1609091839311-d5365f9ff1c5?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 49.0, "rating": 4.6, "stock": 25, "tags": ["Voyage", "Charge", "Mobile"], "source": "fallback"},
+    {"id": "fxp_travel_bag", "title": "Sac voyage business", "brand": "Nomad Pro", "description": "Compartiments securises, poche laptop et finition sobre pour deplacements rapides.", "category": "Voyage", "image": "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 92.0, "rating": 4.8, "stock": 10, "tags": ["Business", "Travel", "Secure"], "source": "fallback"},
+    {"id": "fxp_coffee_box", "title": "Coffret cafe premium", "brand": "Maison Noir", "description": "Selection aromatique, grains fraichement torrefies et presentation cadeau.", "category": "Epicerie", "image": "https://images.unsplash.com/photo-1447933601403-0c6688de566e?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 36.0, "rating": 4.7, "stock": 30, "tags": ["Cafe", "Gourmet", "Cadeau"], "source": "fallback"},
+    {"id": "fxp_green_tea", "title": "Selection the vert bio", "brand": "Pure Leaf", "description": "Infusion douce, notes vegetales et pack ideal pour routines bien-etre.", "category": "Epicerie", "image": "https://images.unsplash.com/photo-1564890369478-c89ca6d9cde9?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 24.0, "rating": 4.5, "stock": 44, "tags": ["Bio", "Bien-etre", "The"], "source": "fallback"},
+    {"id": "fxp_gift_card", "title": "Carte cadeau digitale", "brand": "FX Pro", "description": "Bon d'achat interne utilisable sur selection agence, avec recu numerique instantane.", "category": "Digital", "image": "https://images.unsplash.com/photo-1556742502-ec7c0e9f34b1?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 55.0, "rating": 4.9, "stock": 99, "tags": ["Digital", "Cadeau", "Instantane"], "source": "fallback"},
+    {"id": "fxp_office_pack", "title": "Pack bureau mobile", "brand": "Workline", "description": "Support telephone, cable renforce, carnet premium et rangement compact.", "category": "Accessoires", "image": "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 64.0, "rating": 4.6, "stock": 16, "tags": ["Bureau", "Mobile", "Organisation"], "source": "fallback"},
+    {"id": "fxp_chocolate_box", "title": "Coffret chocolat artisan", "brand": "Cocoa House", "description": "Assortiment premium, emballage soigne et retrait rapide dans les agences participantes.", "category": "Epicerie", "image": "https://images.unsplash.com/photo-1548907040-4baa42d10919?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 42.0, "rating": 4.8, "stock": 22, "tags": ["Gourmet", "Cadeau", "Premium"], "source": "fallback"},
+    {"id": "fxp_smart_tracker", "title": "Tracker intelligent", "brand": "Locate+", "description": "Localisation d'objets, alerte sonore et format discret pour sac, cle ou bagage.", "category": "Tech", "image": "https://images.unsplash.com/photo-1583394838336-acd977736f90?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 39.0, "rating": 4.4, "stock": 28, "tags": ["Securite", "Voyage", "Mobile"], "source": "fallback"},
+    {"id": "fxp_skin_care", "title": "Routine soin essentielle", "brand": "Luma", "description": "Kit compact, texture legere et format adapte aux deplacements.", "category": "Bien-etre", "image": "https://images.unsplash.com/photo-1596462502278-27bfdc403348?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 58.0, "rating": 4.5, "stock": 20, "tags": ["Soin", "Voyage", "Premium"], "source": "fallback"},
+    {"id": "fxp_home_speaker", "title": "Mini enceinte maison", "brand": "SoundNest", "description": "Son ample, Bluetooth stable et finition textile moderne.", "category": "Tech", "image": "https://images.unsplash.com/photo-1545454675-3531b543be5d?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 88.0, "rating": 4.7, "stock": 14, "tags": ["Audio", "Maison", "Bluetooth"], "source": "fallback"},
+]
 
 BONUS_MIN_WINDOW_DAYS = 7
 BONUS_MAX_WINDOW_DAYS = 30
@@ -564,6 +583,20 @@ class UserSearchIn(BaseModel):
     query: str
 
 
+class ShopCartLineIn(BaseModel):
+    product_id: str
+    quantity: int = 1
+
+
+class ShopCheckoutIn(BaseModel):
+    items: List[ShopCartLineIn]
+    currency: str = "XOF"
+    wallet_currency: Optional[str] = None
+    query: Optional[str] = "premium snack"
+    client_order_id: Optional[str] = None
+    note: Optional[str] = None
+
+
 # ============ Auth ============
 @api.post("/auth/register")
 async def register(data: RegisterIn):
@@ -761,6 +794,151 @@ async def get_active_rates(base: str = "EUR") -> Dict[str, Any]:
     await db.exchange_rates.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+def normalize_shop_currency(currency: Optional[str]) -> str:
+    code = (currency or "XOF").upper()
+    return code if code in SUPPORTED_CURRENCIES else "XOF"
+
+
+def round_shop_money(value: float, currency: str) -> float:
+    return round(float(value or 0), 0 if currency in ["XOF", "XAF", "JPY", "NGN", "KES"] else 2)
+
+
+def convert_shop_money(amount: float, from_currency: str, to_currency: str, rates: Dict[str, float]) -> float:
+    source = normalize_shop_currency(from_currency)
+    target = normalize_shop_currency(to_currency)
+    if source == target:
+        return round_shop_money(amount, target)
+    source_rate = rates.get(source) or (1.0 if source == "EUR" else 0)
+    target_rate = rates.get(target) or (1.0 if target == "EUR" else 0)
+    if not source_rate or not target_rate:
+        return round_shop_money(amount, target)
+    return round_shop_money((float(amount) / source_rate) * target_rate, target)
+
+
+def stable_shop_number(seed: str) -> float:
+    digest = hashlib.sha256(seed.encode()).hexdigest()
+    return int(digest[:10], 16) % 1000000 / 1000000
+
+
+def normalize_remote_shop_products(products: List[dict]) -> List[dict]:
+    normalized = []
+    for index, raw in enumerate(products or []):
+        product_id = str(raw.get("id") or raw.get("productId") or raw.get("upc") or f"remote_{index}")
+        title = str(raw.get("title") or raw.get("name") or raw.get("productName") or "").strip()
+        if not title:
+            continue
+        image = str(raw.get("image") or raw.get("imageUrl") or raw.get("image_url") or "")
+        if not image.startswith("http") and product_id:
+            image = f"https://img.spoonacular.com/products/{product_id}-312x231.{raw.get('imageType') or 'jpg'}"
+        brand = str(raw.get("brand") or raw.get("brandName") or raw.get("manufacturer") or "Catalogue APILayer").strip()
+        category = str(raw.get("aisle") or raw.get("category") or "Catalogue").strip()
+        price = float(raw.get("price") or 0) or round_shop_money(18 + stable_shop_number(product_id + title) * 132, "USD")
+        if price > 600:
+            price = price / 100
+        normalized.append({
+            "id": f"api_{product_id}",
+            "title": title,
+            "brand": brand,
+            "description": str(raw.get("description") or "Produit catalogue avec retrait possible via le reseau d'agences FX Pro."),
+            "category": category,
+            "image": image or SHOP_FALLBACK_PRODUCTS[0]["image"],
+            "base_currency": "USD",
+            "base_price": round_shop_money(price, "USD"),
+            "rating": round_shop_money(4.25 + stable_shop_number(product_id) * 0.7, "USD"),
+            "stock": 8 + int(stable_shop_number(product_id + ":stock") * 34),
+            "tags": [category, brand],
+            "source": "apilayer",
+        })
+    return normalized[:18]
+
+
+async def fetch_apilayer_shop_products(query: str = "premium snack") -> List[dict]:
+    if not APILAYER_SHOP_KEY:
+        return []
+    attempts = [
+        ("https://api.apilayer.com/spoonacular/food/products/search", {"query": query, "number": 18}, {"apikey": APILAYER_SHOP_KEY}),
+        ("https://api.spoonacular.com/food/products/search", {"query": query, "number": 18, "apiKey": APILAYER_SHOP_KEY}, {}),
+    ]
+    for url, params, headers in attempts:
+        try:
+            async with httpx.AsyncClient(timeout=7) as h:
+                r = await h.get(url, params=params, headers=headers)
+            if r.status_code != 200:
+                continue
+            body = r.json()
+            products = body.get("products") if isinstance(body, dict) else []
+            if not products and isinstance(body, dict):
+                products = body.get("results") or []
+            normalized = normalize_remote_shop_products(products)
+            if normalized:
+                return normalized
+        except Exception as exc:
+            logger.warning("Shop catalog fetch failed: %s", exc)
+    return []
+
+
+def shop_promotions(products: List[dict]) -> List[dict]:
+    today_key = now_utc().date().isoformat()
+    ranked = sorted(products, key=lambda p: stable_shop_number(f"{today_key}:{p['id']}"))
+    ends_at = datetime.combine(now_utc().date(), datetime.max.time(), tzinfo=timezone.utc)
+    promos = []
+    for index, product in enumerate(ranked[:2]):
+        promos.append({
+            "product_id": product["id"],
+            "discount_percent": 80 if index == 0 else 50,
+            "label": "Flash -80%" if index == 0 else "Selection -50%",
+            "ends_at": ends_at,
+        })
+    return promos
+
+
+async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack") -> dict:
+    rates_doc = await get_active_rates("EUR")
+    rates = rates_doc.get("rates") or FALLBACK_RATES
+    remote = await fetch_apilayer_shop_products(query)
+    products = remote + [p for p in SHOP_FALLBACK_PRODUCTS if p["id"] not in {r["id"] for r in remote}]
+    promotions = shop_promotions(products)
+    promo_map = {p["product_id"]: p for p in promotions}
+    code = normalize_shop_currency(currency)
+    priced = []
+    for product in products:
+        original = convert_shop_money(product["base_price"], product.get("base_currency", "USD"), code, rates)
+        promo = promo_map.get(product["id"])
+        price = round_shop_money(original * (1 - (promo["discount_percent"] / 100)), code) if promo else original
+        priced.append({**product, "original_price": original, "price": price, "currency": code, "promotion": promo})
+    source = "mixed" if remote else "fallback"
+    return {"products": priced, "promotions": promotions, "currency": code, "source": source, "updated_at": now_utc(), "agency_message": SHOP_AGENCY_MESSAGE}
+
+
+def calculate_shop_cart(products: List[dict], lines: List[ShopCartLineIn], order_currency: str, wallet_currency: str, rates: Dict[str, float]) -> dict:
+    product_map = {p["id"]: p for p in products}
+    items = []
+    for line in lines:
+        product = product_map.get(line.product_id)
+        if not product:
+            continue
+        qty = max(1, min(8, int(line.quantity or 1)))
+        if qty > int(product.get("stock") or 0):
+            raise HTTPException(status_code=400, detail=f"{product['title']}: stock insuffisant")
+        items.append({
+            "product_id": product["id"],
+            "title": product["title"],
+            "brand": product["brand"],
+            "image": product["image"],
+            "category": product["category"],
+            "quantity": qty,
+            "unit_price": product["price"],
+            "original_unit_price": product["original_price"],
+            "discount_percent": (product.get("promotion") or {}).get("discount_percent", 0),
+            "line_total": round_shop_money(product["price"] * qty, order_currency),
+        })
+    if not items:
+        raise HTTPException(status_code=400, detail="Panier vide ou produits indisponibles")
+    total = round_shop_money(sum(item["line_total"] for item in items), order_currency)
+    debit = convert_shop_money(total, order_currency, wallet_currency, rates)
+    return {"items": items, "total": total, "currency": order_currency, "wallet_currency": wallet_currency, "debit_amount": debit}
 
 
 @api.get("/rates")
@@ -1235,6 +1413,107 @@ async def qr_lookup(code: str, _: dict = Depends(get_current_user)):
     if not u:
         raise HTTPException(status_code=404, detail="QR invalide")
     return {"user_id": u["user_id"], "email": u["email"], "name": u.get("name"), "picture": u.get("picture")}
+
+
+# ============ Shop ============
+@api.get("/shop/catalog")
+async def shop_catalog(currency: str = "XOF", q: str = "premium snack", _: dict = Depends(get_current_user)):
+    return await build_shop_catalog(currency, q)
+
+
+@api.get("/shop/orders")
+async def shop_orders(user: dict = Depends(get_current_user)):
+    items = await db.shop_orders.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
+    return {"items": items}
+
+
+@api.post("/shop/checkout")
+async def shop_checkout(data: ShopCheckoutIn, user: dict = Depends(get_current_user)):
+    order_currency = normalize_shop_currency(data.currency)
+    wallet_currency = normalize_shop_currency(data.wallet_currency or order_currency)
+    if data.client_order_id:
+        existing = await db.shop_orders.find_one({"user_id": user["user_id"], "client_order_id": data.client_order_id}, {"_id": 0})
+        if existing:
+            return {"ok": True, "duplicate": True, "order": existing, "transaction": existing.get("transaction")}
+
+    rates_doc = await get_active_rates("EUR")
+    catalog = await build_shop_catalog(order_currency, data.query or "premium snack")
+    totals = calculate_shop_cart(catalog["products"], data.items, order_currency, wallet_currency, rates_doc.get("rates") or FALLBACK_RATES)
+    balance_key = f"balances.{wallet_currency}"
+    updated_user = await db.users.find_one_and_update(
+        {"user_id": user["user_id"], balance_key: {"$gte": totals["debit_amount"]}},
+        {"$inc": {balance_key: -totals["debit_amount"]}, "$set": {"updated_at": now_utc()}},
+        projection={"_id": 0},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated_user:
+        full = await find_user_full(user["user_id"])
+        available = float((full.get("balances") or {}).get(wallet_currency, 0))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Solde insuffisant: disponible {available} {wallet_currency}, commande {totals['debit_amount']} {wallet_currency}. Rechargez via depot ou agence FX Pro partenaire.",
+        )
+
+    order_id = f"ord_{uuid.uuid4().hex[:12]}"
+    txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+    reference = f"SHOP-{uuid.uuid4().hex[:8].upper()}"
+    created_at = now_utc()
+    txn = {
+        "txn_id": txn_id,
+        "type": "shop_purchase",
+        "user_id": user["user_id"],
+        "participants": [user["user_id"]],
+        "amount": totals["debit_amount"],
+        "currency": wallet_currency,
+        "order_total": totals["total"],
+        "order_currency": order_currency,
+        "shop_order_id": order_id,
+        "reference": reference,
+        "items": totals["items"],
+        "item_count": sum(int(item.get("quantity") or 0) for item in totals["items"]),
+        "pickup_status": "agency_pending",
+        "status": "completed",
+        "created_at": created_at,
+    }
+    order = {
+        "order_id": order_id,
+        "user_id": user["user_id"],
+        "client_order_id": data.client_order_id,
+        "reference": reference,
+        "status": "paid",
+        "payment_status": "paid",
+        "pickup_status": "agency_pending",
+        "currency": order_currency,
+        "wallet_currency": wallet_currency,
+        "total": totals["total"],
+        "debit_amount": totals["debit_amount"],
+        "items": totals["items"],
+        "transaction": txn,
+        "customer_name": user.get("name"),
+        "customer_email": user.get("email"),
+        "agency_message": SHOP_AGENCY_MESSAGE,
+        "note": (data.note or "")[:180],
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+    notif = {
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"],
+        "type": "shop_purchase",
+        "txn_id": txn_id,
+        "order_id": order_id,
+        "title": "Commande boutique confirmee",
+        "body": f"{reference}: paiement {totals['debit_amount']} {wallet_currency}. Retrait en agence FX Pro.",
+        "read": False,
+        "created_at": created_at,
+    }
+    await db.shop_orders.insert_one(order)
+    await db.transactions.insert_one(txn)
+    await db.notifications.insert_one(notif)
+    await send_push_to_user(user["user_id"], notif["title"], notif["body"], txn_id, "shop_purchase", notif["notif_id"])
+    order.pop("_id", None)
+    txn.pop("_id", None)
+    return {"ok": True, "order": order, "transaction": txn, "balances": updated_user.get("balances", {})}
 
 
 # ============ Transactions / Receipts ============
@@ -1746,6 +2025,8 @@ async def startup_seed():
     await db.users.create_index("user_id", unique=True)
     await db.user_sessions.create_index("session_token", unique=True)
     await db.transactions.create_index("created_at")
+    await db.shop_orders.create_index("created_at")
+    await db.shop_orders.create_index([("user_id", 1), ("client_order_id", 1)])
     await db.bonus_program.create_index("user_id", unique=True)
     await db.bonus_events.create_index("created_at")
     await db.risk_logs.create_index("created_at")

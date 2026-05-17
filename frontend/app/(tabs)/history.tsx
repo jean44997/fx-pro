@@ -8,7 +8,7 @@ import { GradientBg, GlassCard } from "../../src/ui";
 import { Colors, formatMoney } from "../../src/theme";
 import { useAuth, api } from "../../src/auth";
 
-type HistoryFilter = "all" | "transfer" | "convert" | "cash" | "vault" | "bonus" | "admin";
+type HistoryFilter = "all" | "transfer" | "convert" | "cash" | "vault" | "bonus" | "shop" | "admin";
 
 const FILTERS: { key: HistoryFilter; label: string; icon: any }[] = [
   { key: "all", label: "Tout", icon: "apps" },
@@ -17,6 +17,7 @@ const FILTERS: { key: HistoryFilter; label: string; icon: any }[] = [
   { key: "cash", label: "Depot/Retrait", icon: "cash" },
   { key: "vault", label: "Coffre", icon: "lock-closed" },
   { key: "bonus", label: "Bonus", icon: "gift" },
+  { key: "shop", label: "Boutique", icon: "bag-handle" },
   { key: "admin", label: "Admin", icon: "shield-checkmark" },
 ];
 
@@ -54,6 +55,7 @@ export default function History() {
     if (filter === "cash") return t.type === "deposit" || t.type === "withdraw";
     if (filter === "vault") return t.type === "vault_lock" || t.type === "vault_withdraw";
     if (filter === "bonus") return t.type === "bonus_credit";
+    if (filter === "shop") return t.type === "shop_purchase";
     return t.type === filter;
   }), [filter, items]);
 
@@ -109,7 +111,7 @@ export default function History() {
               <View style={styles.emptyState}>
                 <Ionicons name="receipt-outline" size={28} color={Colors.textMuted} />
                 <Text style={styles.emptyTitle}>Aucune transaction</Text>
-                <Text style={styles.emptyText}>Tirez vers le bas pour synchroniser l'historique.</Text>
+                <Text style={styles.emptyText}>Tirez vers le bas pour synchroniser historique.</Text>
               </View>
             </GlassCard>
           ) : (
@@ -247,6 +249,12 @@ function getTransactionVisual(t: any, userId?: string) {
     label = "Bonus credite";
     detail = safeParty(t.reference || "Programme bonus");
     amountText = `+${formatMoney(Number(t.amount || 0), t.currency)}`;
+  } else if (t.type === "shop_purchase") {
+    icon = "bag-handle";
+    color = Colors.orange;
+    label = "Achat boutique";
+    detail = safeParty(t.reference || "Commande FX Pro");
+    amountText = `-${formatMoney(Number(t.amount || 0), t.currency)}`;
   }
 
   return { icon, color, label, detail, amountText };
