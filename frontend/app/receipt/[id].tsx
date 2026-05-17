@@ -94,6 +94,7 @@ export default function Receipt() {
   }
 
   const primary = getPrimaryAmount(t);
+  const shopStats = t.type === "shop_purchase" ? getShopStats(t) : null;
 
   return (
     <GradientBg>
@@ -180,6 +181,29 @@ export default function Receipt() {
             </NeoCard>
           </Animated.View>
 
+          {shopStats ? (
+            <Animated.View entering={FadeInDown.delay(240)} style={styles.shopStats}>
+              <ReceiptStat icon="cube-outline" label="Articles" value={shopStats.items} color={Colors.cyan} />
+              <ReceiptStat icon="pricetag-outline" label="Economies" value={shopStats.savings} color={Colors.yellow} />
+              <ReceiptStat icon="storefront-outline" label="Retrait" value={shopStats.pickup} color={Colors.green} />
+            </Animated.View>
+          ) : null}
+
+          {t.type === "shop_purchase" && Array.isArray(t.items) ? (
+            <Animated.View entering={FadeInDown.delay(300)} style={styles.receiptItems}>
+              <Text style={styles.receiptItemsTitle}>Articles commandes</Text>
+              {t.items.slice(0, 10).map((item: any) => (
+                <View key={`${item.product_id}-${item.title}`} style={styles.receiptItemLine}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.receiptItemTitle} numberOfLines={1}>{item.title}</Text>
+                    <Text style={styles.receiptItemSub}>{item.sku || item.ref || item.category || "Produit boutique"} x {item.quantity}</Text>
+                  </View>
+                  <Text style={styles.receiptItemAmount}>{formatMoney(Number(item.line_total || 0), t.order_currency || t.currency)}</Text>
+                </View>
+              ))}
+            </Animated.View>
+          ) : null}
+
           <View style={{ paddingHorizontal: 0, marginTop: 8 }}>
             <PrimaryButton testID="share-receipt" title="Partager le reçu" icon={<Ionicons name="share" size={16} color="#000" />} onPress={shareReceipt} />
             <GhostButton testID="download-receipt" title="Télécharger le reçu" icon={<Ionicons name="download-outline" size={16} color="#fff" />} onPress={downloadReceipt} />
@@ -226,6 +250,25 @@ function getPrimaryAmount(t: any) {
   return formatMoney(t.amount || 0, t.currency || t.from_currency || "EUR");
 }
 
+function getShopStats(t: any) {
+  const itemCount = Number(t.item_count || t.items?.reduce?.((sum: number, item: any) => sum + Number(item.quantity || 0), 0) || 0);
+  return {
+    items: `${itemCount}`,
+    savings: formatMoney(Number(t.discount_total || 0), t.order_currency || t.currency || "EUR"),
+    pickup: t.pickup_status === "ready" ? "Pret" : t.pickup_status === "picked_up" ? "Livre" : "Agence",
+  };
+}
+
+function ReceiptStat({ icon, label, value, color }: any) {
+  return (
+    <View style={styles.receiptStat}>
+      <Ionicons name={icon} size={17} color={color} />
+      <Text style={styles.receiptStatLabel}>{label}</Text>
+      <Text style={styles.receiptStatValue} numberOfLines={1}>{value}</Text>
+    </View>
+  );
+}
+
 function buildReceiptText(t: any) {
   const lines = [
     "FX PRO 2026 - RECU SECURISE",
@@ -261,6 +304,7 @@ function buildReceiptText(t: any) {
     lines.push(`Commande: ${t.reference || t.shop_order_id || ""}`);
     lines.push(`Total boutique: ${formatMoney(t.order_total || t.amount || 0, t.order_currency || t.currency)}`);
     lines.push(`Portefeuille debite: ${formatMoney(t.amount || 0, t.currency)}`);
+    lines.push(`Economies: ${formatMoney(t.discount_total || 0, t.order_currency || t.currency)}`);
     lines.push(`Articles: ${t.item_count || t.items?.length || 0}`);
     if (Array.isArray(t.items)) {
       t.items.slice(0, 8).forEach((item: any) => lines.push(`- ${item.quantity} x ${item.title}`));
@@ -302,8 +346,10 @@ function receiptRows(t: any) {
       ["Commande", t.reference || t.shop_order_id || ""],
       ["Total boutique", formatMoney(t.order_total || t.amount || 0, t.order_currency || t.currency)],
       ["Portefeuille debite", formatMoney(t.amount || 0, t.currency)],
+      ["Economies", formatMoney(t.discount_total || 0, t.order_currency || t.currency)],
       ["Articles", `${t.item_count || t.items?.length || 0}`],
-      ["Retrait", "Agence FX Pro partenaire"]
+      ["Retrait", "Agence FX Pro partenaire"],
+      ["Signature prix", t.price_snapshot_hash || "Recalculee"]
     );
   }
   return rows;
@@ -375,6 +421,16 @@ const styles = StyleSheet.create({
   amountValue: { color: Colors.cyan, fontSize: 30, fontWeight: "900", marginTop: 6, maxWidth: "100%" },
   statusPill: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, marginTop: 10 },
   statusPillText: { color: "#fff", fontSize: 11, fontWeight: "900" },
+  shopStats: { flexDirection: "row", gap: 8, marginTop: 12 },
+  receiptStat: { flex: 1, minHeight: 74, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, padding: 11, backgroundColor: "rgba(255,255,255,0.055)" },
+  receiptStatLabel: { color: Colors.textMuted, fontSize: 9, fontWeight: "900", textTransform: "uppercase", marginTop: 6 },
+  receiptStatValue: { color: "#fff", fontSize: 13, fontWeight: "900", marginTop: 4 },
+  receiptItems: { marginTop: 12, borderRadius: 20, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.055)", padding: 14 },
+  receiptItemsTitle: { color: "#fff", fontSize: 15, fontWeight: "900", marginBottom: 8 },
+  receiptItemLine: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)" },
+  receiptItemTitle: { color: "#fff", fontSize: 12, fontWeight: "900" },
+  receiptItemSub: { color: Colors.textMuted, fontSize: 10, marginTop: 3 },
+  receiptItemAmount: { color: Colors.cyan, fontSize: 12, fontWeight: "900" },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
   rLbl: { color: Colors.textSoft, fontSize: 12, letterSpacing: 1, textTransform: "uppercase", width: 112, flexShrink: 0 },
   rVal: { color: "#fff", fontWeight: "700", flex: 1, minWidth: 0, textAlign: "right" },

@@ -837,6 +837,7 @@ def normalize_remote_shop_products(products: List[dict]) -> List[dict]:
         price = float(raw.get("price") or 0) or round_shop_money(18 + stable_shop_number(product_id + title) * 132, "USD")
         if price > 600:
             price = price / 100
+        price = max(0.75, min(price * (0.34 + stable_shop_number("api:" + product_id) * 0.18), 499 if price > 1000 else price))
         normalized.append({
             "id": f"api_{product_id}",
             "title": title,
@@ -850,8 +851,91 @@ def normalize_remote_shop_products(products: List[dict]) -> List[dict]:
             "stock": 8 + int(stable_shop_number(product_id + ":stock") * 34),
             "tags": [category, brand],
             "source": "apilayer",
+            "sku": str(raw.get("upc") or raw.get("sku") or f"API-{product_id}").upper(),
+            "ref": f"API-{product_id}",
+            "images": [image] if image else [],
+            "availability": "In Stock",
         })
-    return normalized[:18]
+    return normalized[:24]
+
+
+def normalize_dummyjson_shop_products(products: List[dict]) -> List[dict]:
+    normalized = []
+    for index, raw in enumerate(products or []):
+        product_id = str(raw.get("id") or index + 1)
+        title = str(raw.get("title") or "").strip()
+        if not title:
+            continue
+        category = str(raw.get("category") or "Catalogue").strip()
+        brand = str(raw.get("brand") or category or "FX Catalogue").strip()
+        images = [str(url) for url in raw.get("images") or [] if str(url).startswith("http")]
+        image = str(raw.get("thumbnail") or (images[0] if images else "") or SHOP_FALLBACK_PRODUCTS[index % len(SHOP_FALLBACK_PRODUCTS)]["image"])
+        raw_price = float(raw.get("price") or 0)
+        price = max(0.75, min(raw_price * (0.34 + stable_shop_number(f"dummy:{product_id}:{title}") * 0.18), 499 if raw_price > 1000 else raw_price))
+        meta = raw.get("meta") if isinstance(raw.get("meta"), dict) else {}
+        normalized.append({
+            "id": f"dummy_{product_id}",
+            "title": title,
+            "brand": brand,
+            "description": str(raw.get("description") or "Article catalogue avec retrait possible via une agence FX Pro partenaire."),
+            "category": category,
+            "image": image,
+            "base_currency": "USD",
+            "base_price": round_shop_money(price, "USD"),
+            "rating": round_shop_money(float(raw.get("rating") or 4.2), "USD"),
+            "stock": max(0, int(raw.get("stock") or 0)),
+            "tags": list(dict.fromkeys([*(raw.get("tags") or []), category, brand]))[:8],
+            "source": "dummyjson",
+            "sku": str(raw.get("sku") or f"DUMMY-{product_id}").upper(),
+            "ref": f"DMY-{product_id}",
+            "barcode": meta.get("barcode"),
+            "qr_code": meta.get("qrCode"),
+            "warranty": raw.get("warrantyInformation"),
+            "shipping": raw.get("shippingInformation"),
+            "availability": raw.get("availabilityStatus") or ("In Stock" if raw.get("stock") else "Out of Stock"),
+            "return_policy": raw.get("returnPolicy"),
+            "minimum_order_quantity": max(1, min(8, int(raw.get("minimumOrderQuantity") or 1))),
+            "images": list(dict.fromkeys([image, *images]))[:6],
+            "review_count": len(raw.get("reviews") or []),
+        })
+    return normalized[:150]
+
+
+def normalize_free_shop_products(products: List[dict]) -> List[dict]:
+    normalized = []
+    for index, raw in enumerate(products or []):
+        product_id = str(raw.get("id") or index + 1)
+        title = str(raw.get("name") or raw.get("title") or "").strip()
+        if not title:
+            continue
+        category = str(raw.get("category") or "Catalogue").strip()
+        sub_category = str(raw.get("subCategory") or category).strip()
+        image = str(raw.get("image") or SHOP_FALLBACK_PRODUCTS[index % len(SHOP_FALLBACK_PRODUCTS)]["image"])
+        price = float(raw.get("priceCents") or 0) / 100
+        price = max(0.75, min(price * (0.34 + stable_shop_number(f"free:{product_id}:{title}") * 0.18), 499 if price > 1000 else price))
+        rating = raw.get("rating") if isinstance(raw.get("rating"), dict) else {}
+        normalized.append({
+            "id": f"free_{product_id}",
+            "title": title,
+            "brand": sub_category or "Free Ecommerce API",
+            "description": str(raw.get("description") or "Article catalogue avec retrait possible via une agence FX Pro."),
+            "category": category,
+            "image": image,
+            "base_currency": "USD",
+            "base_price": round_shop_money(price, "USD"),
+            "rating": round_shop_money(float(rating.get("stars") or 4.4), "USD"),
+            "stock": 15 + int(stable_shop_number(f"free:{product_id}:stock") * 85),
+            "tags": list(dict.fromkeys([*(raw.get("keywords") or []), category, sub_category]))[:8],
+            "source": "freeapi",
+            "sku": f"FREE-{product_id.zfill(3)}",
+            "ref": f"FREE-{product_id}",
+            "images": [image],
+            "review_count": int(rating.get("count") or 0),
+            "availability": "In Stock",
+            "shipping": "Retrait agence ou expedition partenaire",
+            "return_policy": "Retour selon agence partenaire",
+        })
+    return normalized[:50]
 
 
 async def fetch_apilayer_shop_products(query: str = "premium snack") -> List[dict]:
@@ -879,27 +963,155 @@ async def fetch_apilayer_shop_products(query: str = "premium snack") -> List[dic
     return []
 
 
+async def fetch_dummyjson_shop_products(limit: int = 150) -> List[dict]:
+    fields = ",".join([
+        "id", "title", "description", "category", "price", "rating", "stock", "tags", "brand", "sku",
+        "warrantyInformation", "shippingInformation", "availabilityStatus", "returnPolicy",
+        "minimumOrderQuantity", "meta", "images", "thumbnail", "reviews",
+    ])
+    try:
+        async with httpx.AsyncClient(timeout=7) as h:
+            r = await h.get("https://dummyjson.com/products", params={"limit": limit, "select": fields})
+        if r.status_code != 200:
+            return []
+        body = r.json()
+        products = body.get("products") if isinstance(body, dict) else []
+        return normalize_dummyjson_shop_products(products or [])
+    except Exception as exc:
+        logger.warning("DummyJSON shop fetch failed: %s", exc)
+        return []
+
+
+async def fetch_free_ecommerce_shop_products() -> List[dict]:
+    try:
+        async with httpx.AsyncClient(timeout=5) as h:
+            r = await h.get("https://kolzsticks.github.io/Free-Ecommerce-Products-Api/main/products.json")
+        if r.status_code != 200:
+            return []
+        body = r.json()
+        return normalize_free_shop_products(body if isinstance(body, list) else [])
+    except Exception as exc:
+        logger.warning("Free Ecommerce shop fetch failed: %s", exc)
+        return []
+
+
+def dedupe_shop_products(products: List[dict]) -> List[dict]:
+    seen = set()
+    deduped = []
+    for product in products:
+        key = f"{str(product.get('title', '')).strip().lower()}:{str(product.get('category', '')).strip().lower()}"
+        sku_key = f"sku:{str(product.get('sku', '')).lower()}" if product.get("sku") else ""
+        if key in seen or (sku_key and sku_key in seen):
+            continue
+        seen.add(key)
+        if sku_key:
+            seen.add(sku_key)
+        deduped.append(product)
+    return deduped
+
+
+async def get_shop_overrides() -> List[dict]:
+    try:
+      return await db.shop_products.find({}, {"_id": 0}).to_list(500)
+    except Exception:
+      return []
+
+
+def apply_shop_overrides(products: List[dict], overrides: List[dict]) -> List[dict]:
+    if not overrides:
+        return products
+    by_key = {}
+    for override in overrides:
+        key = str(override.get("product_id") or override.get("id") or override.get("sku") or "").strip()
+        if key:
+            by_key[key] = override
+    merged = []
+    for product in products:
+        override = by_key.get(product["id"]) or by_key.get(str(product.get("sku") or ""))
+        if not override:
+            merged.append(product)
+            continue
+        if override.get("hidden") or override.get("visible") is False:
+            continue
+        patched = {**product}
+        for key in ["title", "brand", "description", "category", "image"]:
+            if override.get(key):
+                patched[key] = override[key]
+        price_override = override.get("price_override_usd", override.get("base_price"))
+        if price_override is not None and float(price_override or 0) > 0:
+            patched["base_price"] = round_shop_money(float(price_override), "USD")
+        stock_override = override.get("stock_override", override.get("stock"))
+        if stock_override is not None:
+            patched["stock"] = max(0, int(stock_override or 0))
+        if isinstance(override.get("tags"), list) and override["tags"]:
+            patched["tags"] = override["tags"][:8]
+        patched["admin_managed"] = True
+        merged.append(patched)
+    return merged
+
+
 def shop_promotions(products: List[dict]) -> List[dict]:
     today_key = now_utc().date().isoformat()
     ranked = sorted(products, key=lambda p: stable_shop_number(f"{today_key}:{p['id']}"))
     ends_at = datetime.combine(now_utc().date(), datetime.max.time(), tzinfo=timezone.utc)
+    discounts = [80, 50, 35, 25, 15, 10]
+    labels = ["Flash -80%", "Selection -50%", "Bonus -35%", "Prix doux -25%", "Client -15%", "Decouverte -10%"]
     promos = []
-    for index, product in enumerate(ranked[:2]):
+    for index, product in enumerate(ranked[:6]):
         promos.append({
             "product_id": product["id"],
-            "discount_percent": 80 if index == 0 else 50,
-            "label": "Flash -80%" if index == 0 else "Selection -50%",
+            "discount_percent": discounts[index],
+            "label": labels[index],
             "ends_at": ends_at,
         })
     return promos
 
 
-async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack") -> dict:
+async def announce_shop_available(user_id: str) -> None:
+    user = await db.users.find_one({"user_id": user_id}, {"shop_announced_at": 1})
+    if not user or user.get("shop_announced_at"):
+        return
+    created_at = now_utc()
+    notif = {
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "type": "shop_available",
+        "title": "Boutique disponible",
+        "body": "La section Boutique est active: recherche rapide, promos, paiement par solde et recus securises.",
+        "read": False,
+        "created_at": created_at,
+    }
+    await db.users.update_one({"user_id": user_id}, {"$set": {"shop_announced_at": created_at, "updated_at": created_at}})
+    await db.notifications.insert_one(notif)
+    await send_push_to_user(user_id, notif["title"], notif["body"], None, "shop_available", notif["notif_id"])
+
+
+async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack", user_id: Optional[str] = None) -> dict:
     rates_doc = await get_active_rates("EUR")
     rates = rates_doc.get("rates") or FALLBACK_RATES
-    remote = await fetch_apilayer_shop_products(query)
-    products = remote + [p for p in SHOP_FALLBACK_PRODUCTS if p["id"] not in {r["id"] for r in remote}]
-    promotions = shop_promotions(products)
+    remote, dummy, free, overrides = await asyncio.gather(
+        fetch_apilayer_shop_products(query),
+        fetch_dummyjson_shop_products(150),
+        fetch_free_ecommerce_shop_products(),
+        get_shop_overrides(),
+    )
+    if user_id:
+        await announce_shop_available(user_id)
+    products = apply_shop_overrides(dedupe_shop_products(remote + dummy + free + SHOP_FALLBACK_PRODUCTS), overrides)[:200]
+    product_ids = {p["id"] for p in products}
+    admin_promos = []
+    for override in overrides:
+        product_id = str(override.get("product_id") or override.get("id") or "")
+        if override.get("promo_active") and product_id in product_ids:
+            discount = max(1, min(90, int(override.get("promo_discount", override.get("discount_override", 10)) or 10)))
+            admin_promos.append({
+                "product_id": product_id,
+                "discount_percent": discount,
+                "label": f"Admin -{discount}%",
+                "ends_at": datetime.combine(now_utc().date(), datetime.max.time(), tzinfo=timezone.utc),
+            })
+    promotion_ids = {p["product_id"] for p in admin_promos}
+    promotions = (admin_promos + [p for p in shop_promotions(products) if p["product_id"] not in promotion_ids])[:10]
     promo_map = {p["product_id"]: p for p in promotions}
     code = normalize_shop_currency(currency)
     priced = []
@@ -908,37 +1120,61 @@ async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack"
         promo = promo_map.get(product["id"])
         price = round_shop_money(original * (1 - (promo["discount_percent"] / 100)), code) if promo else original
         priced.append({**product, "original_price": original, "price": price, "currency": code, "promotion": promo})
-    source = "mixed" if remote else "fallback"
+    source = "mixed" if (remote or dummy or free) else "fallback"
     return {"products": priced, "promotions": promotions, "currency": code, "source": source, "updated_at": now_utc(), "agency_message": SHOP_AGENCY_MESSAGE}
 
 
 def calculate_shop_cart(products: List[dict], lines: List[ShopCartLineIn], order_currency: str, wallet_currency: str, rates: Dict[str, float]) -> dict:
     product_map = {p["id"]: p for p in products}
+    seen = set()
     items = []
+    if len(lines) > 30:
+        raise HTTPException(status_code=400, detail="Panier trop volumineux")
     for line in lines:
+        if line.product_id in seen:
+            raise HTTPException(status_code=400, detail="Produit en doublon detecte dans le panier")
+        seen.add(line.product_id)
         product = product_map.get(line.product_id)
         if not product:
             continue
         qty = max(1, min(8, int(line.quantity or 1)))
         if qty > int(product.get("stock") or 0):
             raise HTTPException(status_code=400, detail=f"{product['title']}: stock insuffisant")
+        if float(product.get("price") or 0) <= 0:
+            raise HTTPException(status_code=400, detail=f"{product['title']}: prix invalide")
+        savings = round_shop_money(max(0, (float(product["original_price"]) - float(product["price"])) * qty), order_currency)
         items.append({
             "product_id": product["id"],
             "title": product["title"],
             "brand": product["brand"],
             "image": product["image"],
             "category": product["category"],
+            "sku": product.get("sku"),
+            "ref": product.get("ref"),
             "quantity": qty,
             "unit_price": product["price"],
             "original_unit_price": product["original_price"],
             "discount_percent": (product.get("promotion") or {}).get("discount_percent", 0),
             "line_total": round_shop_money(product["price"] * qty, order_currency),
+            "savings": savings,
         })
     if not items:
         raise HTTPException(status_code=400, detail="Panier vide ou produits indisponibles")
     total = round_shop_money(sum(item["line_total"] for item in items), order_currency)
+    discount_total = round_shop_money(sum(item.get("savings") or 0 for item in items), order_currency)
     debit = convert_shop_money(total, order_currency, wallet_currency, rates)
-    return {"items": items, "total": total, "currency": order_currency, "wallet_currency": wallet_currency, "debit_amount": debit}
+    snapshot = hashlib.sha256(str([[i["product_id"], i["quantity"], i["unit_price"], i["discount_percent"]] for i in items]).encode()).hexdigest()[:12]
+    if total <= 0 or debit <= 0:
+        raise HTTPException(status_code=400, detail="Montant de commande invalide")
+    return {
+        "items": items,
+        "total": total,
+        "discount_total": discount_total,
+        "currency": order_currency,
+        "wallet_currency": wallet_currency,
+        "debit_amount": debit,
+        "price_snapshot_hash": f"sp_{snapshot}",
+    }
 
 
 @api.get("/rates")
@@ -1417,8 +1653,8 @@ async def qr_lookup(code: str, _: dict = Depends(get_current_user)):
 
 # ============ Shop ============
 @api.get("/shop/catalog")
-async def shop_catalog(currency: str = "XOF", q: str = "premium snack", _: dict = Depends(get_current_user)):
-    return await build_shop_catalog(currency, q)
+async def shop_catalog(currency: str = "XOF", q: str = "premium snack", user: dict = Depends(get_current_user)):
+    return await build_shop_catalog(currency, q, user["user_id"])
 
 
 @api.get("/shop/orders")
@@ -1427,17 +1663,61 @@ async def shop_orders(user: dict = Depends(get_current_user)):
     return {"items": items}
 
 
+@api.get("/admin/shop/products")
+async def admin_shop_products(_: dict = Depends(require_admin)):
+    items = await db.shop_products.find({}, {"_id": 0}).to_list(500)
+    return {"items": items}
+
+
+@api.patch("/admin/shop/products/{product_id}")
+async def admin_patch_shop_product(product_id: str, payload: Dict[str, Any], admin: dict = Depends(require_admin)):
+    allowed = {
+        "title", "brand", "description", "category", "image", "price_override_usd", "base_price",
+        "discount_override", "promo_active", "promo_discount", "stock_override", "stock", "hidden",
+        "visible", "tags",
+    }
+    patch = {k: v for k, v in payload.items() if k in allowed}
+    patch.update({"product_id": product_id, "updated_at": now_utc(), "updated_by": admin["user_id"]})
+    await db.shop_products.update_one({"product_id": product_id}, {"$set": patch}, upsert=True)
+    return {"ok": True}
+
+
 @api.post("/shop/checkout")
 async def shop_checkout(data: ShopCheckoutIn, user: dict = Depends(get_current_user)):
     order_currency = normalize_shop_currency(data.currency)
     wallet_currency = normalize_shop_currency(data.wallet_currency or order_currency)
+    if not data.items or len(data.items) > 20 or len({item.product_id for item in data.items}) != len(data.items):
+        await db.risk_logs.insert_one({
+            "event_id": f"risk_{uuid.uuid4().hex[:10]}",
+            "user_id": user["user_id"],
+            "type": "shop_checkout",
+            "reason": "invalid_cart_shape",
+            "created_at": now_utc(),
+        })
+        raise HTTPException(status_code=400, detail="Panier invalide: doublon ou volume suspect detecte")
+    if data.client_order_id and not data.client_order_id.startswith("shop_"):
+        raise HTTPException(status_code=400, detail="Identifiant de commande invalide")
     if data.client_order_id:
         existing = await db.shop_orders.find_one({"user_id": user["user_id"], "client_order_id": data.client_order_id}, {"_id": 0})
         if existing:
             return {"ok": True, "duplicate": True, "order": existing, "transaction": existing.get("transaction")}
+    last_order = await db.shop_orders.find_one({"user_id": user["user_id"]}, {"_id": 0}, sort=[("created_at", -1)])
+    last_created = last_order.get("created_at") if last_order else None
+    if last_created and getattr(last_created, "tzinfo", None) is None:
+        last_created = last_created.replace(tzinfo=timezone.utc)
+    if last_created and (now_utc() - last_created).total_seconds() < 4.5:
+        await db.risk_logs.insert_one({
+            "event_id": f"risk_{uuid.uuid4().hex[:10]}",
+            "user_id": user["user_id"],
+            "type": "shop_checkout",
+            "reason": "rapid_checkout",
+            "last_order_id": last_order.get("order_id"),
+            "created_at": now_utc(),
+        })
+        raise HTTPException(status_code=429, detail="Commande trop rapide. Patiente quelques secondes avant de revalider.")
 
     rates_doc = await get_active_rates("EUR")
-    catalog = await build_shop_catalog(order_currency, data.query or "premium snack")
+    catalog = await build_shop_catalog(order_currency, data.query or "market", user["user_id"])
     totals = calculate_shop_cart(catalog["products"], data.items, order_currency, wallet_currency, rates_doc.get("rates") or FALLBACK_RATES)
     balance_key = f"balances.{wallet_currency}"
     updated_user = await db.users.find_one_and_update(
@@ -1467,6 +1747,8 @@ async def shop_checkout(data: ShopCheckoutIn, user: dict = Depends(get_current_u
         "currency": wallet_currency,
         "order_total": totals["total"],
         "order_currency": order_currency,
+        "discount_total": totals["discount_total"],
+        "price_snapshot_hash": totals["price_snapshot_hash"],
         "shop_order_id": order_id,
         "reference": reference,
         "items": totals["items"],
@@ -1487,6 +1769,8 @@ async def shop_checkout(data: ShopCheckoutIn, user: dict = Depends(get_current_u
         "wallet_currency": wallet_currency,
         "total": totals["total"],
         "debit_amount": totals["debit_amount"],
+        "discount_total": totals["discount_total"],
+        "price_snapshot_hash": totals["price_snapshot_hash"],
         "items": totals["items"],
         "transaction": txn,
         "customer_name": user.get("name"),
@@ -2027,6 +2311,7 @@ async def startup_seed():
     await db.transactions.create_index("created_at")
     await db.shop_orders.create_index("created_at")
     await db.shop_orders.create_index([("user_id", 1), ("client_order_id", 1)])
+    await db.shop_products.create_index("product_id", unique=True)
     await db.bonus_program.create_index("user_id", unique=True)
     await db.bonus_events.create_index("created_at")
     await db.risk_logs.create_index("created_at")

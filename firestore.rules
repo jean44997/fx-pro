@@ -66,6 +66,17 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    match /fxpro_shop_orders/{orderId} {
+      allow read: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
+      allow create: if signedIn() && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    match /fxpro_shop_products/{productId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
     match /fxpro_push_tokens/{userId} {
       allow read, write: if isSelf(userId) || isAdmin();
     }

@@ -43,9 +43,13 @@ import {
   buildShopCatalogPayload,
   calculateShopCart,
   fetchApilayerShopProducts,
+  fetchDummyJsonShopProducts,
+  fetchFreeEcommerceShopProducts,
+  hashShopCartSnapshot,
   normalizeShopCurrency,
   SHOP_AGENCY_MESSAGE,
   type ShopCartLine,
+  type ShopProductOverride,
 } from "./shopCatalog";
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
@@ -62,6 +66,7 @@ const BONUS = "fxpro_bonus";
 const BONUS_EVENTS = "fxpro_bonus_events";
 const RISK_LOGS = "fxpro_risk_logs";
 const SHOP_ORDERS = "fxpro_shop_orders";
+const SHOP_PRODUCTS = "fxpro_shop_products";
 const APILAYER_SHOP_KEY = process.env.EXPO_PUBLIC_APILAYER_KEY || "";
 const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_USD", "EUR_XOF"];
 const MAX_INLINE_PROFILE_PICTURE_CHARS = 700000;
@@ -638,11 +643,61 @@ async function deleteProfilePicture(userId: string) {
   );
 }
 
-async function getShopCatalog(currency?: string, queryText?: string) {
+async function getShopProductOverrides() {
+  try {
+    const snap = await getDocs(collection(db, SHOP_PRODUCTS));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as ShopProductOverride[];
+  } catch {
+    return [];
+  }
+}
+
+async function announceShopIfNeeded(userId: string) {
+  const userRef = doc(db, USERS, userId);
+  const snap = await getDoc(userRef);
+  if (snap.data()?.shop_announced_at) return;
+  const notifId = makeId("ntf");
+  const createdAt = nowIso();
+  await Promise.all([
+    updateDoc(userRef, { shop_announced_at: createdAt, updated_at: createdAt }).catch(() => undefined),
+    setDoc(doc(db, NOTIFS, notifId), {
+      notif_id: notifId,
+      user_id: userId,
+      type: "shop_available",
+      title: "Boutique disponible",
+      body: "La section Boutique est active: recherche rapide, promos, paiement par solde et recus securises.",
+      read: false,
+      created_at: createdAt,
+    }).catch(() => undefined),
+  ]);
+}
+
+async function logShopRisk(userId: string, reason: string, payload: any = {}) {
+  const eventId = makeId("risk");
+  await setDoc(doc(db, RISK_LOGS, eventId), {
+    event_id: eventId,
+    user_id: userId,
+    type: "shop_checkout",
+    reason,
+    payload,
+    created_at: nowIso(),
+  }).catch(() => undefined);
+}
+
+async function getShopCatalog(currency?: string, queryText?: string, userId?: string) {
   const ratesPayload = await getRates();
-  const remoteProducts = await fetchApilayerShopProducts(APILAYER_SHOP_KEY, queryText || "premium snack");
+  const [remoteProducts, dummyProducts, freeProducts, overrides] = await Promise.all([
+    fetchApilayerShopProducts(APILAYER_SHOP_KEY, queryText || "market"),
+    fetchDummyJsonShopProducts(150),
+    fetchFreeEcommerceShopProducts(),
+    getShopProductOverrides(),
+  ]);
+  if (userId) await announceShopIfNeeded(userId);
   return buildShopCatalogPayload({
     remoteProducts,
+    dummyProducts,
+    freeProducts,
+    overrides,
     currency: normalizeShopCurrency(currency),
     rates: ratesPayload.rates || FALLBACK_RATES,
   });
@@ -954,8 +1009,8 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   }
 
   if (pathname === "/shop/catalog") {
-    await requireFirebaseUser();
-    return getShopCatalog(url.searchParams.get("currency") || "XOF", url.searchParams.get("q") || "premium snack");
+    const firebaseUser = await requireFirebaseUser();
+    return getShopCatalog(url.searchParams.get("currency") || "XOF", url.searchParams.get("q") || "market", firebaseUser.uid);
   }
 
   if (pathname === "/shop/orders") {
@@ -970,7 +1025,15 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     const walletCurrency = normalizeShopCurrency(body.wallet_currency || orderCurrency);
     const lines = Array.isArray(body.items) ? (body.items as ShopCartLine[]) : [];
     const clientOrderId = String(body.client_order_id || "");
-
+    const uniqueProductIds = new Set(lines.map((line) => String(line.product_id || "")));
+    if (!lines.length || lines.length > 20 || uniqueProductIds.size !== lines.length) {
+      await logShopRisk(firebaseUser.uid, "invalid_cart_shape", { count: lines.length, unique: uniqueProductIds.size });
+      throw new Error("Panier invalide: doublon ou volume suspect detecte.");
+    }
+    if (clientOrderId && !/^shop_[a-z0-9]{8,32}$/i.test(clientOrderId)) {
+      await logShopRisk(firebaseUser.uid, "invalid_client_order_id", { clientOrderId });
+      throw new Error("Identifiant de commande invalide.");
+    }
     if (clientOrderId) {
       const existing = await getDocs(
         query(collection(db, SHOP_ORDERS), where("user_id", "==", firebaseUser.uid), where("client_order_id", "==", clientOrderId), limit(1))
@@ -980,9 +1043,15 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
         return { ok: true, duplicate: true, order, transaction: order.transaction };
       }
     }
+    const recentOrders = await getUserShopOrders(firebaseUser.uid).catch(() => ({ items: [] }));
+    const lastOrder = recentOrders.items?.[0];
+    if (lastOrder?.created_at && Date.now() - new Date(lastOrder.created_at).getTime() < 4500) {
+      await logShopRisk(firebaseUser.uid, "rapid_checkout", { last_order_id: lastOrder.order_id });
+      throw new Error("Commande trop rapide. Patiente quelques secondes avant de revalider.");
+    }
 
     const ratesPayload = await getRates();
-    const catalog = await getShopCatalog(orderCurrency, body.query || "premium snack");
+    const catalog = await getShopCatalog(orderCurrency, body.query || "market", firebaseUser.uid);
     const totals = calculateShopCart({
       products: catalog.products,
       lines,
@@ -990,6 +1059,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       walletCurrency,
       rates: ratesPayload.rates || FALLBACK_RATES,
     });
+    const priceSnapshotHash = totals.price_snapshot_hash || hashShopCartSnapshot(totals.items, totals.total, orderCurrency);
 
     const orderId = makeId("ord");
     const txnId = makeId("txn");
@@ -1010,6 +1080,8 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       currency: walletCurrency,
       order_total: totals.total,
       order_currency: orderCurrency,
+      discount_total: totals.discount_total,
+      price_snapshot_hash: priceSnapshotHash,
       shop_order_id: orderId,
       reference,
       items: totals.items,
@@ -1030,6 +1102,8 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       wallet_currency: walletCurrency,
       total: totals.total,
       debit_amount: totals.debit_amount,
+      discount_total: totals.discount_total,
+      price_snapshot_hash: priceSnapshotHash,
       items: totals.items,
       transaction,
       customer_name: profile.name,
@@ -1067,6 +1141,40 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       });
     });
     return { ok: true, order, transaction, balances };
+  }
+
+  if (pathname === "/admin/shop/products" && method === "GET") {
+    const profile = await currentProfile();
+    if (profile.role !== "admin") throw new Error("Admin requis.");
+    const snap = await getDocs(collection(db, SHOP_PRODUCTS));
+    return { items: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+  }
+
+  if (pathname.startsWith("/admin/shop/products/") && method === "PATCH") {
+    const profile = await currentProfile();
+    if (profile.role !== "admin") throw new Error("Admin requis.");
+    const id = decodeURIComponent(pathname.split("/").pop() || "");
+    if (!id) throw new Error("Produit invalide.");
+    const allowed = [
+      "title",
+      "brand",
+      "description",
+      "category",
+      "image",
+      "price_override_usd",
+      "base_price",
+      "discount_override",
+      "promo_active",
+      "promo_discount",
+      "stock_override",
+      "stock",
+      "hidden",
+      "visible",
+      "tags",
+    ];
+    const patch = Object.fromEntries(Object.entries(body).filter(([key]) => allowed.includes(key)));
+    await setDoc(doc(db, SHOP_PRODUCTS, id), { product_id: id, ...patch, updated_at: nowIso(), updated_by: profile.user_id }, { merge: true });
+    return { ok: true };
   }
 
   if (pathname === "/transactions") {

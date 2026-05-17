@@ -26,12 +26,13 @@ import {
   buildShopCatalogPayload,
   calculateShopCart,
   convertShopMoney,
+  fetchDummyJsonShopProducts,
+  fetchFreeEcommerceShopProducts,
   type ShopCatalogPayload,
 } from "../src/shopCatalog";
 
 type CartState = Record<string, number>;
-
-const QUICK_SEARCHES = ["premium snack", "coffee", "energy", "chocolate", "tea", "protein"];
+type ShopSection = "buy" | "orders" | "promos" | "help";
 
 export default function Shop() {
   const router = useRouter();
@@ -39,8 +40,10 @@ export default function Shop() {
   const { user, refresh } = useAuth();
   const [currency, setCurrency] = useState(user?.bonus_country === "FR" ? "EUR" : "XOF");
   const [walletCurrency, setWalletCurrency] = useState(currency);
-  const [query, setQuery] = useState("premium snack");
+  const [query, setQuery] = useState("");
   const [category, setCategory] = useState("Tout");
+  const [activeSection, setActiveSection] = useState<ShopSection>("buy");
+  const [visibleLimit, setVisibleLimit] = useState(24);
   const [catalog, setCatalog] = useState<ShopCatalogPayload | null>(null);
   const [rates, setRates] = useState<Record<string, number>>({});
   const [orders, setOrders] = useState<any[]>([]);
@@ -58,7 +61,7 @@ export default function Shop() {
     setLoading(true);
     try {
       const [catalogResponse, ratesResponse, orderResponse] = await Promise.all([
-        api.get(`/shop/catalog?currency=${encodeURIComponent(currency)}&q=${encodeURIComponent(query)}`),
+        api.get(`/shop/catalog?currency=${encodeURIComponent(currency)}&q=market`),
         api.get("/rates").catch(() => ({ rates: {} })),
         api.get("/shop/orders").catch(() => ({ items: [] })),
       ]);
@@ -66,13 +69,17 @@ export default function Shop() {
       setRates(ratesResponse.rates || {});
       setOrders(Array.isArray(orderResponse.items) ? orderResponse.items : []);
     } catch {
-      const fallbackRates = await api.get("/rates").catch(() => ({ rates: {} }));
+      const [fallbackRates, dummyProducts, freeProducts] = await Promise.all([
+        api.get("/rates").catch(() => ({ rates: {} })),
+        fetchDummyJsonShopProducts(150),
+        fetchFreeEcommerceShopProducts(),
+      ]);
       setRates(fallbackRates.rates || {});
-      setCatalog(buildShopCatalogPayload({ currency, rates: fallbackRates.rates || {} }));
+      setCatalog(buildShopCatalogPayload({ dummyProducts, freeProducts, currency, rates: fallbackRates.rates || {} }));
     } finally {
       setLoading(false);
     }
-  }, [currency, query]);
+  }, [currency]);
 
   useEffect(() => {
     load();
@@ -82,6 +89,10 @@ export default function Shop() {
     setWalletCurrency(currency);
   }, [currency]);
 
+  useEffect(() => {
+    setVisibleLimit(24);
+  }, [category, query]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([load(), refresh()]);
@@ -90,10 +101,44 @@ export default function Shop() {
 
   const products = useMemo(() => catalog?.products || [], [catalog]);
   const categories = useMemo(() => ["Tout", ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))], [products]);
-  const visibleProducts = useMemo(() => {
-    return products.filter((product) => category === "Tout" || product.category === category);
-  }, [category, products]);
-  const promoProducts = useMemo(() => products.filter((product) => product.promotion).slice(0, 2), [products]);
+  const quickSearches = useMemo(() => {
+    const tags = products.flatMap((product) => product.tags || []).filter(Boolean);
+    return Array.from(new Set(tags)).slice(0, 10);
+  }, [products]);
+  const filteredProducts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return products.filter((product) => {
+      const inCategory = category === "Tout" || product.category === category;
+      if (!inCategory) return false;
+      if (!q) return true;
+      const haystack = [product.title, product.brand, product.category, product.description, product.sku, product.ref, ...(product.tags || [])]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [category, products, query]);
+  const visibleProducts = useMemo(() => filteredProducts.slice(0, visibleLimit), [filteredProducts, visibleLimit]);
+  const promoProducts = useMemo(() => products.filter((product) => product.promotion), [products]);
+  const suggestions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return quickSearches.slice(0, 6).map((label) => ({ type: "tag", label, sub: undefined as string | undefined }));
+    const seen = new Set<string>();
+    const productHits = products
+      .filter((product) => [product.title, product.brand, product.category, ...(product.tags || [])].join(" ").toLowerCase().includes(q))
+      .map((product) => ({ type: "product", label: product.title, sub: product.brand || product.category }))
+      .filter((item) => {
+        const key = item.label.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 6);
+    const tagHits = quickSearches
+      .filter((tag) => tag.toLowerCase().includes(q) && !seen.has(tag.toLowerCase()))
+      .slice(0, 3)
+      .map((label) => ({ type: "tag", label, sub: undefined as string | undefined }));
+    return [...productHits, ...tagHits].slice(0, 8);
+  }, [products, query, quickSearches]);
   const cartLines = useMemo(() => Object.entries(cart).map(([product_id, quantity]) => ({ product_id, quantity })), [cart]);
   const cartCount = cartLines.reduce((sum, line) => sum + line.quantity, 0);
   const cartTotals = useMemo(() => {
@@ -113,10 +158,30 @@ export default function Shop() {
   const walletBalance = Number((user?.balances || {})[walletCurrency] || 0);
   const debitAmount = cartTotals?.debit_amount || 0;
   const canPay = cartCount > 0 && walletBalance >= debitAmount && !checkingOut;
+  const bestWallet = useMemo(() => {
+    if (!cartTotals) return walletCurrency;
+    const balances = user?.balances || {};
+    return (
+      CURRENCIES.map((item) => {
+        const debit = convertShopMoney(cartTotals.total, currency, item.code, rates);
+        const balance = Number((balances as any)[item.code] || 0);
+        return { code: item.code, debit, balance, ok: balance >= debit };
+      })
+        .sort((a, b) => Number(b.ok) - Number(a.ok) || b.balance - a.balance)[0]?.code || walletCurrency
+    );
+  }, [cartTotals, currency, rates, user?.balances, walletCurrency]);
+
+  useEffect(() => {
+    if (cartCount > 0 && bestWallet !== walletCurrency && walletBalance < debitAmount) setWalletCurrency(bestWallet);
+  }, [bestWallet, cartCount, debitAmount, walletBalance, walletCurrency]);
 
   const addToCart = (productId: string, quantity = 1) => {
+    const product = products.find((item) => item.id === productId);
+    if (!product || product.stock <= 0) {
+      Alert.alert("Produit indisponible", "Cet article n'est pas disponible pour le moment.");
+      return;
+    }
     setCart((current) => {
-      const product = products.find((item) => item.id === productId);
       const nextQty = Math.min(product?.stock || 8, Math.max(1, (current[productId] || 0) + quantity));
       return { ...current, [productId]: nextQty };
     });
@@ -126,8 +191,10 @@ export default function Shop() {
   const setLineQty = (productId: string, quantity: number) => {
     setCart((current) => {
       const copy = { ...current };
+      const product = products.find((item) => item.id === productId);
+      const max = Math.max(1, Math.min(8, Number(product?.stock || 1)));
       if (quantity <= 0) delete copy[productId];
-      else copy[productId] = Math.min(8, Math.floor(quantity));
+      else copy[productId] = Math.min(max, Math.floor(quantity));
       return copy;
     });
   };
@@ -147,7 +214,7 @@ export default function Shop() {
         items: cartLines,
         currency,
         wallet_currency: walletCurrency,
-        query,
+        query: query || "market",
         client_order_id: makeClientOrderId(),
       });
       setCart({});
@@ -193,6 +260,29 @@ export default function Shop() {
             </View>
           </Animated.View>
 
+          <View style={styles.statGrid}>
+            <ShopStat icon="storefront" label="Catalogue" value={`${products.length || "..."} articles`} />
+            <ShopStat icon="pricetags" label="Promos" value={`${promoProducts.length || 0} actives`} />
+            <ShopStat icon="receipt" label="Commandes" value={`${orders.length} recu(s)`} />
+          </View>
+
+          <View style={styles.sectionTabs}>
+            {[
+              ["buy", "Acheter", "storefront-outline"],
+              ["orders", "Commandes", "receipt-outline"],
+              ["promos", "Promos", "pricetags-outline"],
+              ["help", "Aide", "shield-checkmark-outline"],
+            ].map(([key, label, icon]) => {
+              const active = activeSection === key;
+              return (
+                <Pressable key={key} onPress={() => setActiveSection(key as ShopSection)} style={[styles.sectionTab, active && styles.sectionTabActive]}>
+                  <Ionicons name={icon as any} size={15} color={active ? "#000" : Colors.textSoft} />
+                  <Text style={[styles.sectionTabText, active && styles.sectionTabTextActive]}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
           <SectionTitle title="Devise boutique" subtitle="Les prix se recalculent automatiquement avec les taux live disponibles." />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
             {CURRENCIES.map((item) => {
@@ -211,17 +301,29 @@ export default function Shop() {
               testID="shop-search"
               value={query}
               onChangeText={setQuery}
-              onSubmitEditing={load}
-              placeholder="Rechercher un catalogue"
+              placeholder="Tape une lettre: produit, marque, categorie, mot-cle"
               placeholderTextColor={Colors.textMuted}
               style={styles.searchInput}
             />
-            <Pressable onPress={load} style={styles.searchButton}>
-              <Ionicons name="refresh" size={16} color="#000" />
+            <Pressable onPress={() => setQuery("")} style={styles.searchButton}>
+              <Ionicons name={query ? "close" : "sparkles"} size={16} color="#000" />
             </Pressable>
           </View>
+          {suggestions.length ? (
+            <View style={styles.suggestionsBox}>
+              {suggestions.map((item) => (
+                <Pressable key={`${item.type}-${item.label}`} onPress={() => setQuery(item.label)} style={styles.suggestionItem}>
+                  <Ionicons name={item.type === "product" ? "cube-outline" : "pricetag-outline"} size={15} color={Colors.cyan} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.suggestionTitle} numberOfLines={1}>{item.label}</Text>
+                    {item.sub ? <Text style={styles.suggestionSub} numberOfLines={1}>{item.sub}</Text> : null}
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {QUICK_SEARCHES.map((item) => (
+            {quickSearches.map((item) => (
               <Pressable key={item} onPress={() => setQuery(item)} style={[styles.quickChip, query === item && styles.quickChipActive]}>
                 <Text style={[styles.quickChipText, query === item && { color: "#000" }]}>{item}</Text>
               </Pressable>
@@ -235,58 +337,97 @@ export default function Shop() {
             </View>
           ) : (
             <>
-              <SectionTitle title="Promotions du jour" subtitle="Deux offres limitees sont choisies automatiquement chaque jour." />
-              <View style={styles.promoGrid}>
-                {promoProducts.map((product, index) => (
-                  <PromoCard key={product.id} product={product} index={index} onOpen={() => setSelected(product)} onAdd={() => addToCart(product.id)} />
-                ))}
-              </View>
+              {activeSection === "buy" ? (
+                <>
+                  <SectionTitle title="Top promos" subtitle="Deux articles du jour profitent de -80% et -50%." />
+                  <View style={styles.promoGrid}>
+                    {promoProducts.slice(0, 2).map((product, index) => (
+                      <PromoCard key={product.id} product={product} index={index} onOpen={() => setSelected(product)} onAdd={() => addToCart(product.id)} />
+                    ))}
+                  </View>
+                  <SectionTitle title="Rayons" subtitle="La recherche reste locale: une lettre suffit pour filtrer sans ralentir le catalogue." />
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                    {categories.map((item) => {
+                      const active = category === item;
+                      return (
+                        <Pressable key={item} onPress={() => setCategory(item)} style={[styles.categoryChip, active && styles.categoryChipActive]}>
+                          <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>{item}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
 
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                {categories.map((item) => {
-                  const active = category === item;
-                  return (
-                    <Pressable key={item} onPress={() => setCategory(item)} style={[styles.categoryChip, active && styles.categoryChipActive]}>
-                      <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>{item}</Text>
+                  <SectionTitle title="Catalogue" subtitle={`${filteredProducts.length} resultat(s), ${products.length} article(s) charges - source ${catalog?.source || "fallback"}.`} />
+                  <View style={styles.productGrid}>
+                    {visibleProducts.map((product, index) => (
+                      <ProductCard
+                        key={product.id}
+                        product={product}
+                        index={index}
+                        width={cardWidth}
+                        onOpen={() => setSelected(product)}
+                        onAdd={() => addToCart(product.id)}
+                      />
+                    ))}
+                  </View>
+                  {visibleProducts.length < filteredProducts.length ? (
+                    <Pressable onPress={() => setVisibleLimit((value) => value + 24)} style={styles.moreButton}>
+                      <Ionicons name="chevron-down" size={17} color="#000" />
+                      <Text style={styles.moreButtonText}>Voir plus</Text>
                     </Pressable>
-                  );
-                })}
-              </ScrollView>
+                  ) : null}
+                </>
+              ) : null}
 
-              <SectionTitle title="Catalogue" subtitle={`${visibleProducts.length} produit(s) disponibles - source ${catalog?.source || "fallback"}.`} />
-              <View style={styles.productGrid}>
-                {visibleProducts.map((product, index) => (
-                  <ProductCard
-                    key={product.id}
-                    product={product}
-                    index={index}
-                    width={cardWidth}
-                    onOpen={() => setSelected(product)}
-                    onAdd={() => addToCart(product.id)}
-                  />
-                ))}
-              </View>
+              {activeSection === "orders" ? (
+                <>
+                  <SectionTitle title="Commandes" subtitle="Suivi, recu et retrait agence restent au meme endroit." />
+                  {orders.length ? (
+                    orders.map((order) => (
+                      <Pressable key={order.order_id} onPress={() => order.transaction?.txn_id && router.push({ pathname: "/receipt/[id]", params: { id: order.transaction.txn_id } })} style={styles.orderCard}>
+                        <View style={styles.orderIcon}>
+                          <Ionicons name="receipt-outline" size={20} color={Colors.cyan} />
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={styles.orderTitle} numberOfLines={1}>{order.reference || order.order_id}</Text>
+                          <Text style={styles.orderText} numberOfLines={2}>{order.items?.length || 0} article(s) - {pickupLabel(order.pickup_status)}</Text>
+                        </View>
+                        <View style={{ alignItems: "flex-end" }}>
+                          <Text style={styles.orderAmount}>{formatMoney(Number(order.total || 0), order.currency || currency)}</Text>
+                          <Text style={styles.orderStatus}>{order.payment_status === "paid" ? "Payee" : "En attente"}</Text>
+                        </View>
+                      </Pressable>
+                    ))
+                  ) : (
+                    <View style={styles.emptyOrders}>
+                      <Ionicons name="bag-outline" size={24} color={Colors.textMuted} />
+                      <Text style={styles.emptyOrdersText}>Aucune commande pour le moment.</Text>
+                    </View>
+                  )}
+                </>
+              ) : null}
 
-              <SectionTitle title="Commandes recentes" subtitle="Recu securise disponible apres paiement." />
-              {orders.length ? (
-                orders.slice(0, 4).map((order) => (
-                  <Pressable key={order.order_id} onPress={() => order.transaction?.txn_id && router.push({ pathname: "/receipt/[id]", params: { id: order.transaction.txn_id } })} style={styles.orderCard}>
-                    <View style={styles.orderIcon}>
-                      <Ionicons name="receipt-outline" size={20} color={Colors.cyan} />
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={styles.orderTitle} numberOfLines={1}>{order.reference || order.order_id}</Text>
-                      <Text style={styles.orderText} numberOfLines={2}>{order.items?.length || 0} article(s) - retrait agence en preparation</Text>
-                    </View>
-                    <Text style={styles.orderAmount}>{formatMoney(Number(order.total || 0), order.currency || currency)}</Text>
-                  </Pressable>
-                ))
-              ) : (
-                <View style={styles.emptyOrders}>
-                  <Ionicons name="bag-outline" size={24} color={Colors.textMuted} />
-                  <Text style={styles.emptyOrdersText}>Aucune commande pour le moment.</Text>
+              {activeSection === "promos" ? (
+                <>
+                  <SectionTitle title="Promotions" subtitle="Les deux premieres offres sont les gros coups du jour, les autres servent de bonus boutique." />
+                  <View style={styles.promoGrid}>
+                    {promoProducts.map((product, index) => (
+                      <PromoCard key={product.id} product={product} index={index} onOpen={() => setSelected(product)} onAdd={() => addToCart(product.id)} />
+                    ))}
+                  </View>
+                </>
+              ) : null}
+
+              {activeSection === "help" ? (
+                <View style={styles.helpBox}>
+                  <InfoTiny icon="shield-checkmark" text="Prix recalcules cote serveur avant paiement" color={Colors.green} />
+                  <InfoTiny icon="wallet" text="Solde verifie avant debit" color={Colors.cyan} />
+                  <InfoTiny icon="receipt" text="Recu anime genere apres achat" color={Colors.yellow} />
+                  <Text style={styles.helpText}>
+                    Si le solde ne couvre pas l achat, la commande est bloquee et l utilisateur est invite a recharger par Depot argent ou via une agence FX Pro. Les commandes payees se recuperent avec le recu dans les agences partenaires disponibles dans plusieurs pays.
+                  </Text>
                 </View>
-              )}
+              ) : null}
             </>
           )}
         </ScrollView>
@@ -302,14 +443,14 @@ export default function Shop() {
         <CartModal
           visible={cartOpen}
           onClose={() => setCartOpen(false)}
-          catalog={catalog}
-          cart={cart}
           setLineQty={setLineQty}
           currency={currency}
           walletCurrency={walletCurrency}
           setWalletCurrency={setWalletCurrency}
           walletBalance={walletBalance}
           debitAmount={debitAmount}
+          balances={user?.balances || {}}
+          rates={rates}
           totals={cartTotals}
           checkingOut={checkingOut}
           canPay={canPay}
@@ -325,6 +466,27 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle?: string })
     <View style={styles.sectionTitle}>
       <Text style={styles.sectionText}>{title}</Text>
       {subtitle ? <Text style={styles.sectionSub}>{subtitle}</Text> : null}
+    </View>
+  );
+}
+
+function pickupLabel(status?: string) {
+  return (
+    {
+      agency_pending: "retrait agence en preparation",
+      ready: "pret en agence",
+      picked_up: "recupere",
+      cancelled: "annule",
+    } as Record<string, string>
+  )[status || ""] || "suivi agence";
+}
+
+function ShopStat({ icon, label, value }: { icon: any; label: string; value: string }) {
+  return (
+    <View style={styles.statCard}>
+      <Ionicons name={icon} size={16} color={Colors.cyan} />
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statValue} numberOfLines={1}>{value}</Text>
     </View>
   );
 }
@@ -352,6 +514,7 @@ function PromoCard({ product, index, onOpen, onAdd }: any) {
 }
 
 function ProductCard({ product, index, width, onOpen, onAdd }: any) {
+  const out = product.stock <= 0 || product.availability === "Out of Stock";
   return (
     <Animated.View entering={FadeInUp.delay(Math.min(index, 12) * 35)} style={[styles.productCard, { width }]}>
       <Pressable onPress={onOpen}>
@@ -363,15 +526,16 @@ function ProductCard({ product, index, width, onOpen, onAdd }: any) {
           <Text style={styles.productDesc} numberOfLines={2}>{product.description}</Text>
           <View style={styles.metaLine}>
             <InfoTiny icon="star" text={String(product.rating)} color={Colors.yellow} />
-            <InfoTiny icon="cube" text={`${product.stock} dispo`} color={Colors.green} />
+            <InfoTiny icon="cube" text={out ? "rupture" : `${product.stock} dispo`} color={out ? Colors.textMuted : Colors.green} />
+            {product.sku ? <InfoTiny icon="barcode-outline" text={product.sku} color={Colors.cyan} /> : null}
           </View>
           <View style={styles.cardFooter}>
             <View style={{ flex: 1, minWidth: 0 }}>
               {product.promotion ? <Text style={styles.cardOldPrice}>{formatMoney(product.original_price, product.currency)}</Text> : null}
               <Text style={styles.cardPrice}>{formatMoney(product.price, product.currency)}</Text>
             </View>
-            <Pressable testID={`shop-add-${product.id}`} onPress={onAdd} style={styles.addButton}>
-              <Ionicons name="add" size={18} color="#000" />
+            <Pressable testID={`shop-add-${product.id}`} disabled={out} onPress={onAdd} style={[styles.addButton, out && styles.addButtonDisabled]}>
+              <Ionicons name={out ? "ban" : "add"} size={18} color="#000" />
             </Pressable>
           </View>
         </View>
@@ -407,6 +571,13 @@ function ProductModal({ product, onClose, onAdd }: any) {
             <View style={styles.tagRow}>
               {product.tags?.slice(0, 4).map((tag: string) => <Text key={tag} style={styles.tag}>{tag}</Text>)}
             </View>
+            <View style={styles.productSpecs}>
+              {product.sku ? <SpecLine label="Ref" value={product.sku} /> : null}
+              {product.shipping ? <SpecLine label="Livraison" value={product.shipping} /> : null}
+              {product.warranty ? <SpecLine label="Garantie" value={product.warranty} /> : null}
+              {product.return_policy ? <SpecLine label="Retour" value={product.return_policy} /> : null}
+              <SpecLine label="Stock" value={`${product.stock} disponible(s)`} />
+            </View>
             <View style={styles.modalPriceBlock}>
               {product.promotion ? <Text style={styles.cardOldPrice}>{formatMoney(product.original_price, product.currency)}</Text> : null}
               <Text style={styles.modalPrice}>{formatMoney(product.price, product.currency)}</Text>
@@ -422,24 +593,37 @@ function ProductModal({ product, onClose, onAdd }: any) {
   );
 }
 
+function SpecLine({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.specLine}>
+      <Text style={styles.specLabel}>{label}</Text>
+      <Text style={styles.specValue} numberOfLines={2}>{value}</Text>
+    </View>
+  );
+}
+
 function CartModal({
   visible,
   onClose,
-  catalog,
-  cart,
   setLineQty,
   currency,
   walletCurrency,
   setWalletCurrency,
   walletBalance,
   debitAmount,
+  balances,
+  rates,
   totals,
   checkingOut,
   canPay,
   onCheckout,
 }: any) {
   const items = totals?.items || [];
-  const activeWallets = CURRENCIES.filter((item) => Number((catalog ? 1 : 0)) || item.code).sort((a, b) => (a.code === walletCurrency ? -1 : b.code === walletCurrency ? 1 : 0));
+  const activeWallets = CURRENCIES.map((item) => {
+    const debit = totals ? convertShopMoney(totals.total, currency, item.code, rates || {}) : 0;
+    const balance = Number((balances || {})[item.code] || 0);
+    return { ...item, debit, balance, ok: totals ? balance >= debit : false };
+  }).sort((a, b) => Number(b.code === walletCurrency) - Number(a.code === walletCurrency) || Number(b.ok) - Number(a.ok) || b.balance - a.balance);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalBg}>
@@ -482,8 +666,9 @@ function CartModal({
             {activeWallets.map((item) => {
               const active = walletCurrency === item.code;
               return (
-                <Pressable key={item.code} onPress={() => setWalletCurrency(item.code)} style={[styles.walletChip, active && styles.walletChipActive]}>
+                <Pressable key={item.code} onPress={() => setWalletCurrency(item.code)} style={[styles.walletChip, active && styles.walletChipActive, item.ok && styles.walletChipReady]}>
                   <Text style={[styles.walletChipText, active && styles.walletChipTextActive]}>{item.code}</Text>
+                  <Text style={[styles.walletChipSub, active && styles.walletChipTextActive]}>{formatMoney(item.balance, item.code)}</Text>
                 </Pressable>
               );
             })}
@@ -536,6 +721,15 @@ const styles = StyleSheet.create({
   heroTitle: { color: "#fff", fontSize: 27, fontWeight: "900", marginTop: 4, lineHeight: 31 },
   heroText: { color: Colors.textSoft, fontSize: 13, lineHeight: 19, marginTop: 8 },
   heroIcon: { width: 58, height: 58, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: Colors.cyan },
+  statGrid: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 10 },
+  statCard: { flex: 1, minHeight: 72, borderRadius: 18, padding: 11, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.052)" },
+  statLabel: { color: Colors.textMuted, fontSize: 10, fontWeight: "900", textTransform: "uppercase", marginTop: 6 },
+  statValue: { color: "#fff", fontSize: 13, fontWeight: "900", marginTop: 3 },
+  sectionTabs: { marginHorizontal: 16, marginTop: 12, flexDirection: "row", gap: 7, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, padding: 5, backgroundColor: "rgba(255,255,255,0.055)" },
+  sectionTab: { flex: 1, minHeight: 38, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 },
+  sectionTabActive: { backgroundColor: Colors.cyan },
+  sectionTabText: { color: Colors.textSoft, fontSize: 11, fontWeight: "900" },
+  sectionTabTextActive: { color: "#000" },
   sectionTitle: { paddingHorizontal: 18, paddingTop: 20, paddingBottom: 8 },
   sectionText: { color: "#fff", fontSize: 19, fontWeight: "900" },
   sectionSub: { color: Colors.textSoft, fontSize: 12, marginTop: 3, lineHeight: 17 },
@@ -547,6 +741,10 @@ const styles = StyleSheet.create({
   searchBox: { marginHorizontal: 16, marginTop: 10, minHeight: 48, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.06)", flexDirection: "row", alignItems: "center", paddingHorizontal: 12, gap: 8 },
   searchInput: { color: "#fff", flex: 1, minWidth: 0, fontSize: 14, paddingVertical: Platform.OS === "web" ? 12 : 8 },
   searchButton: { width: 34, height: 34, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.cyan },
+  suggestionsBox: { marginHorizontal: 16, marginTop: 8, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(5,5,10,0.88)", overflow: "hidden" },
+  suggestionItem: { minHeight: 46, paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+  suggestionTitle: { color: "#fff", fontSize: 13, fontWeight: "900" },
+  suggestionSub: { color: Colors.textMuted, fontSize: 10, marginTop: 2 },
   quickChip: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.04)" },
   quickChipActive: { backgroundColor: Colors.yellow, borderColor: Colors.yellow },
   quickChipText: { color: "#fff", fontSize: 11, fontWeight: "800" },
@@ -582,11 +780,15 @@ const styles = StyleSheet.create({
   cardOldPrice: { color: Colors.textMuted, fontSize: 11, textDecorationLine: "line-through", fontWeight: "800" },
   cardPrice: { color: "#fff", fontSize: 18, fontWeight: "900" },
   addButton: { width: 42, height: 42, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: Colors.cyan },
+  addButtonDisabled: { opacity: 0.45, backgroundColor: Colors.textMuted },
+  moreButton: { alignSelf: "center", marginTop: 14, borderRadius: 999, minHeight: 44, paddingHorizontal: 17, backgroundColor: Colors.cyan, flexDirection: "row", alignItems: "center", gap: 6 },
+  moreButtonText: { color: "#000", fontSize: 13, fontWeight: "900" },
   orderCard: { marginHorizontal: 16, marginVertical: 5, padding: 13, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.055)", flexDirection: "row", alignItems: "center", gap: 11 },
   orderIcon: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, borderColor: Colors.cyan, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,255,255,0.08)" },
   orderTitle: { color: "#fff", fontWeight: "900", fontSize: 13 },
   orderText: { color: Colors.textSoft, fontSize: 11, marginTop: 3 },
   orderAmount: { color: Colors.cyan, fontWeight: "900", fontSize: 12, maxWidth: 120 },
+  orderStatus: { color: Colors.green, fontSize: 10, fontWeight: "900", marginTop: 3 },
   emptyOrders: { marginHorizontal: 16, padding: 18, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.04)", alignItems: "center" },
   emptyOrdersText: { color: Colors.textSoft, textAlign: "center", fontSize: 12, marginTop: 8 },
   floatingCart: { position: "absolute", left: 16, right: 16, bottom: 22, minHeight: 54, borderRadius: 999, backgroundColor: Colors.cyan, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, shadowColor: Colors.cyan, shadowOpacity: 0.45, shadowRadius: 14 },
@@ -599,6 +801,10 @@ const styles = StyleSheet.create({
   modalDesc: { color: Colors.textSoft, fontSize: 14, lineHeight: 20, marginTop: 8 },
   tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 12 },
   tag: { color: "#fff", fontSize: 11, fontWeight: "800", borderWidth: 1, borderColor: Colors.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "rgba(255,255,255,0.045)" },
+  productSpecs: { marginTop: 13, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: "hidden" },
+  specLine: { flexDirection: "row", justifyContent: "space-between", gap: 12, paddingHorizontal: 11, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+  specLabel: { color: Colors.textMuted, fontSize: 10, fontWeight: "900", textTransform: "uppercase", width: 78 },
+  specValue: { color: "#fff", flex: 1, minWidth: 0, textAlign: "right", fontSize: 11, fontWeight: "800" },
   modalPriceBlock: { marginTop: 14 },
   modalPrice: { color: Colors.cyan, fontSize: 28, fontWeight: "900" },
   agencyText: { color: Colors.textSoft, fontSize: 12, lineHeight: 18, marginTop: 10 },
@@ -617,11 +823,15 @@ const styles = StyleSheet.create({
   walletRow: { gap: 8, paddingVertical: 9 },
   walletChip: { borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.05)", paddingHorizontal: 12, paddingVertical: 8 },
   walletChipActive: { backgroundColor: Colors.green, borderColor: Colors.green },
+  walletChipReady: { borderColor: Colors.green },
   walletChipText: { color: "#fff", fontWeight: "900", fontSize: 12 },
+  walletChipSub: { color: Colors.textMuted, fontWeight: "800", fontSize: 9, marginTop: 2 },
   walletChipTextActive: { color: "#000" },
   totalBox: { borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.055)", padding: 13, flexDirection: "row", justifyContent: "space-between", gap: 14 },
   totalLabel: { color: Colors.textMuted, fontSize: 10, fontWeight: "900", textTransform: "uppercase" },
   totalValue: { color: "#fff", fontSize: 17, fontWeight: "900", marginTop: 4 },
   balanceHint: { color: Colors.textSoft, fontSize: 11, marginTop: 4 },
   payWarning: { color: Colors.yellow, fontSize: 12, lineHeight: 18, marginTop: 10, fontWeight: "800" },
+  helpBox: { marginHorizontal: 16, marginTop: 12, borderRadius: 20, borderWidth: 1, borderColor: Colors.border, padding: 14, backgroundColor: "rgba(255,255,255,0.055)", gap: 9 },
+  helpText: { color: Colors.textSoft, fontSize: 12, lineHeight: 19, marginTop: 4 },
 });

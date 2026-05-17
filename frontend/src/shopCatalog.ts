@@ -1,3 +1,5 @@
+import { FREE_ECOMMERCE_SEED_PRODUCTS } from "./shopSeedProducts";
+
 export type ShopProduct = {
   id: string;
   title: string;
@@ -10,12 +12,25 @@ export type ShopProduct = {
   rating: number;
   stock: number;
   tags: string[];
-  source: "apilayer" | "fallback";
+  source: "apilayer" | "dummyjson" | "freeapi" | "fallback" | "firebase";
+  sku?: string;
+  ref?: string;
+  barcode?: string;
+  qr_code?: string;
+  warranty?: string;
+  shipping?: string;
+  availability?: string;
+  return_policy?: string;
+  minimum_order_quantity?: number;
+  images?: string[];
+  review_count?: number;
+  admin_managed?: boolean;
+  hidden?: boolean;
 };
 
 export type ShopPromotion = {
   product_id: string;
-  discount_percent: 50 | 80;
+  discount_percent: number;
   label: string;
   ends_at: string;
 };
@@ -32,6 +47,28 @@ export type ShopCatalogPayload = {
   source: "apilayer" | "fallback" | "mixed";
   updated_at: string;
   agency_message: string;
+};
+
+export type ShopProductOverride = {
+  product_id?: string;
+  id?: string;
+  sku?: string;
+  title?: string;
+  brand?: string;
+  description?: string;
+  category?: string;
+  image?: string;
+  base_price?: number;
+  price_override_usd?: number;
+  discount_override?: number;
+  promo_active?: boolean;
+  promo_discount?: number;
+  stock_override?: number;
+  stock?: number;
+  hidden?: boolean;
+  visible?: boolean;
+  tags?: string[];
+  updated_at?: string;
 };
 
 export type ShopCartLine = {
@@ -258,6 +295,48 @@ function stripHtml(value?: string) {
     .trim();
 }
 
+function slugKey(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function cleanTags(values: any[] = []) {
+  return Array.from(
+    new Set(
+      values
+        .flat()
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .slice(0, 8)
+    )
+  );
+}
+
+function lowerTestPrice(rawPrice: number, seed: string) {
+  const price = Math.max(0.5, Number(rawPrice) || 0);
+  const discountFactor = 0.34 + stableNumber(seed) * 0.18;
+  const capped = price > 1000 ? Math.min(price * discountFactor, 499) : price * discountFactor;
+  return roundShopMoney(Math.max(0.75, capped), "USD");
+}
+
+export function dedupeShopProducts(products: ShopProduct[]) {
+  const seen = new Set<string>();
+  const deduped: ShopProduct[] = [];
+  for (const product of products) {
+    const key = `${slugKey(product.title)}:${slugKey(product.category)}`;
+    const skuKey = product.sku ? `sku:${String(product.sku).toLowerCase()}` : "";
+    if (seen.has(key) || (skuKey && seen.has(skuKey))) continue;
+    seen.add(key);
+    if (skuKey) seen.add(skuKey);
+    deduped.push(product);
+  }
+  return deduped;
+}
+
 function derivedPriceUsd(id: string, title: string, index: number) {
   const n = stableNumber(`${id}:${title}:${index}`);
   return roundShopMoney(18 + n * 132, "USD");
@@ -292,15 +371,20 @@ export function normalizeRemoteProducts(rawProducts: any[] = []): ShopProduct[] 
         category,
         image: productImageFromRaw(raw),
         base_currency: "USD" as const,
-        base_price: roundShopMoney(basePrice > 600 ? basePrice / 100 : basePrice, "USD"),
+        base_price: lowerTestPrice(basePrice > 600 ? basePrice / 100 : basePrice, `apilayer:${id}`),
         rating: roundShopMoney(4.25 + stableNumber(id) * 0.7, "USD"),
         stock: 8 + Math.floor(stableNumber(`${id}:stock`) * 34),
-        tags: [category, brand].filter(Boolean).slice(0, 3),
+        tags: cleanTags([category, brand, raw?.breadcrumbs]),
         source: "apilayer" as const,
+        sku: String(raw?.upc || raw?.sku || `API-${id}`).toUpperCase(),
+        ref: `API-${id}`,
+        images: [productImageFromRaw(raw)],
+        review_count: 24 + Math.floor(stableNumber(`${id}:reviews`) * 180),
+        availability: "In Stock",
       };
     })
     .filter(Boolean)
-    .slice(0, 18) as ShopProduct[];
+    .slice(0, 24) as ShopProduct[];
 }
 
 export async function fetchApilayerShopProducts(apiKey?: string, query = "premium snack") {
@@ -309,11 +393,11 @@ export async function fetchApilayerShopProducts(apiKey?: string, query = "premiu
   const encoded = encodeURIComponent(query || "premium snack");
   const attempts: { url: string; headers: Record<string, string> }[] = [
     {
-      url: `https://api.apilayer.com/spoonacular/food/products/search?query=${encoded}&number=18`,
+      url: `https://api.apilayer.com/spoonacular/food/products/search?query=${encoded}&number=24`,
       headers: { apikey: key },
     },
     {
-      url: `https://api.spoonacular.com/food/products/search?query=${encoded}&number=18&apiKey=${encodeURIComponent(key)}`,
+      url: `https://api.spoonacular.com/food/products/search?query=${encoded}&number=24&apiKey=${encodeURIComponent(key)}`,
       headers: {},
     },
   ];
@@ -337,32 +421,234 @@ export async function fetchApilayerShopProducts(apiKey?: string, query = "premiu
   return [];
 }
 
+export function normalizeDummyJsonProducts(rawProducts: any[] = []): ShopProduct[] {
+  return rawProducts
+    .map((raw, index) => {
+      const rawId = String(raw?.id || index + 1);
+      const title = String(raw?.title || "").trim();
+      if (!title) return null;
+      const category = String(raw?.category || "Catalogue").trim();
+      const brand = String(raw?.brand || category || "FX Catalogue").trim();
+      const images = Array.isArray(raw?.images) ? raw.images.filter((url: any) => String(url).startsWith("http")) : [];
+      const image = String(raw?.thumbnail || images[0] || "").startsWith("http")
+        ? String(raw?.thumbnail || images[0])
+        : FALLBACK_SHOP_PRODUCTS[index % FALLBACK_SHOP_PRODUCTS.length].image;
+      const basePrice = lowerTestPrice(Number(raw?.price || 0), `dummy:${rawId}:${title}`);
+      return {
+        id: `dummy_${rawId}`,
+        title,
+        brand,
+        description:
+          stripHtml(raw?.description) ||
+          "Article catalogue avec photos, reference et retrait possible via une agence FX Pro partenaire.",
+        category,
+        image,
+        base_currency: "USD" as const,
+        base_price: basePrice,
+        rating: roundShopMoney(Number(raw?.rating || 4.2), "USD"),
+        stock: Math.max(0, Math.floor(Number(raw?.stock || 0))),
+        tags: cleanTags([raw?.tags, category, brand]),
+        source: "dummyjson" as const,
+        sku: String(raw?.sku || `DUMMY-${rawId}`).toUpperCase(),
+        ref: `DMY-${rawId}`,
+        barcode: raw?.meta?.barcode ? String(raw.meta.barcode) : undefined,
+        qr_code: raw?.meta?.qrCode ? String(raw.meta.qrCode) : undefined,
+        warranty: raw?.warrantyInformation ? String(raw.warrantyInformation) : undefined,
+        shipping: raw?.shippingInformation ? String(raw.shippingInformation) : undefined,
+        availability: raw?.availabilityStatus ? String(raw.availabilityStatus) : raw?.stock ? "In Stock" : "Out of Stock",
+        return_policy: raw?.returnPolicy ? String(raw.returnPolicy) : undefined,
+        minimum_order_quantity: Math.max(1, Math.min(8, Math.floor(Number(raw?.minimumOrderQuantity || 1)))),
+        images: [image, ...images].filter((url, i, all) => all.indexOf(url) === i).slice(0, 6),
+        review_count: Array.isArray(raw?.reviews) ? raw.reviews.length : undefined,
+      };
+    })
+    .filter(Boolean) as ShopProduct[];
+}
+
+export function normalizeFreeEcommerceProducts(rawProducts: any[] = []): ShopProduct[] {
+  return rawProducts
+    .map((raw, index) => {
+      const rawId = String(raw?.id || index + 1);
+      const title = String(raw?.name || raw?.title || "").trim();
+      if (!title) return null;
+      const category = String(raw?.category || "Catalogue").trim();
+      const subCategory = String(raw?.subCategory || raw?.subcategory || category).trim();
+      const image = String(raw?.image || "").startsWith("http")
+        ? String(raw.image)
+        : FALLBACK_SHOP_PRODUCTS[index % FALLBACK_SHOP_PRODUCTS.length].image;
+      const basePrice = lowerTestPrice(Number(raw?.priceCents || raw?.price_cents || 0) / 100, `free:${rawId}:${title}`);
+      return {
+        id: `free_${rawId}`,
+        title,
+        brand: subCategory || "Free Ecommerce API",
+        description:
+          stripHtml(raw?.description) ||
+          "Article catalogue avec retrait possible via le reseau d'agences FX Pro.",
+        category,
+        image,
+        base_currency: "USD" as const,
+        base_price: basePrice,
+        rating: roundShopMoney(Number(raw?.rating?.stars || raw?.rating || 4.4), "USD"),
+        stock: 15 + Math.floor(stableNumber(`free:${rawId}:stock`) * 85),
+        tags: cleanTags([raw?.keywords, category, subCategory]),
+        source: "freeapi" as const,
+        sku: `FREE-${String(rawId).padStart(3, "0")}`,
+        ref: `FREE-${rawId}`,
+        images: [image],
+        review_count: Number(raw?.rating?.count || 0) || undefined,
+        availability: "In Stock",
+        shipping: "Retrait agence ou expedition partenaire",
+        return_policy: "Retour selon agence partenaire",
+      };
+    })
+    .filter(Boolean) as ShopProduct[];
+}
+
+let dummyJsonCache: { at: number; items: ShopProduct[] } | null = null;
+let freeApiCache: { at: number; items: ShopProduct[] } | null = null;
+const SHOP_PROVIDER_CACHE_MS = 12 * 60 * 1000;
+
+export async function fetchDummyJsonShopProducts(limit = 150) {
+  if (dummyJsonCache && Date.now() - dummyJsonCache.at < SHOP_PROVIDER_CACHE_MS) return dummyJsonCache.items;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
+  try {
+    const fields = [
+      "id",
+      "title",
+      "description",
+      "category",
+      "price",
+      "discountPercentage",
+      "rating",
+      "stock",
+      "tags",
+      "brand",
+      "sku",
+      "warrantyInformation",
+      "shippingInformation",
+      "availabilityStatus",
+      "returnPolicy",
+      "minimumOrderQuantity",
+      "meta",
+      "images",
+      "thumbnail",
+    ].join(",");
+    const res = await fetch(`https://dummyjson.com/products?limit=${limit}&select=${fields}`, { signal: controller.signal });
+    if (!res.ok) return [];
+    const body = await res.json();
+    const normalized = normalizeDummyJsonProducts(Array.isArray(body?.products) ? body.products : []).slice(0, limit);
+    dummyJsonCache = { at: Date.now(), items: normalized };
+    return normalized;
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function fetchFreeEcommerceShopProducts() {
+  if (freeApiCache && Date.now() - freeApiCache.at < SHOP_PROVIDER_CACHE_MS) return freeApiCache.items;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4500);
+  try {
+    const res = await fetch("https://kolzsticks.github.io/Free-Ecommerce-Products-Api/main/products.json", { signal: controller.signal });
+    if (res.ok) {
+      const body = await res.json();
+      const normalized = normalizeFreeEcommerceProducts(Array.isArray(body) ? body : []);
+      if (normalized.length) {
+        freeApiCache = { at: Date.now(), items: normalized };
+        return normalized;
+      }
+    }
+  } catch {
+    // The GitHub Pages endpoint can be slow in some regions; the local seed keeps the page instant.
+  } finally {
+    clearTimeout(timer);
+  }
+  const seeded = normalizeFreeEcommerceProducts(FREE_ECOMMERCE_SEED_PRODUCTS);
+  freeApiCache = { at: Date.now(), items: seeded };
+  return seeded;
+}
+
+function applyShopOverrides(products: ShopProduct[], overrides: ShopProductOverride[] = []) {
+  if (!overrides.length) return products;
+  const byKey = new Map<string, ShopProductOverride>();
+  for (const override of overrides) {
+    const key = String(override.product_id || override.id || override.sku || "").trim();
+    if (key) byKey.set(key, override);
+  }
+  return products
+    .map((product) => {
+      const override = byKey.get(product.id) || (product.sku ? byKey.get(product.sku) : undefined);
+      if (!override) return product;
+      if (override.hidden || override.visible === false) return { ...product, hidden: true, admin_managed: true };
+      const priceOverride = Number(override.price_override_usd ?? override.base_price);
+      return {
+        ...product,
+        title: override.title || product.title,
+        brand: override.brand || product.brand,
+        description: override.description || product.description,
+        category: override.category || product.category,
+        image: override.image || product.image,
+        base_price: priceOverride > 0 ? roundShopMoney(priceOverride, "USD") : product.base_price,
+        stock: Number.isFinite(Number(override.stock_override ?? override.stock))
+          ? Math.max(0, Math.floor(Number(override.stock_override ?? override.stock)))
+          : product.stock,
+        tags: Array.isArray(override.tags) && override.tags.length ? cleanTags([override.tags]) : product.tags,
+        admin_managed: true,
+      };
+    })
+    .filter((product) => !product.hidden);
+}
+
 export function buildShopPromotions(products: ShopProduct[], todayKey = shopTodayKey()): ShopPromotion[] {
   const pool = [...products].sort((a, b) => stableNumber(`${todayKey}:${a.id}`) - stableNumber(`${todayKey}:${b.id}`));
   const end = new Date(`${todayKey}T23:59:59.000Z`).toISOString();
-  return pool.slice(0, 2).map((product, index) => ({
+  const discounts = [80, 50, 35, 25, 15, 10];
+  const labels = ["Flash -80%", "Selection -50%", "Bonus -35%", "Prix doux -25%", "Client -15%", "Decouverte -10%"];
+  return pool.slice(0, Math.min(6, pool.length)).map((product, index) => ({
     product_id: product.id,
-    discount_percent: index === 0 ? 80 : 50,
-    label: index === 0 ? "Flash -80%" : "Selection -50%",
+    discount_percent: discounts[index] || 10,
+    label: labels[index] || "Promo boutique",
     ends_at: end,
   }));
 }
 
 export function buildShopCatalogPayload({
   remoteProducts = [],
+  dummyProducts = [],
+  freeProducts = normalizeFreeEcommerceProducts(FREE_ECOMMERCE_SEED_PRODUCTS),
+  overrides = [],
   currency = "XOF",
   rates = {},
 }: {
   remoteProducts?: ShopProduct[];
+  dummyProducts?: ShopProduct[];
+  freeProducts?: ShopProduct[];
+  overrides?: ShopProductOverride[];
   currency?: string;
   rates?: Record<string, number>;
 }): ShopCatalogPayload {
   const code = normalizeShopCurrency(currency);
-  const merged = [...remoteProducts, ...FALLBACK_SHOP_PRODUCTS].filter((product, index, all) => {
-    return all.findIndex((other) => other.id === product.id) === index;
-  });
+  const merged = applyShopOverrides(
+    dedupeShopProducts([...remoteProducts, ...dummyProducts, ...freeProducts, ...FALLBACK_SHOP_PRODUCTS]),
+    overrides
+  ).slice(0, 200);
   const products = merged.length ? merged : FALLBACK_SHOP_PRODUCTS;
-  const promotions = buildShopPromotions(products);
+  const productIds = new Set(products.map((product) => product.id));
+  const adminPromotions = overrides
+    .filter((override) => override.promo_active && productIds.has(String(override.product_id || override.id || "")))
+    .map((override) => {
+      const discount = Math.max(1, Math.min(90, Number(override.promo_discount ?? override.discount_override ?? 10)));
+      return {
+        product_id: String(override.product_id || override.id),
+        discount_percent: discount,
+        label: `Admin -${discount}%`,
+        ends_at: new Date(`${shopTodayKey()}T23:59:59.000Z`).toISOString(),
+      };
+    });
+  const promotions = [...adminPromotions, ...buildShopPromotions(products).filter((promo) => !adminPromotions.some((adminPromo) => adminPromo.product_id === promo.product_id))].slice(0, 10);
   const promoMap = new Map(promotions.map((promo) => [promo.product_id, promo]));
   const priced = products.map((product) => {
     const original = convertShopMoney(product.base_price, product.base_currency, code, rates);
@@ -370,7 +656,8 @@ export function buildShopCatalogPayload({
     const price = promotion ? roundShopMoney(original * (1 - promotion.discount_percent / 100), code) : original;
     return { ...product, original_price: original, price, currency: code, promotion };
   });
-  const source = remoteProducts.length && remoteProducts.length >= products.length ? "apilayer" : remoteProducts.length ? "mixed" : "fallback";
+  const dynamicCount = remoteProducts.length + dummyProducts.length + freeProducts.length;
+  const source = dynamicCount >= products.length ? "mixed" : dynamicCount ? "mixed" : "fallback";
   return {
     products: priced,
     promotions,
@@ -379,6 +666,20 @@ export function buildShopCatalogPayload({
     updated_at: new Date().toISOString(),
     agency_message: SHOP_AGENCY_MESSAGE,
   };
+}
+
+export function hashShopCartSnapshot(items: any[], total: number, currency: string) {
+  const raw = JSON.stringify({
+    c: currency,
+    t: total,
+    i: items.map((item) => [item.product_id, item.quantity, item.unit_price, item.discount_percent]),
+  });
+  let hash = 2166136261;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash ^= raw.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `sp_${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 export function calculateShopCart({
@@ -395,11 +696,18 @@ export function calculateShopCart({
   rates: Record<string, number>;
 }) {
   const productMap = new Map(products.map((product) => [product.id, product]));
+  const seen = new Set<string>();
+  if (lines.length > 30) throw new Error("Panier trop volumineux. Validez plusieurs commandes.");
   const cleanLines = lines
-    .map((line) => ({
-      product_id: String(line.product_id || ""),
-      quantity: Math.max(1, Math.min(8, Math.floor(Number(line.quantity || 1)))),
-    }))
+    .map((line) => {
+      const product_id = String(line.product_id || "");
+      if (seen.has(product_id)) throw new Error("Produit en doublon detecte dans le panier.");
+      seen.add(product_id);
+      return {
+        product_id,
+        quantity: Math.max(1, Math.min(8, Math.floor(Number(line.quantity || 1)))),
+      };
+    })
     .filter((line) => productMap.has(line.product_id));
 
   if (!cleanLines.length) throw new Error("Panier vide ou produits indisponibles.");
@@ -407,29 +715,41 @@ export function calculateShopCart({
 
   const items = cleanLines.map((line) => {
     const product = productMap.get(line.product_id)!;
+    if (product.hidden) throw new Error(`${product.title}: produit indisponible.`);
+    if (!Number.isFinite(product.price) || product.price <= 0) throw new Error(`${product.title}: prix invalide.`);
     if (line.quantity > product.stock) throw new Error(`${product.title}: stock insuffisant.`);
     const lineTotal = roundShopMoney(product.price * line.quantity, orderCurrency);
+    const savings = roundShopMoney(Math.max(0, (product.original_price - product.price) * line.quantity), orderCurrency);
     return {
       product_id: product.id,
       title: product.title,
       brand: product.brand,
       image: product.image,
       category: product.category,
+      sku: product.sku,
+      ref: product.ref,
       quantity: line.quantity,
       unit_price: product.price,
       original_unit_price: product.original_price,
       discount_percent: product.promotion?.discount_percent || 0,
       line_total: lineTotal,
+      savings,
     };
   });
 
   const total = roundShopMoney(items.reduce((sum, item) => sum + item.line_total, 0), orderCurrency);
+  const discountTotal = roundShopMoney(items.reduce((sum, item) => sum + item.savings, 0), orderCurrency);
   const debitAmount = convertShopMoney(total, orderCurrency, walletCurrency, rates);
+  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(debitAmount) || debitAmount <= 0) {
+    throw new Error("Montant de commande invalide.");
+  }
   return {
     items,
     total,
+    discount_total: discountTotal,
     currency: normalizeShopCurrency(orderCurrency),
     wallet_currency: normalizeShopCurrency(walletCurrency),
     debit_amount: debitAmount,
+    price_snapshot_hash: hashShopCartSnapshot(items, total, orderCurrency),
   };
 }
