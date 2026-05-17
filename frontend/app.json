@@ -2,7 +2,7 @@
   "expo": {
     "name": "FX Pro 2026",
     "slug": "frontend",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "fxpro",
@@ -13,7 +13,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.fxpro2026.app",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Scan QR codes to send money instantly",
@@ -29,7 +29,7 @@
     },
     "android": {
       "package": "com.fxpro2026.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
@@ -54,7 +54,7 @@
       "favicon": "./assets/images/favicon.png",
       "name": "FX Pro 2026",
       "shortName": "FX Pro",
-      "themeColor": "#050505",
+      "themeColor": "#f51010",
       "backgroundColor": "#050505",
       "display": "standalone",
       "orientation": "portrait"
@@ -89,7 +89,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/icon.png",
-          "color": "#00FFFF",
+          "color": "#f51010",
           "defaultChannel": "default",
           "enableBackgroundRemoteNotifications": true,
           "sounds": []
@@ -98,7 +98,7 @@
     ],
     "notification": {
       "icon": "./assets/images/icon.png",
-      "color": "#00FFFF"
+      "color": "#f51010"
     },
     "experiments": { "typedRoutes": true }
   }

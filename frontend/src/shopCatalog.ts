@@ -12,7 +12,7 @@ export type ShopProduct = {
   rating: number;
   stock: number;
   tags: string[];
-  source: "apilayer" | "dummyjson" | "freeapi" | "fallback" | "firebase";
+  source: "apilayer" | "dummyjson" | "freeapi" | "fakestore" | "escuelajs" | "fallback" | "firebase";
   sku?: string;
   ref?: string;
   barcode?: string;
@@ -47,6 +47,8 @@ export type ShopCatalogPayload = {
   source: "apilayer" | "fallback" | "mixed";
   updated_at: string;
   agency_message: string;
+  pickup_available: boolean;
+  pickup_message: string;
 };
 
 export type ShopProductOverride = {
@@ -76,11 +78,14 @@ export type ShopCartLine = {
   quantity: number;
 };
 
-export const SHOP_AGENCY_MESSAGE =
-  "FX Pro dispose d'agences et de points partenaires dans plusieurs pays. Apres paiement, le recu de commande sert a recuperer le produit ou a organiser le retrait avec une agence.";
+export const SHOP_PICKUP_AVAILABLE = false;
+export const SHOP_PICKUP_MESSAGE =
+  "Le retrait en agence est momentanement indisponible pendant la mise a jour logistique. Les commandes restent securisees: un conseiller FX Pro confirmera la livraison ou la reprise du retrait directement avec l'utilisateur.";
+export const SHOP_AGENCY_MESSAGE = SHOP_PICKUP_MESSAGE;
 
 const SUPPORTED = ["EUR", "XOF", "XAF", "USD", "GBP", "NGN", "MAD", "CAD", "CHF", "JPY", "CNY", "AUD", "INR", "BRL", "ZAR", "KES", "GHS", "SEK", "AED"];
 const ZERO_DECIMALS = ["XOF", "XAF", "JPY", "NGN", "KES"];
+const MAX_SHOP_PRODUCTS = 260;
 
 export const FALLBACK_SHOP_PRODUCTS: ShopProduct[] = [
   {
@@ -316,11 +321,83 @@ function cleanTags(values: any[] = []) {
   );
 }
 
-function lowerTestPrice(rawPrice: number, seed: string) {
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+const MARKET_PRICE_ANCHORS: { pattern: RegExp; price: number }[] = [
+  { pattern: /iphone\s*5s/i, price: 35 },
+  { pattern: /iphone\s*6\b/i, price: 55 },
+  { pattern: /iphone\s*x\b/i, price: 130 },
+  { pattern: /iphone\s*13\s*pro/i, price: 330 },
+  { pattern: /samsung\s+galaxy\s+s7/i, price: 60 },
+  { pattern: /samsung\s+galaxy\s+s8/i, price: 90 },
+  { pattern: /samsung\s+galaxy\s+s10/i, price: 150 },
+  { pattern: /oppo\s+a57/i, price: 75 },
+  { pattern: /oppo\s+f19/i, price: 145 },
+  { pattern: /oppo\s+k1/i, price: 85 },
+  { pattern: /realme\s+c35/i, price: 85 },
+  { pattern: /realme\s+x\b/i, price: 110 },
+  { pattern: /realme\s+xt/i, price: 130 },
+  { pattern: /vivo\s+s1/i, price: 95 },
+  { pattern: /vivo\s+v9/i, price: 90 },
+  { pattern: /vivo\s+x21/i, price: 125 },
+  { pattern: /gaming laptop|laptop.*16gb|16gb.*laptop/i, price: 620 },
+  { pattern: /\blaptop\b/i, price: 320 },
+  { pattern: /55-inch|55 inch|4k ultra hd tv/i, price: 290 },
+  { pattern: /curved gaming monitor|super ultrawide/i, price: 480 },
+  { pattern: /monitor/i, price: 120 },
+  { pattern: /1tb.*ssd|ssd.*1tb/i, price: 55 },
+  { pattern: /256gb.*ssd|ssd.*256gb/i, price: 24 },
+  { pattern: /2tb.*hard|hard drive.*2tb/i, price: 45 },
+  { pattern: /4tb.*gaming drive|gaming drive.*4tb/i, price: 80 },
+  { pattern: /wireless bluetooth headphones|over-ear headphones|headphone/i, price: 35 },
+  { pattern: /bluetooth speaker/i, price: 25 },
+  { pattern: /dslr camera/i, price: 220 },
+  { pattern: /action camera/i, price: 75 },
+  { pattern: /smartwatch|fitness tracker/i, price: 55 },
+  { pattern: /tablet/i, price: 95 },
+  { pattern: /usb drive.*64gb|64gb.*usb/i, price: 8 },
+  { pattern: /treadmill/i, price: 360 },
+  { pattern: /dumbbell/i, price: 70 },
+  { pattern: /blood pressure monitor/i, price: 28 },
+  { pattern: /thermometer/i, price: 18 },
+  { pattern: /kawasaki/i, price: 4200 },
+  { pattern: /motogp/i, price: 6200 },
+  { pattern: /scooter motorcycle/i, price: 1400 },
+  { pattern: /sportbike motorcycle/i, price: 3600 },
+  { pattern: /generic motorcycle/i, price: 1600 },
+];
+
+export function marketAdjustedPriceUsd(rawPrice: number, seed: string, title = "", category = "") {
   const price = Math.max(0.5, Number(rawPrice) || 0);
-  const discountFactor = 0.34 + stableNumber(seed) * 0.18;
-  const capped = price > 1000 ? Math.min(price * discountFactor, 499) : price * discountFactor;
-  return roundShopMoney(Math.max(0.75, capped), "USD");
+  const label = `${title} ${category}`.toLowerCase();
+  const anchor = MARKET_PRICE_ANCHORS.find((item) => item.pattern.test(label))?.price || price;
+  const categoryKey = String(category || "").toLowerCase();
+  const seeded = stableNumber(seed);
+  let factor = 0.54 + seeded * 0.16;
+
+  if (/groceries|grocery|beauty|skin|fragrance|personal|health/i.test(categoryKey)) factor = 0.62 + seeded * 0.12;
+  if (/smartphone|mobile|electronics|gadgets/i.test(label)) factor = 0.57 + seeded * 0.13;
+  if (/motorcycle|sportbike|scooter/i.test(label)) factor = 0.50 + seeded * 0.12;
+  if (/furniture|sofa|bed|table|chair|home|kitchen/i.test(label)) factor = 0.55 + seeded * 0.14;
+  if (/jewelery|jewelry|gold|silver|bracelet|ring|earring/i.test(label)) factor = 0.48 + seeded * 0.12;
+  if (price <= 2) factor = 0.82 + seeded * 0.08;
+
+  let adjusted = anchor * factor;
+  if (/motorcycle|sportbike|scooter/i.test(label)) adjusted = clamp(adjusted, 950, 6500);
+  else if (/iphone|galaxy|oppo|realme|vivo|smartphone|mobile phone/i.test(label)) adjusted = clamp(adjusted, 18, 420);
+  else if (/laptop|monitor|tv|camera|ssd|hard drive|tablet|electronics|gadgets/i.test(label)) adjusted = clamp(adjusted, 6, 950);
+  else if (/furniture|sofa|bed|mattress|refrigerator|dining|table|chair/i.test(label)) adjusted = clamp(adjusted, 12, 1400);
+  else if (/jewelery|jewelry|gold|silver|bracelet|ring|earring/i.test(label)) adjusted = clamp(adjusted, 6, 360);
+  else if (/groceries|grocery|beauty|skin|fragrance|personal|health/i.test(categoryKey)) adjusted = clamp(adjusted, 0.75, 85);
+  else adjusted = clamp(adjusted, 0.75, 900);
+
+  return roundShopMoney(adjusted, "USD");
+}
+
+function lowerTestPrice(rawPrice: number, seed: string, title = "", category = "") {
+  return marketAdjustedPriceUsd(rawPrice, seed, title, category);
 }
 
 export function dedupeShopProducts(products: ShopProduct[]) {
@@ -371,7 +448,7 @@ export function normalizeRemoteProducts(rawProducts: any[] = []): ShopProduct[] 
         category,
         image: productImageFromRaw(raw),
         base_currency: "USD" as const,
-        base_price: lowerTestPrice(basePrice > 600 ? basePrice / 100 : basePrice, `apilayer:${id}`),
+        base_price: lowerTestPrice(basePrice > 600 ? basePrice / 100 : basePrice, `apilayer:${id}`, title, category),
         rating: roundShopMoney(4.25 + stableNumber(id) * 0.7, "USD"),
         stock: 8 + Math.floor(stableNumber(`${id}:stock`) * 34),
         tags: cleanTags([category, brand, raw?.breadcrumbs]),
@@ -433,7 +510,7 @@ export function normalizeDummyJsonProducts(rawProducts: any[] = []): ShopProduct
       const image = String(raw?.thumbnail || images[0] || "").startsWith("http")
         ? String(raw?.thumbnail || images[0])
         : FALLBACK_SHOP_PRODUCTS[index % FALLBACK_SHOP_PRODUCTS.length].image;
-      const basePrice = lowerTestPrice(Number(raw?.price || 0), `dummy:${rawId}:${title}`);
+      const basePrice = lowerTestPrice(Number(raw?.price || 0), `dummy:${rawId}:${title}`, title, category);
       return {
         id: `dummy_${rawId}`,
         title,
@@ -476,7 +553,7 @@ export function normalizeFreeEcommerceProducts(rawProducts: any[] = []): ShopPro
       const image = String(raw?.image || "").startsWith("http")
         ? String(raw.image)
         : FALLBACK_SHOP_PRODUCTS[index % FALLBACK_SHOP_PRODUCTS.length].image;
-      const basePrice = lowerTestPrice(Number(raw?.priceCents || raw?.price_cents || 0) / 100, `free:${rawId}:${title}`);
+      const basePrice = lowerTestPrice(Number(raw?.priceCents || raw?.price_cents || 0) / 100, `free:${rawId}:${title}`, title, category);
       return {
         id: `free_${rawId}`,
         title,
@@ -504,8 +581,124 @@ export function normalizeFreeEcommerceProducts(rawProducts: any[] = []): ShopPro
     .filter(Boolean) as ShopProduct[];
 }
 
+function titleCaseCategory(value: string) {
+  return String(value || "Catalogue")
+    .replace(/-/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+export function normalizeFakeStoreProducts(rawProducts: any[] = []): ShopProduct[] {
+  return rawProducts
+    .map((raw, index) => {
+      const rawId = String(raw?.id || index + 1);
+      const title = String(raw?.title || "").trim();
+      if (!title) return null;
+      const category = titleCaseCategory(String(raw?.category || "Catalogue"));
+      const image = String(raw?.image || "").startsWith("http")
+        ? String(raw.image)
+        : FALLBACK_SHOP_PRODUCTS[index % FALLBACK_SHOP_PRODUCTS.length].image;
+      const basePrice = lowerTestPrice(Number(raw?.price || 0), `fakestore:${rawId}:${title}`, title, category);
+      const rating = typeof raw?.rating === "object" ? raw.rating : {};
+      return {
+        id: `fake_${rawId}`,
+        title,
+        brand: category,
+        description:
+          stripHtml(raw?.description) ||
+          "Article boutique avec prix verifie cote serveur et recu FX Pro apres paiement.",
+        category,
+        image,
+        base_currency: "USD" as const,
+        base_price: basePrice,
+        rating: roundShopMoney(Number(rating?.rate || 4.2), "USD"),
+        stock: 12 + Math.floor(stableNumber(`fake:${rawId}:stock`) * 58),
+        tags: cleanTags([category, title.split(/\s+/).slice(0, 4)]),
+        source: "fakestore" as const,
+        sku: `FAKE-${String(rawId).padStart(3, "0")}`,
+        ref: `FKS-${rawId}`,
+        images: [image],
+        review_count: Number(rating?.count || 0) || undefined,
+        availability: "In Stock",
+        shipping: "Livraison partenaire apres confirmation FX Pro",
+        return_policy: "Retour selon disponibilite partenaire",
+      };
+    })
+    .filter(Boolean) as ShopProduct[];
+}
+
+const ESCUELA_BLOCKED_TITLES = new Set([
+  "cot - furniture",
+  "samsung",
+  "nokia",
+  "new product",
+  "t-shirt",
+  "mobile phones",
+  "test product smth to test",
+  "n",
+  "m",
+]);
+
+function isBlockedEscuelaImage(url: string) {
+  return /placehold\.co|placeimg\.com|picsum\.photos|products\.com/i.test(url);
+}
+
+function escuelaCategory(raw: any, title: string) {
+  const source = String(raw?.category?.name || raw?.category || "").trim();
+  if (source && !/updated category name/i.test(source)) return titleCaseCategory(source);
+  const label = title.toLowerCase();
+  if (/cap|jogger|shorts|t-shirt|tee|shirt/i.test(label)) return "Fashion & Apparel";
+  if (/controller|headphone|earbud|toaster|mouse|laptop|phone|smartwatch/i.test(label)) return "Electronics & Gadgets";
+  if (/sofa|dining|table|armchair|workstation|chair/i.test(label)) return "Home & Kitchen";
+  if (/sneaker|heel|sandal|boot|loafer|shoe|cleat/i.test(label)) return "Footwear";
+  return "Lifestyle";
+}
+
+export function normalizeEscuelajsProducts(rawProducts: any[] = []): ShopProduct[] {
+  return rawProducts
+    .map((raw, index) => {
+      const rawId = String(raw?.id || index + 1);
+      const title = String(raw?.title || "").trim();
+      const titleKey = title.toLowerCase();
+      const images = Array.isArray(raw?.images) ? raw.images.map((url: any) => String(url)).filter((url: string) => url.startsWith("http")) : [];
+      const cleanImages = images.filter((url: string) => !isBlockedEscuelaImage(url));
+      if (!title || title.length < 4 || ESCUELA_BLOCKED_TITLES.has(titleKey) || !cleanImages.length) return null;
+      const description = stripHtml(raw?.description);
+      if (description.length < 24 || /^a description$/i.test(description) || /^string$/i.test(description)) return null;
+      const category = escuelaCategory(raw, title);
+      const image = cleanImages[0] || FALLBACK_SHOP_PRODUCTS[index % FALLBACK_SHOP_PRODUCTS.length].image;
+      const basePrice = lowerTestPrice(Number(raw?.price || 0), `escuelajs:${rawId}:${title}`, title, category);
+      return {
+        id: `escuela_${rawId}`,
+        title,
+        brand: category,
+        description,
+        category,
+        image,
+        base_currency: "USD" as const,
+        base_price: basePrice,
+        rating: roundShopMoney(4.15 + stableNumber(`escuela:${rawId}:rating`) * 0.75, "USD"),
+        stock: 10 + Math.floor(stableNumber(`escuela:${rawId}:stock`) * 74),
+        tags: cleanTags([category, raw?.category?.slug, title.split(/\s+/).slice(0, 5)]),
+        source: "escuelajs" as const,
+        sku: `ESC-${String(rawId).padStart(3, "0")}`,
+        ref: `ESC-${rawId}`,
+        images: cleanImages.slice(0, 5),
+        review_count: 18 + Math.floor(stableNumber(`escuela:${rawId}:reviews`) * 220),
+        availability: "In Stock",
+        shipping: "Livraison partenaire apres confirmation FX Pro",
+        return_policy: "Retour selon disponibilite partenaire",
+      };
+    })
+    .filter(Boolean) as ShopProduct[];
+}
+
 let dummyJsonCache: { at: number; items: ShopProduct[] } | null = null;
 let freeApiCache: { at: number; items: ShopProduct[] } | null = null;
+let fakeStoreCache: { at: number; items: ShopProduct[] } | null = null;
+let escuelajsCache: { at: number; items: ShopProduct[] } | null = null;
 const SHOP_PROVIDER_CACHE_MS = 12 * 60 * 1000;
 
 export async function fetchDummyJsonShopProducts(limit = 150) {
@@ -571,6 +764,42 @@ export async function fetchFreeEcommerceShopProducts() {
   return seeded;
 }
 
+export async function fetchFakeStoreShopProducts() {
+  if (fakeStoreCache && Date.now() - fakeStoreCache.at < SHOP_PROVIDER_CACHE_MS) return fakeStoreCache.items;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4500);
+  try {
+    const res = await fetch("https://fakestoreapi.com/products", { signal: controller.signal });
+    if (!res.ok) return [];
+    const body = await res.json();
+    const normalized = normalizeFakeStoreProducts(Array.isArray(body) ? body : []);
+    fakeStoreCache = { at: Date.now(), items: normalized };
+    return normalized;
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function fetchEscuelajsShopProducts(limit = 80) {
+  if (escuelajsCache && Date.now() - escuelajsCache.at < SHOP_PROVIDER_CACHE_MS) return escuelajsCache.items;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4500);
+  try {
+    const res = await fetch(`https://api.escuelajs.co/api/v1/products?offset=0&limit=${limit}`, { signal: controller.signal });
+    if (!res.ok) return [];
+    const body = await res.json();
+    const normalized = normalizeEscuelajsProducts(Array.isArray(body) ? body : []);
+    escuelajsCache = { at: Date.now(), items: normalized };
+    return normalized;
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function applyShopOverrides(products: ShopProduct[], overrides: ShopProductOverride[] = []) {
   if (!overrides.length) return products;
   const byKey = new Map<string, ShopProductOverride>();
@@ -605,9 +834,9 @@ function applyShopOverrides(products: ShopProduct[], overrides: ShopProductOverr
 export function buildShopPromotions(products: ShopProduct[], todayKey = shopTodayKey()): ShopPromotion[] {
   const pool = [...products].sort((a, b) => stableNumber(`${todayKey}:${a.id}`) - stableNumber(`${todayKey}:${b.id}`));
   const end = new Date(`${todayKey}T23:59:59.000Z`).toISOString();
-  const discounts = [80, 50, 35, 25, 15, 10];
-  const labels = ["Flash -80%", "Selection -50%", "Bonus -35%", "Prix doux -25%", "Client -15%", "Decouverte -10%"];
-  return pool.slice(0, Math.min(6, pool.length)).map((product, index) => ({
+  const discounts = [70, 55, 40, 30, 22, 15, 12, 10];
+  const labels = ["Flash -70%", "Selection -55%", "Bonus -40%", "Prix doux -30%", "Client -22%", "Decouverte -15%", "Panier -12%", "Mini pub -10%"];
+  return pool.slice(0, Math.min(8, pool.length)).map((product, index) => ({
     product_id: product.id,
     discount_percent: discounts[index] || 10,
     label: labels[index] || "Promo boutique",
@@ -619,6 +848,8 @@ export function buildShopCatalogPayload({
   remoteProducts = [],
   dummyProducts = [],
   freeProducts = normalizeFreeEcommerceProducts(FREE_ECOMMERCE_SEED_PRODUCTS),
+  fakeStoreProducts = [],
+  escuelajsProducts = [],
   overrides = [],
   currency = "XOF",
   rates = {},
@@ -626,15 +857,24 @@ export function buildShopCatalogPayload({
   remoteProducts?: ShopProduct[];
   dummyProducts?: ShopProduct[];
   freeProducts?: ShopProduct[];
+  fakeStoreProducts?: ShopProduct[];
+  escuelajsProducts?: ShopProduct[];
   overrides?: ShopProductOverride[];
   currency?: string;
   rates?: Record<string, number>;
 }): ShopCatalogPayload {
   const code = normalizeShopCurrency(currency);
   const merged = applyShopOverrides(
-    dedupeShopProducts([...remoteProducts, ...dummyProducts, ...freeProducts, ...FALLBACK_SHOP_PRODUCTS]),
+    dedupeShopProducts([
+      ...remoteProducts,
+      ...freeProducts,
+      ...fakeStoreProducts,
+      ...escuelajsProducts,
+      ...dummyProducts,
+      ...FALLBACK_SHOP_PRODUCTS,
+    ]),
     overrides
-  ).slice(0, 200);
+  ).slice(0, MAX_SHOP_PRODUCTS);
   const products = merged.length ? merged : FALLBACK_SHOP_PRODUCTS;
   const productIds = new Set(products.map((product) => product.id));
   const adminPromotions = overrides
@@ -656,7 +896,7 @@ export function buildShopCatalogPayload({
     const price = promotion ? roundShopMoney(original * (1 - promotion.discount_percent / 100), code) : original;
     return { ...product, original_price: original, price, currency: code, promotion };
   });
-  const dynamicCount = remoteProducts.length + dummyProducts.length + freeProducts.length;
+  const dynamicCount = remoteProducts.length + dummyProducts.length + freeProducts.length + fakeStoreProducts.length + escuelajsProducts.length;
   const source = dynamicCount >= products.length ? "mixed" : dynamicCount ? "mixed" : "fallback";
   return {
     products: priced,
@@ -665,6 +905,8 @@ export function buildShopCatalogPayload({
     source,
     updated_at: new Date().toISOString(),
     agency_message: SHOP_AGENCY_MESSAGE,
+    pickup_available: SHOP_PICKUP_AVAILABLE,
+    pickup_message: SHOP_PICKUP_MESSAGE,
   };
 }
 

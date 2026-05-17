@@ -44,10 +44,13 @@ import {
   calculateShopCart,
   fetchApilayerShopProducts,
   fetchDummyJsonShopProducts,
+  fetchEscuelajsShopProducts,
+  fetchFakeStoreShopProducts,
   fetchFreeEcommerceShopProducts,
   hashShopCartSnapshot,
   normalizeShopCurrency,
   SHOP_AGENCY_MESSAGE,
+  SHOP_PICKUP_MESSAGE,
   type ShopCartLine,
   type ShopProductOverride,
 } from "./shopCatalog";
@@ -655,17 +658,18 @@ async function getShopProductOverrides() {
 async function announceShopIfNeeded(userId: string) {
   const userRef = doc(db, USERS, userId);
   const snap = await getDoc(userRef);
-  if (snap.data()?.shop_announced_at) return;
+  const updateFlag = "shop_update_pickup_paused_2026_05_17_at";
+  if (snap.data()?.[updateFlag]) return;
   const notifId = makeId("ntf");
   const createdAt = nowIso();
   await Promise.all([
-    updateDoc(userRef, { shop_announced_at: createdAt, updated_at: createdAt }).catch(() => undefined),
+    updateDoc(userRef, { shop_announced_at: snap.data()?.shop_announced_at || createdAt, [updateFlag]: createdAt, updated_at: createdAt }).catch(() => undefined),
     setDoc(doc(db, NOTIFS, notifId), {
       notif_id: notifId,
       user_id: userId,
       type: "shop_available",
-      title: "Boutique disponible",
-      body: "La section Boutique est active: recherche rapide, promos, paiement par solde et recus securises.",
+      title: "Mise a jour Boutique FX Pro",
+      body: `La boutique est disponible avec nouveaux articles, promos et paiement par solde. ${SHOP_PICKUP_MESSAGE}`,
       read: false,
       created_at: createdAt,
     }).catch(() => undefined),
@@ -686,10 +690,12 @@ async function logShopRisk(userId: string, reason: string, payload: any = {}) {
 
 async function getShopCatalog(currency?: string, queryText?: string, userId?: string) {
   const ratesPayload = await getRates();
-  const [remoteProducts, dummyProducts, freeProducts, overrides] = await Promise.all([
+  const [remoteProducts, dummyProducts, freeProducts, fakeStoreProducts, escuelajsProducts, overrides] = await Promise.all([
     fetchApilayerShopProducts(APILAYER_SHOP_KEY, queryText || "market"),
     fetchDummyJsonShopProducts(150),
     fetchFreeEcommerceShopProducts(),
+    fetchFakeStoreShopProducts(),
+    fetchEscuelajsShopProducts(),
     getShopProductOverrides(),
   ]);
   if (userId) await announceShopIfNeeded(userId);
@@ -697,6 +703,8 @@ async function getShopCatalog(currency?: string, queryText?: string, userId?: st
     remoteProducts,
     dummyProducts,
     freeProducts,
+    fakeStoreProducts,
+    escuelajsProducts,
     overrides,
     currency: normalizeShopCurrency(currency),
     rates: ratesPayload.rates || FALLBACK_RATES,
@@ -1086,7 +1094,8 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       reference,
       items: totals.items,
       item_count: totals.items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0),
-      pickup_status: "agency_pending",
+      pickup_status: "pickup_paused",
+      pickup_message: catalog.pickup_message || SHOP_AGENCY_MESSAGE,
       status: "completed",
       created_at: createdAt,
     };
@@ -1097,7 +1106,8 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       reference,
       status: "paid",
       payment_status: "paid",
-      pickup_status: "agency_pending",
+      pickup_status: "pickup_paused",
+      pickup_message: catalog.pickup_message || SHOP_AGENCY_MESSAGE,
       currency: orderCurrency,
       wallet_currency: walletCurrency,
       total: totals.total,
@@ -1108,7 +1118,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       transaction,
       customer_name: profile.name,
       customer_email: profile.email,
-      agency_message: SHOP_AGENCY_MESSAGE,
+      agency_message: catalog.pickup_message || SHOP_AGENCY_MESSAGE,
       note: String(body.note || "").slice(0, 180),
       created_at: createdAt,
       updated_at: createdAt,
@@ -1135,7 +1145,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
         txn_id: txnId,
         order_id: orderId,
         title: "Commande boutique confirmee",
-        body: `${reference}: ${totals.items.length} article(s), paiement ${totals.debit_amount} ${walletCurrency}. Retrait en agence FX Pro.`,
+        body: `${reference}: ${totals.items.length} article(s), paiement ${totals.debit_amount} ${walletCurrency}. Retrait agence momentanement indisponible, suivi FX Pro active.`,
         read: false,
         created_at: createdAt,
       });

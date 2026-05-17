@@ -27,6 +27,8 @@ import {
   calculateShopCart,
   convertShopMoney,
   fetchDummyJsonShopProducts,
+  fetchEscuelajsShopProducts,
+  fetchFakeStoreShopProducts,
   fetchFreeEcommerceShopProducts,
   type ShopCatalogPayload,
 } from "../src/shopCatalog";
@@ -69,13 +71,15 @@ export default function Shop() {
       setRates(ratesResponse.rates || {});
       setOrders(Array.isArray(orderResponse.items) ? orderResponse.items : []);
     } catch {
-      const [fallbackRates, dummyProducts, freeProducts] = await Promise.all([
+      const [fallbackRates, dummyProducts, freeProducts, fakeStoreProducts, escuelajsProducts] = await Promise.all([
         api.get("/rates").catch(() => ({ rates: {} })),
         fetchDummyJsonShopProducts(150),
         fetchFreeEcommerceShopProducts(),
+        fetchFakeStoreShopProducts(),
+        fetchEscuelajsShopProducts(),
       ]);
       setRates(fallbackRates.rates || {});
-      setCatalog(buildShopCatalogPayload({ dummyProducts, freeProducts, currency, rates: fallbackRates.rates || {} }));
+      setCatalog(buildShopCatalogPayload({ dummyProducts, freeProducts, fakeStoreProducts, escuelajsProducts, currency, rates: fallbackRates.rates || {} }));
     } finally {
       setLoading(false);
     }
@@ -119,6 +123,12 @@ export default function Shop() {
   }, [category, products, query]);
   const visibleProducts = useMemo(() => filteredProducts.slice(0, visibleLimit), [filteredProducts, visibleLimit]);
   const promoProducts = useMemo(() => products.filter((product) => product.promotion), [products]);
+  const adProducts = useMemo(() => {
+    const promoted = promoProducts.length ? promoProducts : products;
+    return [...promoted]
+      .sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0) || String(a.id).localeCompare(String(b.id)))
+      .slice(0, 8);
+  }, [products, promoProducts]);
   const suggestions = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return quickSearches.slice(0, 6).map((label) => ({ type: "tag", label, sub: undefined as string | undefined }));
@@ -252,7 +262,7 @@ export default function Shop() {
               <Text style={styles.heroKicker}>Marketplace securisee</Text>
               <Text style={styles.heroTitle}>Achats avec ton solde FX Pro</Text>
               <Text style={styles.heroText}>
-                Choisis la devise d affichage, paie avec un portefeuille disponible, puis recupere le produit via une agence partenaire.
+                Choisis la devise d affichage, paie avec un portefeuille disponible, puis suis la commande depuis la section Commandes.
               </Text>
             </View>
             <View style={styles.heroIcon}>
@@ -265,6 +275,11 @@ export default function Shop() {
             <ShopStat icon="pricetags" label="Promos" value={`${promoProducts.length || 0} actives`} />
             <ShopStat icon="receipt" label="Commandes" value={`${orders.length} recu(s)`} />
           </View>
+          <InfoBanner
+            icon="information-circle"
+            title="Retrait momentanement indisponible"
+            text={catalog?.pickup_message || "Le retrait agence est temporairement suspendu. Les commandes restent securisees et suivies par FX Pro."}
+          />
 
           <View style={styles.sectionTabs}>
             {[
@@ -345,6 +360,12 @@ export default function Shop() {
                       <PromoCard key={product.id} product={product} index={index} onOpen={() => setSelected(product)} onAdd={() => addToCart(product.id)} />
                     ))}
                   </View>
+                  <SectionTitle title="Mini pubs" subtitle="Selections courtes pour motiver l'achat sans alourdir la page." />
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.adRow}>
+                    {adProducts.map((product) => (
+                      <MiniAdCard key={`ad-${product.id}`} product={product} onOpen={() => setSelected(product)} onAdd={() => addToCart(product.id)} />
+                    ))}
+                  </ScrollView>
                   <SectionTitle title="Rayons" subtitle="La recherche reste locale: une lettre suffit pour filtrer sans ralentir le catalogue." />
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
                     {categories.map((item) => {
@@ -381,7 +402,13 @@ export default function Shop() {
 
               {activeSection === "orders" ? (
                 <>
-                  <SectionTitle title="Commandes" subtitle="Suivi, recu et retrait agence restent au meme endroit." />
+                  <SectionTitle title="Commandes" subtitle="Suivi, recu, reference et statut logistique restent au meme endroit." />
+                  <InfoBanner
+                    icon="alert-circle"
+                    title="Retrait en pause"
+                    text={catalog?.pickup_message || "Le retrait agence est momentanement indisponible; FX Pro gardera chaque commande suivie et confirmee."}
+                    compact
+                  />
                   {orders.length ? (
                     orders.map((order) => (
                       <Pressable key={order.order_id} onPress={() => order.transaction?.txn_id && router.push({ pathname: "/receipt/[id]", params: { id: order.transaction.txn_id } })} style={styles.orderCard}>
@@ -391,10 +418,17 @@ export default function Shop() {
                         <View style={{ flex: 1, minWidth: 0 }}>
                           <Text style={styles.orderTitle} numberOfLines={1}>{order.reference || order.order_id}</Text>
                           <Text style={styles.orderText} numberOfLines={2}>{order.items?.length || 0} article(s) - {pickupLabel(order.pickup_status)}</Text>
+                          <Text style={styles.orderHash} numberOfLines={1}>{order.price_snapshot_hash || order.transaction?.price_snapshot_hash || "signature prix active"}</Text>
+                          <View style={styles.orderSteps}>
+                            <OrderStep active label="Payee" />
+                            <OrderStep active={order.pickup_status !== "cancelled"} label="Preparee" />
+                            <OrderStep active={order.pickup_status === "ready" || order.pickup_status === "picked_up"} label="Disponible" />
+                          </View>
                         </View>
                         <View style={{ alignItems: "flex-end" }}>
                           <Text style={styles.orderAmount}>{formatMoney(Number(order.total || 0), order.currency || currency)}</Text>
                           <Text style={styles.orderStatus}>{order.payment_status === "paid" ? "Payee" : "En attente"}</Text>
+                          <Ionicons name="chevron-forward" size={17} color={Colors.textMuted} />
                         </View>
                       </Pressable>
                     ))
@@ -424,7 +458,7 @@ export default function Shop() {
                   <InfoTiny icon="wallet" text="Solde verifie avant debit" color={Colors.cyan} />
                   <InfoTiny icon="receipt" text="Recu anime genere apres achat" color={Colors.yellow} />
                   <Text style={styles.helpText}>
-                    Si le solde ne couvre pas l achat, la commande est bloquee et l utilisateur est invite a recharger par Depot argent ou via une agence FX Pro. Les commandes payees se recuperent avec le recu dans les agences partenaires disponibles dans plusieurs pays.
+                    Si le solde ne couvre pas l achat, la commande est bloquee et l utilisateur est invite a recharger par Depot argent. Le retrait en agence est momentanement indisponible; les commandes payees restent suivies, avec recu complet, reference et confirmation FX Pro.
                   </Text>
                 </View>
               ) : null}
@@ -474,11 +508,34 @@ function pickupLabel(status?: string) {
   return (
     {
       agency_pending: "retrait agence en preparation",
+      pickup_paused: "retrait momentanement indisponible",
       ready: "pret en agence",
       picked_up: "recupere",
       cancelled: "annule",
     } as Record<string, string>
   )[status || ""] || "suivi agence";
+}
+
+function InfoBanner({ icon, title, text, compact }: { icon: any; title: string; text: string; compact?: boolean }) {
+  return (
+    <View style={[styles.infoBanner, compact && styles.infoBannerCompact]}>
+      <View style={styles.infoBannerIcon}>
+        <Ionicons name={icon} size={18} color="#000" />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.infoBannerTitle}>{title}</Text>
+        <Text style={styles.infoBannerText}>{text}</Text>
+      </View>
+    </View>
+  );
+}
+
+function OrderStep({ active, label }: { active: boolean; label: string }) {
+  return (
+    <View style={[styles.orderStep, active && styles.orderStepActive]}>
+      <Text style={[styles.orderStepText, active && styles.orderStepTextActive]}>{label}</Text>
+    </View>
+  );
 }
 
 function ShopStat({ icon, label, value }: { icon: any; label: string; value: string }) {
@@ -495,7 +552,7 @@ function PromoCard({ product, index, onOpen, onAdd }: any) {
   return (
     <Animated.View entering={FadeInDown.delay(index * 80)} style={styles.promoCard}>
       <Pressable onPress={onOpen}>
-        <Image source={{ uri: product.image }} style={styles.promoImage} />
+        <Image source={{ uri: product.image }} style={styles.promoImage} resizeMode="contain" />
         <View style={styles.promoOverlay}>
           <Text style={styles.promoBadge}>{product.promotion?.label}</Text>
           <Text style={styles.promoTitle} numberOfLines={2}>{product.title}</Text>
@@ -513,12 +570,28 @@ function PromoCard({ product, index, onOpen, onAdd }: any) {
   );
 }
 
+function MiniAdCard({ product, onOpen, onAdd }: any) {
+  return (
+    <Pressable onPress={onOpen} style={styles.adCard}>
+      <Image source={{ uri: product.image }} style={styles.adImage} resizeMode="contain" />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.adBadge}>{product.promotion?.label || "Bon plan"}</Text>
+        <Text style={styles.adTitle} numberOfLines={2}>{product.title}</Text>
+        <Text style={styles.adPrice}>{formatMoney(product.price, product.currency)}</Text>
+      </View>
+      <Pressable onPress={onAdd} style={styles.adAdd}>
+        <Ionicons name="add" size={16} color="#000" />
+      </Pressable>
+    </Pressable>
+  );
+}
+
 function ProductCard({ product, index, width, onOpen, onAdd }: any) {
   const out = product.stock <= 0 || product.availability === "Out of Stock";
   return (
     <Animated.View entering={FadeInUp.delay(Math.min(index, 12) * 35)} style={[styles.productCard, { width }]}>
       <Pressable onPress={onOpen}>
-        <Image source={{ uri: product.image }} style={styles.productImage} />
+        <Image source={{ uri: product.image }} style={styles.productImage} resizeMode="contain" />
         {product.promotion ? <Text style={styles.discountFlag}>-{product.promotion.discount_percent}%</Text> : null}
         <View style={styles.productBody}>
           <Text style={styles.productBrand}>{product.brand}</Text>
@@ -560,7 +633,7 @@ function ProductModal({ product, onClose, onAdd }: any) {
       <Animated.View entering={FadeIn.duration(220)} style={styles.modalBg}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={styles.productModal}>
-          <Image source={{ uri: product.image }} style={styles.modalImage} />
+          <Image source={{ uri: product.image }} style={styles.modalImage} resizeMode="contain" />
           <Pressable onPress={onClose} style={styles.modalClose}>
             <Ionicons name="close" size={20} color="#fff" />
           </Pressable>
@@ -583,7 +656,7 @@ function ProductModal({ product, onClose, onAdd }: any) {
               <Text style={styles.modalPrice}>{formatMoney(product.price, product.currency)}</Text>
             </View>
             <Text style={styles.agencyText}>
-              Retrait securise en agence partenaire apres validation du recu de commande.
+              Retrait agence momentanement indisponible. La commande reste suivie et le recu servira a la livraison ou a la reprise du retrait.
             </Text>
             <PrimaryButton title="Ajouter au panier" icon={<Ionicons name="bag-add" size={16} color="#000" />} onPress={() => { onAdd(product.id); onClose(); }} />
           </View>
@@ -640,7 +713,7 @@ function CartModal({
             {items.length ? (
               items.map((item: any) => (
                 <View key={item.product_id} style={styles.cartLine}>
-                  <Image source={{ uri: item.image }} style={styles.cartImage} />
+                  <Image source={{ uri: item.image }} style={styles.cartImage} resizeMode="contain" />
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={styles.cartItemTitle} numberOfLines={2}>{item.title}</Text>
                     <Text style={styles.cartItemPrice}>{formatMoney(item.unit_price, currency)} x {item.quantity}</Text>
@@ -691,7 +764,7 @@ function CartModal({
             </Text>
           ) : (
             <Text style={styles.agencyText}>
-              Paiement atomique: prix recalcules cote API, solde verifie, recu genere immediatement.
+              Paiement atomique: prix recalcules cote API, solde verifie, recu genere immediatement. Retrait agence en pause, suivi FX Pro active.
             </Text>
           )}
           <PrimaryButton title="Payer avec mon solde" loading={checkingOut} disabled={!canPay} icon={<Ionicons name="shield-checkmark" size={16} color="#000" />} onPress={onCheckout} />
@@ -725,6 +798,11 @@ const styles = StyleSheet.create({
   statCard: { flex: 1, minHeight: 72, borderRadius: 18, padding: 11, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.052)" },
   statLabel: { color: Colors.textMuted, fontSize: 10, fontWeight: "900", textTransform: "uppercase", marginTop: 6 },
   statValue: { color: "#fff", fontSize: 13, fontWeight: "900", marginTop: 3 },
+  infoBanner: { marginHorizontal: 16, marginTop: 10, borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,215,0,0.45)", backgroundColor: "rgba(255,215,0,0.09)", padding: 12, flexDirection: "row", gap: 10, alignItems: "center" },
+  infoBannerCompact: { marginTop: 2, marginBottom: 8 },
+  infoBannerIcon: { width: 34, height: 34, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.yellow },
+  infoBannerTitle: { color: "#fff", fontSize: 13, fontWeight: "900" },
+  infoBannerText: { color: Colors.textSoft, fontSize: 11, lineHeight: 16, marginTop: 3 },
   sectionTabs: { marginHorizontal: 16, marginTop: 12, flexDirection: "row", gap: 7, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, padding: 5, backgroundColor: "rgba(255,255,255,0.055)" },
   sectionTab: { flex: 1, minHeight: 38, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 },
   sectionTabActive: { backgroundColor: Colors.cyan },
@@ -752,7 +830,7 @@ const styles = StyleSheet.create({
   loadingText: { color: Colors.textSoft, marginTop: 10, fontWeight: "700" },
   promoGrid: { paddingHorizontal: 16, gap: 12 },
   promoCard: { borderRadius: 24, overflow: "hidden", minHeight: 210, borderWidth: 1, borderColor: Colors.borderStrong, backgroundColor: Colors.bgCard },
-  promoImage: { width: "100%", height: 210, backgroundColor: Colors.bgSoft },
+  promoImage: { width: "100%", height: 210, backgroundColor: "#fff" },
   promoOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", padding: 16, backgroundColor: "rgba(0,0,0,0.28)" },
   promoBadge: { alignSelf: "flex-start", color: "#000", backgroundColor: Colors.yellow, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, fontSize: 11, fontWeight: "900", overflow: "hidden" },
   promoTitle: { color: "#fff", fontSize: 24, fontWeight: "900", marginTop: 10, textShadowColor: "rgba(0,0,0,0.7)", textShadowRadius: 10 },
@@ -761,13 +839,20 @@ const styles = StyleSheet.create({
   newPrice: { color: Colors.cyan, fontSize: 20, fontWeight: "900" },
   promoAdd: { position: "absolute", right: 12, top: 12, borderRadius: 999, backgroundColor: Colors.cyan, paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 5 },
   promoAddText: { color: "#000", fontWeight: "900", fontSize: 12 },
+  adRow: { paddingHorizontal: 16, paddingVertical: 4, gap: 10 },
+  adCard: { width: 270, minHeight: 112, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.058)", padding: 10, flexDirection: "row", alignItems: "center", gap: 10 },
+  adImage: { width: 76, height: 76, borderRadius: 14, backgroundColor: "#fff" },
+  adBadge: { alignSelf: "flex-start", color: "#000", backgroundColor: Colors.yellow, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, fontSize: 9, fontWeight: "900", overflow: "hidden" },
+  adTitle: { color: "#fff", fontSize: 12, fontWeight: "900", lineHeight: 16, marginTop: 5 },
+  adPrice: { color: Colors.cyan, fontSize: 13, fontWeight: "900", marginTop: 4 },
+  adAdd: { width: 34, height: 34, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: Colors.cyan },
   categoryChip: { borderRadius: 999, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 13, paddingVertical: 8, backgroundColor: "rgba(255,255,255,0.04)" },
   categoryChipActive: { backgroundColor: Colors.magenta, borderColor: Colors.magenta },
   categoryChipText: { color: "#fff", fontSize: 12, fontWeight: "800" },
   categoryChipTextActive: { color: "#fff", fontWeight: "900" },
   productGrid: { paddingHorizontal: 16, flexDirection: "row", flexWrap: "wrap", gap: 10, alignItems: "stretch" },
   productCard: { borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.06)" },
-  productImage: { width: "100%", height: 168, backgroundColor: Colors.bgSoft },
+  productImage: { width: "100%", height: 168, backgroundColor: "#fff" },
   discountFlag: { position: "absolute", top: 10, left: 10, color: "#000", backgroundColor: Colors.yellow, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, overflow: "hidden", fontWeight: "900", fontSize: 11 },
   productBody: { padding: 14 },
   productBrand: { color: Colors.cyan, fontSize: 11, fontWeight: "900", textTransform: "uppercase", letterSpacing: 1.2 },
@@ -787,6 +872,12 @@ const styles = StyleSheet.create({
   orderIcon: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, borderColor: Colors.cyan, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,255,255,0.08)" },
   orderTitle: { color: "#fff", fontWeight: "900", fontSize: 13 },
   orderText: { color: Colors.textSoft, fontSize: 11, marginTop: 3 },
+  orderHash: { color: Colors.textMuted, fontSize: 9, marginTop: 3, fontWeight: "800" },
+  orderSteps: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 8 },
+  orderStep: { borderRadius: 999, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 7, paddingVertical: 3, backgroundColor: "rgba(255,255,255,0.04)" },
+  orderStepActive: { borderColor: Colors.green, backgroundColor: "rgba(57,255,20,0.10)" },
+  orderStepText: { color: Colors.textMuted, fontSize: 9, fontWeight: "900" },
+  orderStepTextActive: { color: Colors.green },
   orderAmount: { color: Colors.cyan, fontWeight: "900", fontSize: 12, maxWidth: 120 },
   orderStatus: { color: Colors.green, fontSize: 10, fontWeight: "900", marginTop: 3 },
   emptyOrders: { marginHorizontal: 16, padding: 18, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.04)", alignItems: "center" },
@@ -795,7 +886,7 @@ const styles = StyleSheet.create({
   floatingCartText: { color: "#000", fontWeight: "900" },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.74)", justifyContent: "flex-end" },
   productModal: { margin: 16, maxHeight: "88%", borderRadius: 26, overflow: "hidden", backgroundColor: "#101018", borderWidth: 1, borderColor: Colors.borderStrong },
-  modalImage: { width: "100%", height: 260, backgroundColor: Colors.bgSoft },
+  modalImage: { width: "100%", height: 260, backgroundColor: "#fff" },
   modalClose: { position: "absolute", top: 12, right: 12, width: 38, height: 38, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center" },
   modalTitle: { color: "#fff", fontSize: 25, fontWeight: "900", marginTop: 6, lineHeight: 29 },
   modalDesc: { color: Colors.textSoft, fontSize: 14, lineHeight: 20, marginTop: 8 },
@@ -813,7 +904,7 @@ const styles = StyleSheet.create({
   cartHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   cartTitle: { color: "#fff", fontSize: 20, fontWeight: "900" },
   cartLine: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.08)" },
-  cartImage: { width: 58, height: 58, borderRadius: 16, backgroundColor: Colors.bgSoft },
+  cartImage: { width: 58, height: 58, borderRadius: 16, backgroundColor: "#fff" },
   cartItemTitle: { color: "#fff", fontSize: 13, fontWeight: "900" },
   cartItemPrice: { color: Colors.textSoft, fontSize: 11, marginTop: 4 },
   qtyBox: { flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderWidth: 1, borderColor: Colors.border, padding: 4 },

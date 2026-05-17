@@ -39,15 +39,16 @@ export default function Receipt() {
   const shareReceipt = async () => {
     if (!t) return;
     const text = buildReceiptText(t);
+    const title = `Recu FX Pro ${t.reference || t.txn_id}`;
     try {
       if (Platform.OS === "web") {
-        if (navigator.share) await navigator.share({ title: "Reçu FX Pro", text });
+        if (navigator.share) await navigator.share({ title, text });
         else if (navigator.clipboard) {
           await navigator.clipboard.writeText(text);
           Alert.alert("Copié", "Reçu copié dans le presse-papier");
         }
       } else {
-        await Share.share({ message: text, title: "Reçu FX Pro" });
+        await Share.share({ message: text, title });
       }
     } catch {}
   };
@@ -173,7 +174,9 @@ export default function Receipt() {
                   <Row label="Total boutique" value={formatMoney(Number(t.order_total || t.amount || 0), t.order_currency || t.currency)} highlight />
                   <Row label="Portefeuille debite" value={formatMoney(Number(t.amount || 0), t.currency)} />
                   <Row label="Articles" value={`${t.item_count || t.items?.length || 0} article(s)`} />
-                  <Row label="Retrait" value="Agence FX Pro partenaire" />
+                  <Row label="Retrait" value={pickupReceiptLabel(t.pickup_status)} />
+                  <Row label="Signature prix" value={t.price_snapshot_hash || "Recalculee"} />
+                  <Row label="Message" value={pickupReceiptMessage(t)} />
                 </>
               )}
               <Row label="Statut" value={statusLabel(t.status)} />
@@ -255,8 +258,28 @@ function getShopStats(t: any) {
   return {
     items: `${itemCount}`,
     savings: formatMoney(Number(t.discount_total || 0), t.order_currency || t.currency || "EUR"),
-    pickup: t.pickup_status === "ready" ? "Pret" : t.pickup_status === "picked_up" ? "Livre" : "Agence",
+    pickup: pickupReceiptLabel(t.pickup_status),
   };
+}
+
+function pickupReceiptLabel(status?: string) {
+  return (
+    {
+      agency_pending: "Preparation",
+      pickup_paused: "Retrait en pause",
+      ready: "Pret",
+      picked_up: "Recupere",
+      cancelled: "Annule",
+    } as Record<string, string>
+  )[status || ""] || "Suivi FX Pro";
+}
+
+function pickupReceiptMessage(t: any) {
+  return (
+    t.pickup_message ||
+    t.agency_message ||
+    "Le retrait agence est momentanement indisponible. La commande reste securisee; FX Pro confirmera la livraison ou la reprise du retrait."
+  );
 }
 
 function ReceiptStat({ icon, label, value, color }: any) {
@@ -305,11 +328,13 @@ function buildReceiptText(t: any) {
     lines.push(`Total boutique: ${formatMoney(t.order_total || t.amount || 0, t.order_currency || t.currency)}`);
     lines.push(`Portefeuille debite: ${formatMoney(t.amount || 0, t.currency)}`);
     lines.push(`Economies: ${formatMoney(t.discount_total || 0, t.order_currency || t.currency)}`);
+    lines.push(`Signature prix: ${t.price_snapshot_hash || "Recalculee"}`);
     lines.push(`Articles: ${t.item_count || t.items?.length || 0}`);
     if (Array.isArray(t.items)) {
       t.items.slice(0, 8).forEach((item: any) => lines.push(`- ${item.quantity} x ${item.title}`));
     }
-    lines.push("Retrait: agence FX Pro partenaire");
+    lines.push(`Retrait: ${pickupReceiptLabel(t.pickup_status)}`);
+    lines.push(`Message: ${pickupReceiptMessage(t)}`);
   }
   lines.push(`Signature: FXP-${String(t.txn_id || "").slice(-10).toUpperCase()}`);
   return lines.join("\n");
@@ -348,8 +373,9 @@ function receiptRows(t: any) {
       ["Portefeuille debite", formatMoney(t.amount || 0, t.currency)],
       ["Economies", formatMoney(t.discount_total || 0, t.order_currency || t.currency)],
       ["Articles", `${t.item_count || t.items?.length || 0}`],
-      ["Retrait", "Agence FX Pro partenaire"],
-      ["Signature prix", t.price_snapshot_hash || "Recalculee"]
+      ["Retrait", pickupReceiptLabel(t.pickup_status)],
+      ["Signature prix", t.price_snapshot_hash || "Recalculee"],
+      ["Message", pickupReceiptMessage(t)]
     );
   }
   return rows;
@@ -368,7 +394,8 @@ function buildReceiptHtml(t: any) {
   <title>Recu FX Pro ${escapeHtml(t.txn_id)}</title>
   <style>
     body{margin:0;background:#050505;color:#fff;font-family:Inter,Arial,sans-serif;padding:24px}
-    .receipt{max-width:680px;margin:0 auto;background:#111118;border:1px solid rgba(255,255,255,.16);border-radius:22px;overflow:hidden;box-shadow:0 20px 80px rgba(0,255,255,.12)}
+    @keyframes receiptIn{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+    .receipt{max-width:680px;margin:0 auto;background:#111118;border:1px solid rgba(255,255,255,.16);border-radius:22px;overflow:hidden;box-shadow:0 20px 80px rgba(0,255,255,.12);animation:receiptIn .55s ease-out both}
     .head{padding:28px;background:linear-gradient(135deg,rgba(0,255,255,.18),rgba(157,76,221,.22));border-bottom:1px solid rgba(255,255,255,.12)}
     .brand{font-size:13px;letter-spacing:2px;color:#A1A1AA;text-transform:uppercase;font-weight:800}
     h1{margin:8px 0 0;font-size:30px;line-height:1.08}
@@ -404,7 +431,7 @@ function Row({ label, value, highlight }: any) {
   return (
     <View style={styles.row}>
       <Text style={styles.rLbl}>{label}</Text>
-      <Text style={[styles.rVal, highlight && { color: Colors.cyan, fontSize: 18, fontWeight: "900" }]} numberOfLines={3}>{value}</Text>
+      <Text style={[styles.rVal, highlight && { color: Colors.cyan, fontSize: 18, fontWeight: "900" }]} numberOfLines={5}>{value}</Text>
     </View>
   );
 }

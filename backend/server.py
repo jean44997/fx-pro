@@ -18,6 +18,7 @@ import jwt
 import httpx
 import hashlib
 import math
+import re
 from pymongo import ReturnDocument
 
 ROOT_DIR = Path(__file__).parent
@@ -44,10 +45,15 @@ FALLBACK_RATES = {
     "KES": 140.0, "GHS": 13.0, "SEK": 11.4, "AED": 3.95,
 }
 APILAYER_SHOP_KEY = os.environ.get("APILAYER_SHOP_KEY") or os.environ.get("EXPO_PUBLIC_APILAYER_KEY", "")
-SHOP_AGENCY_MESSAGE = (
-    "FX Pro dispose d'agences et de points partenaires dans plusieurs pays. "
-    "Apres paiement, le recu de commande sert a recuperer le produit ou a organiser le retrait avec une agence."
+SHOP_PICKUP_AVAILABLE = False
+SHOP_PICKUP_MESSAGE = (
+    "Le retrait en agence est momentanement indisponible pendant la mise a jour logistique. "
+    "Les commandes restent securisees: un conseiller FX Pro confirmera la livraison ou la reprise du retrait directement avec l'utilisateur."
 )
+SHOP_AGENCY_MESSAGE = (
+    SHOP_PICKUP_MESSAGE
+)
+MAX_SHOP_PRODUCTS = 260
 SHOP_FALLBACK_PRODUCTS = [
     {"id": "fxp_earbuds_pro", "title": "Ecouteurs Bluetooth Pro", "brand": "FX Select", "description": "Audio clair, boitier compact, autonomie longue duree et retrait disponible en agence partenaire.", "category": "Tech", "image": "https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 79.0, "rating": 4.8, "stock": 18, "tags": ["Audio", "Mobile", "Premium"], "source": "fallback"},
     {"id": "fxp_watch_core", "title": "Montre connectee Core", "brand": "FX Select", "description": "Suivi activite, notifications, autonomie solide et design discret pour usage quotidien.", "category": "Tech", "image": "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 129.0, "rating": 4.7, "stock": 12, "tags": ["Wearable", "Sport", "Mobile"], "source": "fallback"},
@@ -822,6 +828,57 @@ def stable_shop_number(seed: str) -> float:
     return int(digest[:10], 16) % 1000000 / 1000000
 
 
+MARKET_PRICE_ANCHORS = [
+    ("iphone 5s", 35.0), ("iphone 6", 55.0), ("iphone x", 130.0), ("iphone 13 pro", 330.0),
+    ("samsung galaxy s7", 60.0), ("samsung galaxy s8", 90.0), ("samsung galaxy s10", 150.0),
+    ("oppo a57", 75.0), ("oppo f19", 145.0), ("oppo k1", 85.0), ("realme c35", 85.0),
+    ("realme x", 110.0), ("realme xt", 130.0), ("vivo s1", 95.0), ("vivo v9", 90.0), ("vivo x21", 125.0),
+    ("gaming laptop", 620.0), ("laptop", 320.0), ("55-inch", 290.0), ("55 inch", 290.0),
+    ("curved gaming monitor", 480.0), ("monitor", 120.0), ("1tb", 55.0), ("256gb ssd", 24.0),
+    ("2tb", 45.0), ("4tb gaming drive", 80.0), ("wireless bluetooth headphones", 35.0),
+    ("headphone", 35.0), ("bluetooth speaker", 25.0), ("dslr camera", 220.0), ("action camera", 75.0),
+    ("smartwatch", 55.0), ("tablet", 95.0), ("usb drive", 8.0), ("treadmill", 360.0),
+    ("dumbbell", 70.0), ("blood pressure monitor", 28.0), ("thermometer", 18.0),
+    ("kawasaki", 4200.0), ("motogp", 6200.0), ("scooter motorcycle", 1400.0),
+    ("sportbike motorcycle", 3600.0), ("generic motorcycle", 1600.0),
+]
+
+
+def market_adjusted_price_usd(raw_price: float, seed: str, title: str = "", category: str = "") -> float:
+    price = max(0.5, float(raw_price or 0))
+    label = f"{title} {category}".lower()
+    anchor = next((value for needle, value in MARKET_PRICE_ANCHORS if needle in label), price)
+    factor = 0.54 + stable_shop_number(seed) * 0.16
+    if any(token in label for token in ["groceries", "grocery", "beauty", "skin", "fragrance", "personal", "health"]):
+        factor = 0.62 + stable_shop_number(seed) * 0.12
+    if any(token in label for token in ["smartphone", "mobile", "electronics", "gadgets"]):
+        factor = 0.57 + stable_shop_number(seed) * 0.13
+    if any(token in label for token in ["motorcycle", "sportbike", "scooter"]):
+        factor = 0.50 + stable_shop_number(seed) * 0.12
+    if any(token in label for token in ["furniture", "sofa", "bed", "table", "chair", "home", "kitchen"]):
+        factor = 0.55 + stable_shop_number(seed) * 0.14
+    if any(token in label for token in ["jewelery", "jewelry", "gold", "silver", "bracelet", "ring", "earring"]):
+        factor = 0.48 + stable_shop_number(seed) * 0.12
+    if price <= 2:
+        factor = 0.82 + stable_shop_number(seed) * 0.08
+    adjusted = anchor * factor
+    if any(token in label for token in ["motorcycle", "sportbike", "scooter"]):
+        adjusted = max(950, min(adjusted, 6500))
+    elif any(token in label for token in ["iphone", "galaxy", "oppo", "realme", "vivo", "smartphone", "mobile phone"]):
+        adjusted = max(18, min(adjusted, 420))
+    elif any(token in label for token in ["laptop", "monitor", "tv", "camera", "ssd", "hard drive", "tablet", "electronics", "gadgets"]):
+        adjusted = max(6, min(adjusted, 950))
+    elif any(token in label for token in ["furniture", "sofa", "bed", "mattress", "refrigerator", "dining", "table", "chair"]):
+        adjusted = max(12, min(adjusted, 1400))
+    elif any(token in label for token in ["jewelery", "jewelry", "gold", "silver", "bracelet", "ring", "earring"]):
+        adjusted = max(6, min(adjusted, 360))
+    elif any(token in label for token in ["groceries", "grocery", "beauty", "skin", "fragrance", "personal", "health"]):
+        adjusted = max(0.75, min(adjusted, 85))
+    else:
+        adjusted = max(0.75, min(adjusted, 900))
+    return round_shop_money(adjusted, "USD")
+
+
 def normalize_remote_shop_products(products: List[dict]) -> List[dict]:
     normalized = []
     for index, raw in enumerate(products or []):
@@ -837,7 +894,7 @@ def normalize_remote_shop_products(products: List[dict]) -> List[dict]:
         price = float(raw.get("price") or 0) or round_shop_money(18 + stable_shop_number(product_id + title) * 132, "USD")
         if price > 600:
             price = price / 100
-        price = max(0.75, min(price * (0.34 + stable_shop_number("api:" + product_id) * 0.18), 499 if price > 1000 else price))
+        price = market_adjusted_price_usd(price, "api:" + product_id, title, category)
         normalized.append({
             "id": f"api_{product_id}",
             "title": title,
@@ -871,7 +928,7 @@ def normalize_dummyjson_shop_products(products: List[dict]) -> List[dict]:
         images = [str(url) for url in raw.get("images") or [] if str(url).startswith("http")]
         image = str(raw.get("thumbnail") or (images[0] if images else "") or SHOP_FALLBACK_PRODUCTS[index % len(SHOP_FALLBACK_PRODUCTS)]["image"])
         raw_price = float(raw.get("price") or 0)
-        price = max(0.75, min(raw_price * (0.34 + stable_shop_number(f"dummy:{product_id}:{title}") * 0.18), 499 if raw_price > 1000 else raw_price))
+        price = market_adjusted_price_usd(raw_price, f"dummy:{product_id}:{title}", title, category)
         meta = raw.get("meta") if isinstance(raw.get("meta"), dict) else {}
         normalized.append({
             "id": f"dummy_{product_id}",
@@ -912,7 +969,7 @@ def normalize_free_shop_products(products: List[dict]) -> List[dict]:
         sub_category = str(raw.get("subCategory") or category).strip()
         image = str(raw.get("image") or SHOP_FALLBACK_PRODUCTS[index % len(SHOP_FALLBACK_PRODUCTS)]["image"])
         price = float(raw.get("priceCents") or 0) / 100
-        price = max(0.75, min(price * (0.34 + stable_shop_number(f"free:{product_id}:{title}") * 0.18), 499 if price > 1000 else price))
+        price = market_adjusted_price_usd(price, f"free:{product_id}:{title}", title, category)
         rating = raw.get("rating") if isinstance(raw.get("rating"), dict) else {}
         normalized.append({
             "id": f"free_{product_id}",
@@ -936,6 +993,108 @@ def normalize_free_shop_products(products: List[dict]) -> List[dict]:
             "return_policy": "Retour selon agence partenaire",
         })
     return normalized[:50]
+
+
+def title_case_category(value: str) -> str:
+    return " ".join(word[:1].upper() + word[1:] for word in str(value or "Catalogue").replace("-", " ").split())
+
+
+def normalize_fakestore_shop_products(products: List[dict]) -> List[dict]:
+    normalized = []
+    for index, raw in enumerate(products or []):
+        product_id = str(raw.get("id") or index + 1)
+        title = str(raw.get("title") or "").strip()
+        if not title:
+            continue
+        category = title_case_category(str(raw.get("category") or "Catalogue"))
+        image = str(raw.get("image") or SHOP_FALLBACK_PRODUCTS[index % len(SHOP_FALLBACK_PRODUCTS)]["image"])
+        rating = raw.get("rating") if isinstance(raw.get("rating"), dict) else {}
+        normalized.append({
+            "id": f"fake_{product_id}",
+            "title": title,
+            "brand": category,
+            "description": str(raw.get("description") or "Article boutique avec prix verifie cote serveur et recu FX Pro apres paiement."),
+            "category": category,
+            "image": image,
+            "base_currency": "USD",
+            "base_price": market_adjusted_price_usd(float(raw.get("price") or 0), f"fakestore:{product_id}:{title}", title, category),
+            "rating": round_shop_money(float(rating.get("rate") or 4.2), "USD"),
+            "stock": 12 + int(stable_shop_number(f"fake:{product_id}:stock") * 58),
+            "tags": list(dict.fromkeys([category, *title.split()[:4]]))[:8],
+            "source": "fakestore",
+            "sku": f"FAKE-{product_id.zfill(3)}",
+            "ref": f"FKS-{product_id}",
+            "images": [image],
+            "review_count": int(rating.get("count") or 0),
+            "availability": "In Stock",
+            "shipping": "Livraison partenaire apres confirmation FX Pro",
+            "return_policy": "Retour selon disponibilite partenaire",
+        })
+    return normalized[:20]
+
+
+ESCUELA_BLOCKED_TITLES = {
+    "cot - furniture", "samsung", "nokia", "new product", "t-shirt", "mobile phones",
+    "test product smth to test", "n", "m",
+}
+
+
+def escuela_image_ok(url: str) -> bool:
+    lower = str(url).lower()
+    return lower.startswith("http") and not any(bad in lower for bad in ["placehold.co", "placeimg.com", "picsum.photos", "products.com"])
+
+
+def escuela_category(raw: dict, title: str) -> str:
+    source = str(((raw.get("category") or {}) if isinstance(raw.get("category"), dict) else {}).get("name") or raw.get("category") or "").strip()
+    if source and "updated category name" not in source.lower():
+        return title_case_category(source)
+    label = title.lower()
+    if any(token in label for token in ["cap", "jogger", "shorts", "t-shirt", "tee", "shirt"]):
+        return "Fashion & Apparel"
+    if any(token in label for token in ["controller", "headphone", "earbud", "toaster", "mouse", "laptop", "phone", "smartwatch"]):
+        return "Electronics & Gadgets"
+    if any(token in label for token in ["sofa", "dining", "table", "armchair", "workstation", "chair"]):
+        return "Home & Kitchen"
+    if any(token in label for token in ["sneaker", "heel", "sandal", "boot", "loafer", "shoe", "cleat"]):
+        return "Footwear"
+    return "Lifestyle"
+
+
+def normalize_escuelajs_shop_products(products: List[dict]) -> List[dict]:
+    normalized = []
+    for index, raw in enumerate(products or []):
+        product_id = str(raw.get("id") or index + 1)
+        title = str(raw.get("title") or "").strip()
+        title_key = title.lower()
+        images = [str(url) for url in raw.get("images") or [] if escuela_image_ok(str(url))]
+        description = str(raw.get("description") or "").strip()
+        if not title or len(title) < 4 or title_key in ESCUELA_BLOCKED_TITLES or not images:
+            continue
+        if len(description) < 24 or description.lower() in {"a description", "string"}:
+            continue
+        category = escuela_category(raw, title)
+        normalized.append({
+            "id": f"escuela_{product_id}",
+            "title": title,
+            "brand": category,
+            "description": description,
+            "category": category,
+            "image": images[0],
+            "base_currency": "USD",
+            "base_price": market_adjusted_price_usd(float(raw.get("price") or 0), f"escuelajs:{product_id}:{title}", title, category),
+            "rating": round_shop_money(4.15 + stable_shop_number(f"escuela:{product_id}:rating") * 0.75, "USD"),
+            "stock": 10 + int(stable_shop_number(f"escuela:{product_id}:stock") * 74),
+            "tags": list(dict.fromkeys([category, str(((raw.get("category") or {}) if isinstance(raw.get("category"), dict) else {}).get("slug") or ""), *title.split()[:5]]))[:8],
+            "source": "escuelajs",
+            "sku": f"ESC-{product_id.zfill(3)}",
+            "ref": f"ESC-{product_id}",
+            "images": images[:5],
+            "review_count": 18 + int(stable_shop_number(f"escuela:{product_id}:reviews") * 220),
+            "availability": "In Stock",
+            "shipping": "Livraison partenaire apres confirmation FX Pro",
+            "return_policy": "Retour selon disponibilite partenaire",
+        })
+    return normalized[:80]
 
 
 async def fetch_apilayer_shop_products(query: str = "premium snack") -> List[dict]:
@@ -992,6 +1151,32 @@ async def fetch_free_ecommerce_shop_products() -> List[dict]:
         return normalize_free_shop_products(body if isinstance(body, list) else [])
     except Exception as exc:
         logger.warning("Free Ecommerce shop fetch failed: %s", exc)
+        return []
+
+
+async def fetch_fakestore_shop_products() -> List[dict]:
+    try:
+        async with httpx.AsyncClient(timeout=5) as h:
+            r = await h.get("https://fakestoreapi.com/products")
+        if r.status_code != 200:
+            return []
+        body = r.json()
+        return normalize_fakestore_shop_products(body if isinstance(body, list) else [])
+    except Exception as exc:
+        logger.warning("FakeStore shop fetch failed: %s", exc)
+        return []
+
+
+async def fetch_escuelajs_shop_products(limit: int = 80) -> List[dict]:
+    try:
+        async with httpx.AsyncClient(timeout=5) as h:
+            r = await h.get("https://api.escuelajs.co/api/v1/products", params={"offset": 0, "limit": limit})
+        if r.status_code != 200:
+            return []
+        body = r.json()
+        return normalize_escuelajs_shop_products(body if isinstance(body, list) else [])
+    except Exception as exc:
+        logger.warning("Escuelajs shop fetch failed: %s", exc)
         return []
 
 
@@ -1054,10 +1239,10 @@ def shop_promotions(products: List[dict]) -> List[dict]:
     today_key = now_utc().date().isoformat()
     ranked = sorted(products, key=lambda p: stable_shop_number(f"{today_key}:{p['id']}"))
     ends_at = datetime.combine(now_utc().date(), datetime.max.time(), tzinfo=timezone.utc)
-    discounts = [80, 50, 35, 25, 15, 10]
-    labels = ["Flash -80%", "Selection -50%", "Bonus -35%", "Prix doux -25%", "Client -15%", "Decouverte -10%"]
+    discounts = [70, 55, 40, 30, 22, 15, 12, 10]
+    labels = ["Flash -70%", "Selection -55%", "Bonus -40%", "Prix doux -30%", "Client -22%", "Decouverte -15%", "Panier -12%", "Mini pub -10%"]
     promos = []
-    for index, product in enumerate(ranked[:6]):
+    for index, product in enumerate(ranked[:8]):
         promos.append({
             "product_id": product["id"],
             "discount_percent": discounts[index],
@@ -1068,20 +1253,21 @@ def shop_promotions(products: List[dict]) -> List[dict]:
 
 
 async def announce_shop_available(user_id: str) -> None:
-    user = await db.users.find_one({"user_id": user_id}, {"shop_announced_at": 1})
-    if not user or user.get("shop_announced_at"):
+    update_flag = "shop_update_pickup_paused_2026_05_17_at"
+    user = await db.users.find_one({"user_id": user_id}, {"shop_announced_at": 1, update_flag: 1})
+    if not user or user.get(update_flag):
         return
     created_at = now_utc()
     notif = {
         "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
         "user_id": user_id,
         "type": "shop_available",
-        "title": "Boutique disponible",
-        "body": "La section Boutique est active: recherche rapide, promos, paiement par solde et recus securises.",
+        "title": "Mise a jour Boutique FX Pro",
+        "body": f"La boutique est disponible avec nouveaux articles, promos et paiement par solde. {SHOP_PICKUP_MESSAGE}",
         "read": False,
         "created_at": created_at,
     }
-    await db.users.update_one({"user_id": user_id}, {"$set": {"shop_announced_at": created_at, "updated_at": created_at}})
+    await db.users.update_one({"user_id": user_id}, {"$set": {"shop_announced_at": user.get("shop_announced_at") or created_at, update_flag: created_at, "updated_at": created_at}})
     await db.notifications.insert_one(notif)
     await send_push_to_user(user_id, notif["title"], notif["body"], None, "shop_available", notif["notif_id"])
 
@@ -1089,15 +1275,17 @@ async def announce_shop_available(user_id: str) -> None:
 async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack", user_id: Optional[str] = None) -> dict:
     rates_doc = await get_active_rates("EUR")
     rates = rates_doc.get("rates") or FALLBACK_RATES
-    remote, dummy, free, overrides = await asyncio.gather(
+    remote, dummy, free, fake, escuela, overrides = await asyncio.gather(
         fetch_apilayer_shop_products(query),
         fetch_dummyjson_shop_products(150),
         fetch_free_ecommerce_shop_products(),
+        fetch_fakestore_shop_products(),
+        fetch_escuelajs_shop_products(),
         get_shop_overrides(),
     )
     if user_id:
         await announce_shop_available(user_id)
-    products = apply_shop_overrides(dedupe_shop_products(remote + dummy + free + SHOP_FALLBACK_PRODUCTS), overrides)[:200]
+    products = apply_shop_overrides(dedupe_shop_products(remote + free + fake + escuela + dummy + SHOP_FALLBACK_PRODUCTS), overrides)[:MAX_SHOP_PRODUCTS]
     product_ids = {p["id"] for p in products}
     admin_promos = []
     for override in overrides:
@@ -1120,8 +1308,17 @@ async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack"
         promo = promo_map.get(product["id"])
         price = round_shop_money(original * (1 - (promo["discount_percent"] / 100)), code) if promo else original
         priced.append({**product, "original_price": original, "price": price, "currency": code, "promotion": promo})
-    source = "mixed" if (remote or dummy or free) else "fallback"
-    return {"products": priced, "promotions": promotions, "currency": code, "source": source, "updated_at": now_utc(), "agency_message": SHOP_AGENCY_MESSAGE}
+    source = "mixed" if (remote or dummy or free or fake or escuela) else "fallback"
+    return {
+        "products": priced,
+        "promotions": promotions,
+        "currency": code,
+        "source": source,
+        "updated_at": now_utc(),
+        "agency_message": SHOP_AGENCY_MESSAGE,
+        "pickup_available": SHOP_PICKUP_AVAILABLE,
+        "pickup_message": SHOP_PICKUP_MESSAGE,
+    }
 
 
 def calculate_shop_cart(products: List[dict], lines: List[ShopCartLineIn], order_currency: str, wallet_currency: str, rates: Dict[str, float]) -> dict:
@@ -1695,7 +1892,14 @@ async def shop_checkout(data: ShopCheckoutIn, user: dict = Depends(get_current_u
             "created_at": now_utc(),
         })
         raise HTTPException(status_code=400, detail="Panier invalide: doublon ou volume suspect detecte")
-    if data.client_order_id and not data.client_order_id.startswith("shop_"):
+    if data.client_order_id and not re.fullmatch(r"shop_[a-zA-Z0-9]{8,32}", data.client_order_id):
+        await db.risk_logs.insert_one({
+            "event_id": f"risk_{uuid.uuid4().hex[:10]}",
+            "user_id": user["user_id"],
+            "type": "shop_checkout",
+            "reason": "invalid_client_order_id",
+            "created_at": now_utc(),
+        })
         raise HTTPException(status_code=400, detail="Identifiant de commande invalide")
     if data.client_order_id:
         existing = await db.shop_orders.find_one({"user_id": user["user_id"], "client_order_id": data.client_order_id}, {"_id": 0})
@@ -1753,7 +1957,8 @@ async def shop_checkout(data: ShopCheckoutIn, user: dict = Depends(get_current_u
         "reference": reference,
         "items": totals["items"],
         "item_count": sum(int(item.get("quantity") or 0) for item in totals["items"]),
-        "pickup_status": "agency_pending",
+        "pickup_status": "pickup_paused",
+        "pickup_message": catalog.get("pickup_message") or SHOP_AGENCY_MESSAGE,
         "status": "completed",
         "created_at": created_at,
     }
@@ -1764,7 +1969,8 @@ async def shop_checkout(data: ShopCheckoutIn, user: dict = Depends(get_current_u
         "reference": reference,
         "status": "paid",
         "payment_status": "paid",
-        "pickup_status": "agency_pending",
+        "pickup_status": "pickup_paused",
+        "pickup_message": catalog.get("pickup_message") or SHOP_AGENCY_MESSAGE,
         "currency": order_currency,
         "wallet_currency": wallet_currency,
         "total": totals["total"],
@@ -1775,7 +1981,7 @@ async def shop_checkout(data: ShopCheckoutIn, user: dict = Depends(get_current_u
         "transaction": txn,
         "customer_name": user.get("name"),
         "customer_email": user.get("email"),
-        "agency_message": SHOP_AGENCY_MESSAGE,
+        "agency_message": catalog.get("pickup_message") or SHOP_AGENCY_MESSAGE,
         "note": (data.note or "")[:180],
         "created_at": created_at,
         "updated_at": created_at,
@@ -1787,7 +1993,7 @@ async def shop_checkout(data: ShopCheckoutIn, user: dict = Depends(get_current_u
         "txn_id": txn_id,
         "order_id": order_id,
         "title": "Commande boutique confirmee",
-        "body": f"{reference}: paiement {totals['debit_amount']} {wallet_currency}. Retrait en agence FX Pro.",
+        "body": f"{reference}: paiement {totals['debit_amount']} {wallet_currency}. Retrait agence momentanement indisponible, suivi FX Pro active.",
         "read": False,
         "created_at": created_at,
     }
