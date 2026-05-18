@@ -10,7 +10,7 @@
   "orientation": "portrait",
   "background_color": "#050505",
   "theme_color": "#f51010",
-  "categories": ["finance", "productivity"],
+  "categories": ["finance", "shopping", "productivity"],
   "lang": "fr",
   "dir": "ltr",
   "icons": [
@@ -85,6 +85,18 @@
       "name": "Notifications",
       "short_name": "Alertes",
       "url": "/notifications",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Jeux bonus",
+      "short_name": "Jeux",
+      "url": "/games",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Boutique",
+      "short_name": "Shop",
+      "url": "/shop",
       "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
     }
   ]

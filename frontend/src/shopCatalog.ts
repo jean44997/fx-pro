@@ -12,7 +12,7 @@ export type ShopProduct = {
   rating: number;
   stock: number;
   tags: string[];
-  source: "apilayer" | "dummyjson" | "freeapi" | "fakestore" | "escuelajs" | "fallback" | "firebase";
+  source: "apilayer" | "dummyjson" | "freeapi" | "fakestore" | "escuelajs" | "generated" | "fallback" | "firebase";
   sku?: string;
   ref?: string;
   barcode?: string;
@@ -85,7 +85,7 @@ export const SHOP_AGENCY_MESSAGE = SHOP_PICKUP_MESSAGE;
 
 const SUPPORTED = ["EUR", "XOF", "XAF", "USD", "GBP", "NGN", "MAD", "CAD", "CHF", "JPY", "CNY", "AUD", "INR", "BRL", "ZAR", "KES", "GHS", "SEK", "AED"];
 const ZERO_DECIMALS = ["XOF", "XAF", "JPY", "NGN", "KES"];
-const MAX_SHOP_PRODUCTS = 260;
+const MAX_SHOP_PRODUCTS = 1400;
 
 export const FALLBACK_SHOP_PRODUCTS: ShopProduct[] = [
   {
@@ -343,6 +343,13 @@ const MARKET_PRICE_ANCHORS: { pattern: RegExp; price: number }[] = [
   { pattern: /vivo\s+v9/i, price: 90 },
   { pattern: /vivo\s+x21/i, price: 125 },
   { pattern: /gaming laptop|laptop.*16gb|16gb.*laptop/i, price: 620 },
+  { pattern: /macbook\s+air\s+m4|macbook\s+air\s+13/i, price: 999 },
+  { pattern: /macbook\s+air\s+15/i, price: 1199 },
+  { pattern: /macbook\s+pro\s+m4\s+pro|macbook\s+pro\s+14/i, price: 1999 },
+  { pattern: /macbook\s+pro\s+16|m4\s+max/i, price: 2499 },
+  { pattern: /imac\s+24|mac\s+mini|mac\s+studio/i, price: 699 },
+  { pattern: /dell\s+xps|hp\s+spectre|thinkpad\s+x1|surface\s+laptop|galaxy\s+book/i, price: 1180 },
+  { pattern: /lenovo\s+legion|asus\s+rog|msi\s+stealth|predator\s+helios|gaming pc/i, price: 1450 },
   { pattern: /\blaptop\b/i, price: 320 },
   { pattern: /55-inch|55 inch|4k ultra hd tv/i, price: 290 },
   { pattern: /curved gaming monitor|super ultrawide/i, price: 480 },
@@ -398,6 +405,245 @@ export function marketAdjustedPriceUsd(rawPrice: number, seed: string, title = "
 
 function lowerTestPrice(rawPrice: number, seed: string, title = "", category = "") {
   return marketAdjustedPriceUsd(rawPrice, seed, title, category);
+}
+
+type GeneratedMarketPack = {
+  key: string;
+  count: number;
+  category: string;
+  brandPool: string[];
+  nounPool: string[];
+  stylePool: string[];
+  detailPool: string[];
+  imagePool: string[];
+  minPrice: number;
+  maxPrice: number;
+  tags: string[];
+};
+
+const REAL_PRODUCT_IMAGE_POOLS = {
+  jewelry: [
+    "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1522312346375-d1a52e2b99b3?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1506630448388-4e683c67ddb0?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1611591437281-460bfbe1220a?auto=format&fit=crop&w=900&q=80",
+  ],
+  womenFashion: [
+    "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=900&q=80",
+  ],
+  menFashion: [
+    "https://images.unsplash.com/photo-1516257984-b1b4d707412e?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1516826957135-700dedea698c?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1487222477894-8943e31ef7b2?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1520975682031-a51d3c6d7cb1?auto=format&fit=crop&w=900&q=80",
+  ],
+  menShoes: [
+    "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1549298916-b41d501d3772?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1608231387042-66d1773070a5?auto=format&fit=crop&w=900&q=80",
+  ],
+  womenShoes: [
+    "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1551107696-a4b0c5a0d9a2?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1562273138-f46be4ebdf33?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?auto=format&fit=crop&w=900&q=80",
+  ],
+  electronics: [
+    "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80",
+  ],
+  lifestyle: [
+    "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1556742502-ec7c0e9f34b1?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=900&q=80",
+    "https://images.unsplash.com/photo-1540574163026-643ea20ade25?auto=format&fit=crop&w=900&q=80",
+  ],
+};
+
+const GENERATED_MARKET_PACKS: GeneratedMarketPack[] = [
+  {
+    key: "jewelry",
+    count: 150,
+    category: "Bijoux 2025-2026",
+    brandPool: ["Aurelia", "Maison Dore", "Luna Pearl", "Nova Bijoux", "Orline"],
+    nounPool: ["Bague solitaire", "Collier maille fine", "Bracelet tennis", "Creoles polies", "Pendentif coeur", "Set bague et boucles"],
+    stylePool: ["vermeil 18k", "argent 925", "cristal premium", "perles nacrees", "acier dore"],
+    detailPool: ["boite cadeau", "anti-ternissure", "taille ajustable", "edition soiree", "serti lumineux"],
+    imagePool: REAL_PRODUCT_IMAGE_POOLS.jewelry,
+    minPrice: 18,
+    maxPrice: 260,
+    tags: ["bijoux", "cadeau", "2026", "promotion"],
+  },
+  {
+    key: "women-fashion",
+    count: 200,
+    category: "Mode femme 2025-2026",
+    brandPool: ["Nova Mode", "Lyla Studio", "Sheen Select", "Urban Muse", "Cote Femme"],
+    nounPool: ["Robe satin", "Blazer coupe courte", "Top maille", "Jean wide leg", "Ensemble deux pieces", "Chemise oversize", "Jupe plisse"],
+    stylePool: ["minimal chic", "pastel ete", "business doux", "streetwear premium", "soiree elegante"],
+    detailPool: ["tissu respirant", "coupe actuelle", "finition douce", "taille inclusive", "collection 2026"],
+    imagePool: REAL_PRODUCT_IMAGE_POOLS.womenFashion,
+    minPrice: 9,
+    maxPrice: 74,
+    tags: ["femme", "mode", "shein-style", "2026"],
+  },
+  {
+    key: "men-fashion",
+    count: 200,
+    category: "Mode homme 2025-2026",
+    brandPool: ["Northline", "Atlas Wear", "Urban Gent", "Mode Homme FX", "Cobalt Studio"],
+    nounPool: ["Chemise oxford", "Polo premium", "Jean slim confort", "Veste bomber", "Sweat molleton", "Pantalon cargo", "Blazer leger"],
+    stylePool: ["casual business", "street premium", "sport chic", "minimal noir", "weekend urbain"],
+    detailPool: ["coutures renforcees", "coupe moderne", "matiere respirante", "facile a assortir", "collection 2026"],
+    imagePool: REAL_PRODUCT_IMAGE_POOLS.menFashion,
+    minPrice: 12,
+    maxPrice: 92,
+    tags: ["homme", "mode", "2026", "promo"],
+  },
+  {
+    key: "men-shoes",
+    count: 100,
+    category: "Chaussures homme 2025-2026",
+    brandPool: ["Stride Pro", "AeroStep", "Urban Sole", "FlexRun", "North Boot"],
+    nounPool: ["Sneakers running", "Derbies cuir", "Baskets basses", "Boots urbaines", "Mocassins souples"],
+    stylePool: ["semelle confort", "cuir premium", "mesh respirant", "look sport luxe", "usage quotidien"],
+    detailPool: ["anti-glisse", "legeres", "amorti renforce", "collection 2026", "finition durable"],
+    imagePool: REAL_PRODUCT_IMAGE_POOLS.menShoes,
+    minPrice: 24,
+    maxPrice: 165,
+    tags: ["chaussures", "homme", "sneakers", "2026"],
+  },
+  {
+    key: "women-shoes",
+    count: 150,
+    category: "Chaussures femme 2025-2026",
+    brandPool: ["Bella Step", "Luna Shoes", "Nova Heel", "Soft Walk", "Muse Sole"],
+    nounPool: ["Sandales talon", "Sneakers pastel", "Escarpins vernis", "Bottines chic", "Mules confort", "Ballerines souples"],
+    stylePool: ["soiree", "bureau", "casual luxe", "ete 2026", "brillant discret"],
+    detailPool: ["semelle stable", "confort long port", "finition elegante", "anti-glisse", "forme moderne"],
+    imagePool: REAL_PRODUCT_IMAGE_POOLS.womenShoes,
+    minPrice: 18,
+    maxPrice: 150,
+    tags: ["chaussures", "femme", "talons", "2026"],
+  },
+  {
+    key: "electronics",
+    count: 200,
+    category: "Electronique & ordinateurs 2025-2026",
+    brandPool: ["Apple", "Dell", "HP", "Lenovo", "ASUS", "MSI", "Samsung", "Acer", "Microsoft"],
+    nounPool: [
+      "MacBook Air M4 13 16Go 256Go",
+      "MacBook Air M4 15 16Go 512Go",
+      "MacBook Pro M4 Pro 14 24Go 512Go",
+      "MacBook Pro 16 M4 Max 36Go 1To",
+      "iMac 24 M4",
+      "Mac mini M4",
+      "Dell XPS 13 2025",
+      "HP Spectre x360 14",
+      "ThinkPad X1 Carbon Gen 13",
+      "Surface Laptop 7",
+      "ASUS ROG Zephyrus G14",
+      "Lenovo Legion Pro 7i",
+      "MSI Stealth 16",
+      "Acer Predator Helios Neo 16",
+      "Galaxy Book4 Pro",
+      "Moniteur OLED 27 240Hz",
+      "SSD NVMe 2To",
+      "Station dock USB-C Pro",
+    ],
+    stylePool: ["stock verifie", "haute performance", "pro createur", "gaming fluide", "bureau premium"],
+    detailPool: ["garantie partenaire", "edition 2025-2026", "pret pour IA", "prix reduit", "configuration fiable"],
+    imagePool: REAL_PRODUCT_IMAGE_POOLS.electronics,
+    minPrice: 45,
+    maxPrice: 2499,
+    tags: ["ordinateur", "mac", "pc", "electronique", "2026"],
+  },
+  {
+    key: "lifestyle",
+    count: 100,
+    category: "Maison & lifestyle 2025-2026",
+    brandPool: ["HomeLine", "Travel FX", "WorkNest", "Pure Casa", "Daily Plus"],
+    nounPool: ["Valise cabine", "Lampe bureau LED", "Sac ordinateur", "Organiseur maison", "Set verres premium", "Diffuseur aromatique"],
+    stylePool: ["compact", "moderne", "durable", "minimal", "cadeau utile"],
+    detailPool: ["usage quotidien", "finition propre", "gain de place", "collection 2026", "prix doux"],
+    imagePool: REAL_PRODUCT_IMAGE_POOLS.lifestyle,
+    minPrice: 8,
+    maxPrice: 230,
+    tags: ["maison", "lifestyle", "utile", "2026"],
+  },
+];
+
+let generatedMarketCache: ShopProduct[] | null = null;
+
+function generatedRawPrice(pack: GeneratedMarketPack, index: number, title: string) {
+  const label = title.toLowerCase();
+  const explicit = [
+    [/macbook air m4 13/i, 999],
+    [/macbook air m4 15/i, 1199],
+    [/macbook pro m4 pro 14/i, 1999],
+    [/macbook pro 16/i, 2499],
+    [/imac 24/i, 1299],
+    [/mac mini/i, 599],
+    [/dell xps|spectre|thinkpad|surface laptop|galaxy book/i, 1199],
+    [/rog|legion|msi|predator/i, 1499],
+    [/oled 27/i, 649],
+    [/ssd nvme/i, 129],
+    [/station dock/i, 89],
+  ].find(([pattern]) => (pattern as RegExp).test(label));
+  if (explicit) return explicit[1] as number;
+  return pack.minPrice + stableNumber(`${pack.key}:${index}:${title}:price`) * (pack.maxPrice - pack.minPrice);
+}
+
+export function buildGeneratedMarketProducts(): ShopProduct[] {
+  if (generatedMarketCache) return generatedMarketCache;
+  const products: ShopProduct[] = [];
+  for (const pack of GENERATED_MARKET_PACKS) {
+    for (let i = 0; i < pack.count; i += 1) {
+      const n = i + 1;
+      const brand = pack.brandPool[i % pack.brandPool.length];
+      const noun = pack.nounPool[(i * 3 + 1) % pack.nounPool.length];
+      const style = pack.stylePool[(i * 5 + 2) % pack.stylePool.length];
+      const detail = pack.detailPool[(i * 7 + 3) % pack.detailPool.length];
+      const year = i % 3 === 0 ? "2026" : "2025";
+      const title = `${brand} ${noun} ${style} ${year} - S${String(n).padStart(3, "0")}`;
+      const id = `gen_${pack.key}_${String(n).padStart(3, "0")}`;
+      const image = pack.imagePool[i % pack.imagePool.length];
+      const rawPrice = generatedRawPrice(pack, i, title);
+      const rating = roundShopMoney(4.35 + stableNumber(`${id}:rating`) * 0.58, "USD");
+      products.push({
+        id,
+        title,
+        brand,
+        description: `${noun} ${style}, selection ${year} coherente avec une photo produit reelle, une reference boutique unique et un prix reduit pour attirer les clients FX Pro.`,
+        category: pack.category,
+        image,
+        base_currency: "USD",
+        base_price: lowerTestPrice(rawPrice, `generated:${id}:${title}`, title, pack.category),
+        rating,
+        stock: 6 + Math.floor(stableNumber(`${id}:stock`) * 88),
+        tags: cleanTags([pack.tags, noun, style, detail, year]),
+        source: "generated",
+        sku: `FX-${pack.key.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)}-${String(n).padStart(4, "0")}`,
+        ref: `FXP-${year}-${pack.key.toUpperCase().slice(0, 3)}-${String(n).padStart(4, "0")}`,
+        warranty: /electronique|ordinateur/i.test(pack.category) ? "Garantie partenaire 12 mois" : "Garantie boutique 30 jours",
+        shipping: "Livraison partenaire ou suivi FX Pro apres paiement",
+        availability: "In Stock",
+        return_policy: "Retour selon controle produit et disponibilite partenaire",
+        minimum_order_quantity: 1,
+        images: [image],
+        review_count: 24 + Math.floor(stableNumber(`${id}:reviews`) * 420),
+      });
+    }
+  }
+  generatedMarketCache = products;
+  return products;
 }
 
 export function dedupeShopProducts(products: ShopProduct[]) {
@@ -850,6 +1096,7 @@ export function buildShopCatalogPayload({
   freeProducts = normalizeFreeEcommerceProducts(FREE_ECOMMERCE_SEED_PRODUCTS),
   fakeStoreProducts = [],
   escuelajsProducts = [],
+  generatedProducts = buildGeneratedMarketProducts(),
   overrides = [],
   currency = "XOF",
   rates = {},
@@ -859,6 +1106,7 @@ export function buildShopCatalogPayload({
   freeProducts?: ShopProduct[];
   fakeStoreProducts?: ShopProduct[];
   escuelajsProducts?: ShopProduct[];
+  generatedProducts?: ShopProduct[];
   overrides?: ShopProductOverride[];
   currency?: string;
   rates?: Record<string, number>;
@@ -870,6 +1118,7 @@ export function buildShopCatalogPayload({
       ...freeProducts,
       ...fakeStoreProducts,
       ...escuelajsProducts,
+      ...generatedProducts,
       ...dummyProducts,
       ...FALLBACK_SHOP_PRODUCTS,
     ]),
@@ -896,7 +1145,7 @@ export function buildShopCatalogPayload({
     const price = promotion ? roundShopMoney(original * (1 - promotion.discount_percent / 100), code) : original;
     return { ...product, original_price: original, price, currency: code, promotion };
   });
-  const dynamicCount = remoteProducts.length + dummyProducts.length + freeProducts.length + fakeStoreProducts.length + escuelajsProducts.length;
+  const dynamicCount = remoteProducts.length + dummyProducts.length + freeProducts.length + fakeStoreProducts.length + escuelajsProducts.length + generatedProducts.length;
   const source = dynamicCount >= products.length ? "mixed" : dynamicCount ? "mixed" : "fallback";
   return {
     products: priced,

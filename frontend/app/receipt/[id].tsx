@@ -168,6 +168,14 @@ export default function Receipt() {
                   {t.bonus_id ? <Row label="Bonus" value={t.bonus_id} /> : null}
                 </>
               )}
+              {t.type === "game_win" && (
+                <>
+                  <Row label="Gain" value={`${formatMoney(t.amount, t.currency || "XOF")}`} highlight />
+                  <Row label="Jeu" value={t.game_id || "bonus"} />
+                  <Row label="Reference" value={t.reference || t.txn_id} />
+                  <Row label="Credit" value="Credite en live sur le solde" />
+                </>
+              )}
               {t.type === "shop_purchase" && (
                 <>
                   <Row label="Commande" value={t.reference || t.shop_order_id || t.txn_id} />
@@ -229,6 +237,7 @@ function typeLabel(t: string) {
     admin_credit: "Crédit admin",
     admin_debit: "Débit admin",
     bonus_credit: "Bonus credite",
+    game_win: "Gain jeu bonus",
     shop_purchase: "Achat boutique",
   } as any)[t] || t;
 }
@@ -323,6 +332,10 @@ function buildReceiptText(t: any) {
   } else if (t.type === "bonus_credit") {
     lines.push(`Montant: ${formatMoney(t.amount, t.currency)}`);
     lines.push(`Bonus: ${t.bonus_id || ""}`);
+  } else if (t.type === "game_win") {
+    lines.push(`Gain: ${formatMoney(t.amount, t.currency || "XOF")}`);
+    lines.push(`Jeu: ${t.game_id || "bonus"}`);
+    lines.push(`Reference: ${t.reference || t.txn_id}`);
   } else if (t.type === "shop_purchase") {
     lines.push(`Commande: ${t.reference || t.shop_order_id || ""}`);
     lines.push(`Total boutique: ${formatMoney(t.order_total || t.amount || 0, t.order_currency || t.currency)}`);
@@ -366,6 +379,8 @@ function receiptRows(t: any) {
     rows.push(["Methode", methodLabel(t.method)], [t.type === "deposit" ? "Source" : "Destination", t.account_ref || ""], ["Frais", formatMoney(t.fees || 0, t.currency)]);
   } else if (t.type === "bonus_credit") {
     rows.push(["Bonus", t.bonus_id || ""], ["Reference bonus", t.reference || ""]);
+  } else if (t.type === "game_win") {
+    rows.push(["Gain", formatMoney(t.amount, t.currency || "XOF")], ["Jeu", t.game_id || "bonus"], ["Credit", "Credite en live sur le solde"]);
   } else if (t.type === "shop_purchase") {
     rows.push(
       ["Commande", t.reference || t.shop_order_id || ""],

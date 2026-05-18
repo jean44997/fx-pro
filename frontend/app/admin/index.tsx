@@ -15,6 +15,7 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [broadcasting, setBroadcasting] = useState(false);
 
   useEffect(() => {
     if (user && user.role !== "admin") router.replace("/(tabs)/home");
@@ -53,6 +54,19 @@ export default function AdminDashboard() {
       await load();
     } catch (e: any) {
       Alert.alert("Erreur", e.message);
+    }
+  };
+
+  const notifyWithdrawPaused = async () => {
+    try {
+      setBroadcasting(true);
+      const res = await api.post("/admin/notifications/withdraw-paused", {});
+      Alert.alert("Notification envoyee", `${res.sent || 0} utilisateur(s) prevenu(s). ${res.skipped || 0} deja notifie(s).`);
+      await load();
+    } catch (e: any) {
+      Alert.alert("Erreur", e.message);
+    } finally {
+      setBroadcasting(false);
     }
   };
 
@@ -100,6 +114,13 @@ export default function AdminDashboard() {
             <Pressable testID="admin-rates-edit" onPress={() => router.push("/admin/rates")} style={[styles.qAction, { borderColor: Colors.yellow }]}>
               <Ionicons name="construct" size={18} color={Colors.yellow} />
               <Text style={styles.qText}>Modifier taux</Text>
+            </Pressable>
+          </View>
+
+          <View style={{ paddingHorizontal: 16, marginTop: 10 }}>
+            <Pressable testID="admin-notify-withdraw-paused" onPress={notifyWithdrawPaused} disabled={broadcasting} style={[styles.qAction, { borderColor: Colors.orange, opacity: broadcasting ? 0.55 : 1 }]}>
+              <Ionicons name="notifications" size={18} color={Colors.orange} />
+              <Text style={styles.qText}>{broadcasting ? "Envoi en cours..." : "Notifier retrait indisponible"}</Text>
             </Pressable>
           </View>
 

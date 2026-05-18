@@ -19,6 +19,7 @@ import httpx
 import hashlib
 import math
 import re
+import secrets
 from pymongo import ReturnDocument
 
 ROOT_DIR = Path(__file__).parent
@@ -53,7 +54,21 @@ SHOP_PICKUP_MESSAGE = (
 SHOP_AGENCY_MESSAGE = (
     SHOP_PICKUP_MESSAGE
 )
-MAX_SHOP_PRODUCTS = 260
+WITHDRAW_PAUSED_NOTICE_FLAG = "withdraw_paused_notice_2026_05_18_at"
+WITHDRAW_PAUSED_NOTICE_TITLE = "Retrait momentanement indisponible"
+WITHDRAW_PAUSED_NOTICE_BODY = (
+    "Le retrait est momentanement indisponible pendant une mise a jour de securite et de logistique. "
+    "Votre solde reste protege, les depots, transferts, achats boutique et notifications continuent normalement. "
+    "FX Pro vous previendra des la reprise."
+)
+GAME_DAILY_TICKETS = 5
+GAME_TICKET_NOTICE_PREFIX = "game_tickets_recharged_notice_"
+GAME_CONFIG = {
+    "scratch": {"name": "Carte Neon", "win_chance": 0.34, "min_prize": 80, "max_prize": 750},
+    "vault": {"name": "Coffre Flash", "win_chance": 0.26, "min_prize": 150, "max_prize": 1400},
+    "reflex": {"name": "Reflexe FX", "win_chance": 0.42, "min_prize": 40, "max_prize": 420},
+}
+MAX_SHOP_PRODUCTS = 1400
 SHOP_FALLBACK_PRODUCTS = [
     {"id": "fxp_earbuds_pro", "title": "Ecouteurs Bluetooth Pro", "brand": "FX Select", "description": "Audio clair, boitier compact, autonomie longue duree et retrait disponible en agence partenaire.", "category": "Tech", "image": "https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 79.0, "rating": 4.8, "stock": 18, "tags": ["Audio", "Mobile", "Premium"], "source": "fallback"},
     {"id": "fxp_watch_core", "title": "Montre connectee Core", "brand": "FX Select", "description": "Suivi activite, notifications, autonomie solide et design discret pour usage quotidien.", "category": "Tech", "image": "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 129.0, "rating": 4.7, "stock": 12, "tags": ["Wearable", "Sport", "Mobile"], "source": "fallback"},
@@ -504,6 +519,166 @@ async def send_push_to_user(
         logger.warning("Expo push failed for %s: %s", user_id, exc)
 
 
+async def notify_withdraw_paused_once(user_id: str) -> bool:
+    created_at = now_utc()
+    updated = await db.users.update_one(
+        {"user_id": user_id, WITHDRAW_PAUSED_NOTICE_FLAG: {"$exists": False}},
+        {"$set": {WITHDRAW_PAUSED_NOTICE_FLAG: created_at, "updated_at": created_at}},
+    )
+    if updated.modified_count <= 0:
+        return False
+    notif = {
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "type": "withdraw_paused",
+        "title": WITHDRAW_PAUSED_NOTICE_TITLE,
+        "body": WITHDRAW_PAUSED_NOTICE_BODY,
+        "read": False,
+        "created_at": created_at,
+        "url": "/notifications",
+    }
+    await db.notifications.insert_one(notif)
+    await send_push_to_user(user_id, notif["title"], notif["body"], None, "withdraw_paused", notif["notif_id"])
+    return True
+
+
+def game_today_key() -> str:
+    return now_utc().date().isoformat()
+
+
+def game_notice_flag(day: Optional[str] = None) -> str:
+    return f"{GAME_TICKET_NOTICE_PREFIX}{(day or game_today_key()).replace('-', '_')}"
+
+
+async def ensure_game_tickets(user_id: str) -> dict:
+    day = game_today_key()
+    flag = game_notice_flag(day)
+    user = await find_user_full(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    tickets = int(user.get("game_tickets") or 0)
+    patch = {"game_ticket_day": day, "updated_at": now_utc()}
+    recharged = False
+    if user.get("game_ticket_day") != day:
+        tickets = GAME_DAILY_TICKETS
+        patch["game_tickets"] = tickets
+        recharged = True
+    if recharged and not user.get(flag):
+        patch[flag] = now_utc()
+        notif_id = f"ntf_{uuid.uuid4().hex[:10]}"
+        await db.notifications.insert_one({
+            "notif_id": notif_id,
+            "user_id": user_id,
+            "type": "game_tickets",
+            "title": "Tickets jeux recharges",
+            "body": f"{GAME_DAILY_TICKETS} tickets bonus sont disponibles pour les jeux du profil. Une seule recharge est notifiee par jour.",
+            "read": False,
+            "created_at": now_utc(),
+            "url": "/games",
+        })
+        await send_push_to_user(user_id, "Tickets jeux recharges", f"{GAME_DAILY_TICKETS} tickets bonus sont disponibles.", None, "game_tickets", notif_id)
+    await db.users.update_one({"user_id": user_id}, {"$set": patch})
+    fresh = await find_user_full(user_id) or {}
+    return {
+        "tickets": int(fresh.get("game_tickets") or tickets),
+        "daily_tickets": GAME_DAILY_TICKETS,
+        "day": day,
+        "notice_sent": bool(fresh.get(flag) or patch.get(flag)),
+        "stats": fresh.get("game_stats") or {},
+        "currency": "XOF",
+        "games": [{"id": key, **cfg} for key, cfg in GAME_CONFIG.items()],
+    }
+
+
+async def play_game(user: dict, game_id: str) -> dict:
+    config = GAME_CONFIG.get(game_id)
+    if not config:
+        raise HTTPException(status_code=400, detail="Jeu indisponible")
+    await ensure_game_tickets(user["user_id"])
+    fresh = await find_user_full(user["user_id"]) or user
+    tickets = int(fresh.get("game_tickets") or 0)
+    if tickets <= 0:
+        raise HTTPException(status_code=400, detail="Plus de tickets disponibles. Les tickets seront recharges automatiquement.")
+    roll = secrets.randbelow(10000) / 10000
+    won = roll < float(config["win_chance"])
+    seed = f"{user['user_id']}:{game_id}:{now_utc().isoformat()}:{roll}"
+    prize = 0
+    if won:
+        spread = int(config["max_prize"]) - int(config["min_prize"])
+        prize = int(config["min_prize"]) + int(stable_shop_number(seed) * max(1, spread))
+        prize = int(round(prize / 10) * 10)
+    txn_id = f"txn_{uuid.uuid4().hex[:12]}" if won else None
+    event_id = f"game_{uuid.uuid4().hex[:12]}"
+    balance_key = "balances.XOF"
+    stats_key = f"game_stats.{game_id}"
+    update = {
+        "$inc": {"game_tickets": -1, f"{stats_key}.plays": 1},
+        "$set": {"updated_at": now_utc(), "last_game_play_at": now_utc()},
+    }
+    if won:
+        update["$inc"][balance_key] = prize
+        update["$inc"][f"{stats_key}.wins"] = 1
+        update["$inc"][f"{stats_key}.prizes"] = prize
+    updated_user = await db.users.find_one_and_update(
+        {"user_id": user["user_id"], "game_tickets": {"$gte": 1}},
+        update,
+        projection={"_id": 0, "password_hash": 0},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated_user:
+        raise HTTPException(status_code=409, detail="Ticket deja utilise. Rechargez la page des jeux.")
+    event = {
+        "event_id": event_id,
+        "user_id": user["user_id"],
+        "game_id": game_id,
+        "game_name": config["name"],
+        "won": won,
+        "prize": prize,
+        "currency": "XOF",
+        "txn_id": txn_id,
+        "created_at": now_utc(),
+    }
+    await db.game_events.insert_one(event)
+    if won and txn_id:
+        txn = {
+            "txn_id": txn_id,
+            "type": "game_win",
+            "user_id": user["user_id"],
+            "participants": [user["user_id"]],
+            "amount": prize,
+            "currency": "XOF",
+            "status": "completed",
+            "reference": f"GAME-{event_id[-8:].upper()}",
+            "game_id": game_id,
+            "created_at": now_utc(),
+        }
+        notif_id = f"ntf_{uuid.uuid4().hex[:10]}"
+        await db.transactions.insert_one(txn)
+        await db.notifications.insert_one({
+            "notif_id": notif_id,
+            "user_id": user["user_id"],
+            "type": "game_win",
+            "txn_id": txn_id,
+            "title": "Gain jeu credite",
+            "body": f"+{prize} XOF credites depuis {config['name']}. Reference {txn['reference']}.",
+            "read": False,
+            "created_at": now_utc(),
+            "url": f"/receipt/{txn_id}",
+        })
+        await send_push_to_user(user["user_id"], "Gain jeu credite", f"+{prize} XOF credites.", txn_id, "game_win", notif_id)
+        event["transaction"] = txn
+    return {
+        "ok": True,
+        "result": "win" if won else "loss",
+        "won": won,
+        "prize": prize,
+        "currency": "XOF",
+        "tickets": int(updated_user.get("game_tickets") or 0),
+        "balances": updated_user.get("balances") or {},
+        "event": event,
+    }
+
+
 # ============ Models ============
 class RegisterIn(BaseModel):
     email: EmailStr
@@ -601,6 +776,10 @@ class ShopCheckoutIn(BaseModel):
     query: Optional[str] = "premium snack"
     client_order_id: Optional[str] = None
     note: Optional[str] = None
+
+
+class GamePlayIn(BaseModel):
+    game_id: str = "scratch"
 
 
 # ============ Auth ============
@@ -712,6 +891,7 @@ async def google_session(data: GoogleSessionIn):
 
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
+    await notify_withdraw_paused_once(user["user_id"])
     return user
 
 
@@ -833,7 +1013,12 @@ MARKET_PRICE_ANCHORS = [
     ("samsung galaxy s7", 60.0), ("samsung galaxy s8", 90.0), ("samsung galaxy s10", 150.0),
     ("oppo a57", 75.0), ("oppo f19", 145.0), ("oppo k1", 85.0), ("realme c35", 85.0),
     ("realme x", 110.0), ("realme xt", 130.0), ("vivo s1", 95.0), ("vivo v9", 90.0), ("vivo x21", 125.0),
-    ("gaming laptop", 620.0), ("laptop", 320.0), ("55-inch", 290.0), ("55 inch", 290.0),
+    ("gaming laptop", 620.0), ("macbook air m4 13", 999.0), ("macbook air m4 15", 1199.0),
+    ("macbook pro m4 pro", 1999.0), ("macbook pro 16", 2499.0), ("m4 max", 2499.0),
+    ("imac 24", 1299.0), ("mac mini", 599.0), ("dell xps", 1180.0), ("hp spectre", 1180.0),
+    ("thinkpad x1", 1180.0), ("surface laptop", 1180.0), ("galaxy book", 1180.0),
+    ("lenovo legion", 1450.0), ("asus rog", 1450.0), ("msi stealth", 1450.0), ("predator helios", 1450.0),
+    ("laptop", 320.0), ("55-inch", 290.0), ("55 inch", 290.0),
     ("curved gaming monitor", 480.0), ("monitor", 120.0), ("1tb", 55.0), ("256gb ssd", 24.0),
     ("2tb", 45.0), ("4tb gaming drive", 80.0), ("wireless bluetooth headphones", 35.0),
     ("headphone", 35.0), ("bluetooth speaker", 25.0), ("dslr camera", 220.0), ("action camera", 75.0),
@@ -877,6 +1062,193 @@ def market_adjusted_price_usd(raw_price: float, seed: str, title: str = "", cate
     else:
         adjusted = max(0.75, min(adjusted, 900))
     return round_shop_money(adjusted, "USD")
+
+
+REAL_PRODUCT_IMAGE_POOLS = {
+    "jewelry": [
+        "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1522312346375-d1a52e2b99b3?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1506630448388-4e683c67ddb0?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1611591437281-460bfbe1220a?auto=format&fit=crop&w=900&q=80",
+    ],
+    "women_fashion": [
+        "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=900&q=80",
+    ],
+    "men_fashion": [
+        "https://images.unsplash.com/photo-1516257984-b1b4d707412e?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1516826957135-700dedea698c?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1487222477894-8943e31ef7b2?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1520975682031-a51d3c6d7cb1?auto=format&fit=crop&w=900&q=80",
+    ],
+    "men_shoes": [
+        "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1549298916-b41d501d3772?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1608231387042-66d1773070a5?auto=format&fit=crop&w=900&q=80",
+    ],
+    "women_shoes": [
+        "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1551107696-a4b0c5a0d9a2?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1562273138-f46be4ebdf33?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?auto=format&fit=crop&w=900&q=80",
+    ],
+    "electronics": [
+        "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80",
+    ],
+    "lifestyle": [
+        "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1556742502-ec7c0e9f34b1?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1540574163026-643ea20ade25?auto=format&fit=crop&w=900&q=80",
+    ],
+}
+
+
+GENERATED_MARKET_PACKS = [
+    {
+        "key": "jewelry", "count": 150, "category": "Bijoux 2025-2026",
+        "brand_pool": ["Aurelia", "Maison Dore", "Luna Pearl", "Nova Bijoux", "Orline"],
+        "noun_pool": ["Bague solitaire", "Collier maille fine", "Bracelet tennis", "Creoles polies", "Pendentif coeur", "Set bague et boucles"],
+        "style_pool": ["vermeil 18k", "argent 925", "cristal premium", "perles nacrees", "acier dore"],
+        "detail_pool": ["boite cadeau", "anti-ternissure", "taille ajustable", "edition soiree", "serti lumineux"],
+        "image_pool": REAL_PRODUCT_IMAGE_POOLS["jewelry"], "min_price": 18.0, "max_price": 260.0,
+        "tags": ["bijoux", "cadeau", "2026", "promotion"],
+    },
+    {
+        "key": "women-fashion", "count": 200, "category": "Mode femme 2025-2026",
+        "brand_pool": ["Nova Mode", "Lyla Studio", "Sheen Select", "Urban Muse", "Cote Femme"],
+        "noun_pool": ["Robe satin", "Blazer coupe courte", "Top maille", "Jean wide leg", "Ensemble deux pieces", "Chemise oversize", "Jupe plisse"],
+        "style_pool": ["minimal chic", "pastel ete", "business doux", "streetwear premium", "soiree elegante"],
+        "detail_pool": ["tissu respirant", "coupe actuelle", "finition douce", "taille inclusive", "collection 2026"],
+        "image_pool": REAL_PRODUCT_IMAGE_POOLS["women_fashion"], "min_price": 9.0, "max_price": 74.0,
+        "tags": ["femme", "mode", "shein-style", "2026"],
+    },
+    {
+        "key": "men-fashion", "count": 200, "category": "Mode homme 2025-2026",
+        "brand_pool": ["Northline", "Atlas Wear", "Urban Gent", "Mode Homme FX", "Cobalt Studio"],
+        "noun_pool": ["Chemise oxford", "Polo premium", "Jean slim confort", "Veste bomber", "Sweat molleton", "Pantalon cargo", "Blazer leger"],
+        "style_pool": ["casual business", "street premium", "sport chic", "minimal noir", "weekend urbain"],
+        "detail_pool": ["coutures renforcees", "coupe moderne", "matiere respirante", "facile a assortir", "collection 2026"],
+        "image_pool": REAL_PRODUCT_IMAGE_POOLS["men_fashion"], "min_price": 12.0, "max_price": 92.0,
+        "tags": ["homme", "mode", "2026", "promo"],
+    },
+    {
+        "key": "men-shoes", "count": 100, "category": "Chaussures homme 2025-2026",
+        "brand_pool": ["Stride Pro", "AeroStep", "Urban Sole", "FlexRun", "North Boot"],
+        "noun_pool": ["Sneakers running", "Derbies cuir", "Baskets basses", "Boots urbaines", "Mocassins souples"],
+        "style_pool": ["semelle confort", "cuir premium", "mesh respirant", "look sport luxe", "usage quotidien"],
+        "detail_pool": ["anti-glisse", "legeres", "amorti renforce", "collection 2026", "finition durable"],
+        "image_pool": REAL_PRODUCT_IMAGE_POOLS["men_shoes"], "min_price": 24.0, "max_price": 165.0,
+        "tags": ["chaussures", "homme", "sneakers", "2026"],
+    },
+    {
+        "key": "women-shoes", "count": 150, "category": "Chaussures femme 2025-2026",
+        "brand_pool": ["Bella Step", "Luna Shoes", "Nova Heel", "Soft Walk", "Muse Sole"],
+        "noun_pool": ["Sandales talon", "Sneakers pastel", "Escarpins vernis", "Bottines chic", "Mules confort", "Ballerines souples"],
+        "style_pool": ["soiree", "bureau", "casual luxe", "ete 2026", "brillant discret"],
+        "detail_pool": ["semelle stable", "confort long port", "finition elegante", "anti-glisse", "forme moderne"],
+        "image_pool": REAL_PRODUCT_IMAGE_POOLS["women_shoes"], "min_price": 18.0, "max_price": 150.0,
+        "tags": ["chaussures", "femme", "talons", "2026"],
+    },
+    {
+        "key": "electronics", "count": 200, "category": "Electronique & ordinateurs 2025-2026",
+        "brand_pool": ["Apple", "Dell", "HP", "Lenovo", "ASUS", "MSI", "Samsung", "Acer", "Microsoft"],
+        "noun_pool": ["MacBook Air M4 13 16Go 256Go", "MacBook Air M4 15 16Go 512Go", "MacBook Pro M4 Pro 14 24Go 512Go", "MacBook Pro 16 M4 Max 36Go 1To", "iMac 24 M4", "Mac mini M4", "Dell XPS 13 2025", "HP Spectre x360 14", "ThinkPad X1 Carbon Gen 13", "Surface Laptop 7", "ASUS ROG Zephyrus G14", "Lenovo Legion Pro 7i", "MSI Stealth 16", "Acer Predator Helios Neo 16", "Galaxy Book4 Pro", "Moniteur OLED 27 240Hz", "SSD NVMe 2To", "Station dock USB-C Pro"],
+        "style_pool": ["stock verifie", "haute performance", "pro createur", "gaming fluide", "bureau premium"],
+        "detail_pool": ["garantie partenaire", "edition 2025-2026", "pret pour IA", "prix reduit", "configuration fiable"],
+        "image_pool": REAL_PRODUCT_IMAGE_POOLS["electronics"], "min_price": 45.0, "max_price": 2499.0,
+        "tags": ["ordinateur", "mac", "pc", "electronique", "2026"],
+    },
+    {
+        "key": "lifestyle", "count": 100, "category": "Maison & lifestyle 2025-2026",
+        "brand_pool": ["HomeLine", "Travel FX", "WorkNest", "Pure Casa", "Daily Plus"],
+        "noun_pool": ["Valise cabine", "Lampe bureau LED", "Sac ordinateur", "Organiseur maison", "Set verres premium", "Diffuseur aromatique"],
+        "style_pool": ["compact", "moderne", "durable", "minimal", "cadeau utile"],
+        "detail_pool": ["usage quotidien", "finition propre", "gain de place", "collection 2026", "prix doux"],
+        "image_pool": REAL_PRODUCT_IMAGE_POOLS["lifestyle"], "min_price": 8.0, "max_price": 230.0,
+        "tags": ["maison", "lifestyle", "utile", "2026"],
+    },
+]
+
+GENERATED_MARKET_PRODUCTS: Optional[List[dict]] = None
+
+
+def generated_raw_price(pack: dict, index: int, title: str) -> float:
+    label = title.lower()
+    explicit = [
+        ("macbook air m4 13", 999.0), ("macbook air m4 15", 1199.0), ("macbook pro m4 pro 14", 1999.0),
+        ("macbook pro 16", 2499.0), ("imac 24", 1299.0), ("mac mini", 599.0), ("dell xps", 1199.0),
+        ("spectre", 1199.0), ("thinkpad", 1199.0), ("surface laptop", 1199.0), ("galaxy book", 1199.0),
+        ("rog", 1499.0), ("legion", 1499.0), ("msi", 1499.0), ("predator", 1499.0),
+        ("oled 27", 649.0), ("ssd nvme", 129.0), ("station dock", 89.0),
+    ]
+    for needle, price in explicit:
+        if needle in label:
+            return price
+    return float(pack["min_price"]) + stable_shop_number(f"{pack['key']}:{index}:{title}:price") * (float(pack["max_price"]) - float(pack["min_price"]))
+
+
+def clean_shop_tags(values: List[Any]) -> List[str]:
+    seen = []
+    for value in values:
+        raw_items = value if isinstance(value, list) else [value]
+        for item in raw_items:
+            label = str(item or "").strip()
+            if label and label not in seen:
+                seen.append(label)
+    return seen[:8]
+
+
+def build_generated_market_products() -> List[dict]:
+    global GENERATED_MARKET_PRODUCTS
+    if GENERATED_MARKET_PRODUCTS is not None:
+        return GENERATED_MARKET_PRODUCTS
+    products: List[dict] = []
+    for pack in GENERATED_MARKET_PACKS:
+        for index in range(int(pack["count"])):
+            n = index + 1
+            brand = pack["brand_pool"][index % len(pack["brand_pool"])]
+            noun = pack["noun_pool"][(index * 3 + 1) % len(pack["noun_pool"])]
+            style = pack["style_pool"][(index * 5 + 2) % len(pack["style_pool"])]
+            detail = pack["detail_pool"][(index * 7 + 3) % len(pack["detail_pool"])]
+            year = "2026" if index % 3 == 0 else "2025"
+            title = f"{brand} {noun} {style} {year} - S{n:03d}"
+            product_id = f"gen_{pack['key']}_{n:03d}"
+            image = pack["image_pool"][index % len(pack["image_pool"])]
+            price = market_adjusted_price_usd(generated_raw_price(pack, index, title), f"generated:{product_id}:{title}", title, pack["category"])
+            clean_key = re.sub(r"[^A-Z0-9]", "", pack["key"].upper())[:6]
+            products.append({
+                "id": product_id,
+                "title": title,
+                "brand": brand,
+                "description": f"{noun} {style}, selection {year} coherente avec une photo produit reelle, une reference boutique unique et un prix reduit pour attirer les clients FX Pro.",
+                "category": pack["category"],
+                "image": image,
+                "base_currency": "USD",
+                "base_price": price,
+                "rating": round_shop_money(4.35 + stable_shop_number(f"{product_id}:rating") * 0.58, "USD"),
+                "stock": 6 + int(stable_shop_number(f"{product_id}:stock") * 88),
+                "tags": clean_shop_tags([pack["tags"], noun, style, detail, year]),
+                "source": "generated",
+                "sku": f"FX-{clean_key}-{n:04d}",
+                "ref": f"FXP-{year}-{pack['key'].upper()[:3]}-{n:04d}",
+                "warranty": "Garantie partenaire 12 mois" if "electronique" in pack["category"].lower() else "Garantie boutique 30 jours",
+                "shipping": "Livraison partenaire ou suivi FX Pro apres paiement",
+                "availability": "In Stock",
+                "return_policy": "Retour selon controle produit et disponibilite partenaire",
+                "minimum_order_quantity": 1,
+                "images": [image],
+                "review_count": 24 + int(stable_shop_number(f"{product_id}:reviews") * 420),
+            })
+    GENERATED_MARKET_PRODUCTS = products
+    return products
 
 
 def normalize_remote_shop_products(products: List[dict]) -> List[dict]:
@@ -1253,7 +1625,8 @@ def shop_promotions(products: List[dict]) -> List[dict]:
 
 
 async def announce_shop_available(user_id: str) -> None:
-    update_flag = "shop_update_pickup_paused_2026_05_17_at"
+    await notify_withdraw_paused_once(user_id)
+    update_flag = "shop_update_pickup_paused_2026_05_18_at"
     user = await db.users.find_one({"user_id": user_id}, {"shop_announced_at": 1, update_flag: 1})
     if not user or user.get(update_flag):
         return
@@ -1285,7 +1658,8 @@ async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack"
     )
     if user_id:
         await announce_shop_available(user_id)
-    products = apply_shop_overrides(dedupe_shop_products(remote + free + fake + escuela + dummy + SHOP_FALLBACK_PRODUCTS), overrides)[:MAX_SHOP_PRODUCTS]
+    generated = build_generated_market_products()
+    products = apply_shop_overrides(dedupe_shop_products(remote + free + fake + escuela + generated + dummy + SHOP_FALLBACK_PRODUCTS), overrides)[:MAX_SHOP_PRODUCTS]
     product_ids = {p["id"] for p in products}
     admin_promos = []
     for override in overrides:
@@ -1308,7 +1682,7 @@ async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack"
         promo = promo_map.get(product["id"])
         price = round_shop_money(original * (1 - (promo["discount_percent"] / 100)), code) if promo else original
         priced.append({**product, "original_price": original, "price": price, "currency": code, "promotion": promo})
-    source = "mixed" if (remote or dummy or free or fake or escuela) else "fallback"
+    source = "mixed" if (remote or dummy or free or fake or escuela or generated) else "fallback"
     return {
         "products": priced,
         "promotions": promotions,
@@ -1852,6 +2226,16 @@ async def qr_lookup(code: str, _: dict = Depends(get_current_user)):
 @api.get("/shop/catalog")
 async def shop_catalog(currency: str = "XOF", q: str = "premium snack", user: dict = Depends(get_current_user)):
     return await build_shop_catalog(currency, q, user["user_id"])
+
+
+@api.get("/games/status")
+async def games_status(user: dict = Depends(get_current_user)):
+    return await ensure_game_tickets(user["user_id"])
+
+
+@api.post("/games/play")
+async def games_play(data: GamePlayIn, user: dict = Depends(get_current_user)):
+    return await play_game(user, data.game_id)
 
 
 @api.get("/shop/orders")
@@ -2438,6 +2822,22 @@ async def admin_stats(_: dict = Depends(require_admin)):
     }
 
 
+@api.post("/admin/notifications/withdraw-paused")
+async def admin_notify_withdraw_paused(_: dict = Depends(require_admin)):
+    sent = 0
+    skipped = 0
+    cursor = db.users.find({"role": {"$ne": "admin"}}, {"_id": 0, "user_id": 1, WITHDRAW_PAUSED_NOTICE_FLAG: 1})
+    async for item in cursor:
+        if item.get(WITHDRAW_PAUSED_NOTICE_FLAG):
+            skipped += 1
+            continue
+        if await notify_withdraw_paused_once(item["user_id"]):
+            sent += 1
+        else:
+            skipped += 1
+    return {"ok": True, "sent": sent, "skipped": skipped, "flag": WITHDRAW_PAUSED_NOTICE_FLAG}
+
+
 @api.get("/admin/users")
 async def admin_users(_: dict = Depends(require_admin), search: str = ""):
     q = {}
@@ -2521,6 +2921,8 @@ async def startup_seed():
     await db.bonus_program.create_index("user_id", unique=True)
     await db.bonus_events.create_index("created_at")
     await db.risk_logs.create_index("created_at")
+    await db.game_events.create_index("created_at")
+    await db.game_events.create_index("user_id")
 
     # Seed admin
     admin = await db.users.find_one({"email": "admin@fxpro.com"})

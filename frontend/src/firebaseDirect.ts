@@ -67,12 +67,24 @@ const ALERTS = "fxpro_alerts";
 const VAULTS = "fxpro_vaults";
 const BONUS = "fxpro_bonus";
 const BONUS_EVENTS = "fxpro_bonus_events";
+const GAME_EVENTS = "fxpro_game_events";
 const RISK_LOGS = "fxpro_risk_logs";
 const SHOP_ORDERS = "fxpro_shop_orders";
 const SHOP_PRODUCTS = "fxpro_shop_products";
 const APILAYER_SHOP_KEY = process.env.EXPO_PUBLIC_APILAYER_KEY || "";
 const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_USD", "EUR_XOF"];
 const MAX_INLINE_PROFILE_PICTURE_CHARS = 700000;
+const WITHDRAW_PAUSED_NOTICE_FLAG = "withdraw_paused_notice_2026_05_18_at";
+const WITHDRAW_PAUSED_NOTICE_TITLE = "Retrait momentanement indisponible";
+const WITHDRAW_PAUSED_NOTICE_BODY =
+  "Le retrait est momentanement indisponible pendant une mise a jour de securite et de logistique. Votre solde reste protege, les depots, transferts, achats boutique et notifications continuent normalement. FX Pro vous previendra des la reprise.";
+const GAME_DAILY_TICKETS = 5;
+const GAME_TICKET_NOTICE_PREFIX = "game_tickets_recharged_notice_";
+const GAME_CONFIG: Record<string, { name: string; win_chance: number; min_prize: number; max_prize: number }> = {
+  scratch: { name: "Carte Neon", win_chance: 0.34, min_prize: 80, max_prize: 750 },
+  vault: { name: "Coffre Flash", win_chance: 0.26, min_prize: 150, max_prize: 1400 },
+  reflex: { name: "Reflexe FX", win_chance: 0.42, min_prize: 40, max_prize: 420 },
+};
 
 const INITIAL_BALANCES: Record<string, number> = {
   EUR: 0,
@@ -141,6 +153,15 @@ function makeReference(prefix: "DEP" | "WDR") {
       ? crypto.randomUUID().replace(/-/g, "")
       : Math.random().toString(36).slice(2) + Date.now().toString(36);
   return `${prefix}-${random.slice(0, 8).toUpperCase()}`;
+}
+
+function stableDirectNumber(seed: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 4294967295;
 }
 
 function parseBody(opts: RequestInit) {
@@ -658,7 +679,8 @@ async function getShopProductOverrides() {
 async function announceShopIfNeeded(userId: string) {
   const userRef = doc(db, USERS, userId);
   const snap = await getDoc(userRef);
-  const updateFlag = "shop_update_pickup_paused_2026_05_17_at";
+  await notifyWithdrawPausedOnce(userId, snap.data());
+  const updateFlag = "shop_update_pickup_paused_2026_05_18_at";
   if (snap.data()?.[updateFlag]) return;
   const notifId = makeId("ntf");
   const createdAt = nowIso();
@@ -674,6 +696,167 @@ async function announceShopIfNeeded(userId: string) {
       created_at: createdAt,
     }).catch(() => undefined),
   ]);
+}
+
+async function notifyWithdrawPausedOnce(userId: string, userData?: any) {
+  const userRef = doc(db, USERS, userId);
+  const data = userData || (await getDoc(userRef)).data();
+  if (data?.[WITHDRAW_PAUSED_NOTICE_FLAG]) return false;
+  const notifId = makeId("ntf");
+  const createdAt = nowIso();
+  await Promise.all([
+    setDoc(userRef, { [WITHDRAW_PAUSED_NOTICE_FLAG]: createdAt, updated_at: createdAt }, { merge: true }),
+    setDoc(doc(db, NOTIFS, notifId), {
+      notif_id: notifId,
+      user_id: userId,
+      type: "withdraw_paused",
+      title: WITHDRAW_PAUSED_NOTICE_TITLE,
+      body: WITHDRAW_PAUSED_NOTICE_BODY,
+      read: false,
+      created_at: createdAt,
+      url: "/notifications",
+    }),
+  ]);
+  return true;
+}
+
+function gameTodayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function gameNoticeFlag(day = gameTodayKey()) {
+  return `${GAME_TICKET_NOTICE_PREFIX}${day.replace(/-/g, "_")}`;
+}
+
+async function ensureGameTicketsDirect(userId: string) {
+  const userRef = doc(db, USERS, userId);
+  const day = gameTodayKey();
+  const flag = gameNoticeFlag(day);
+  let status: any = null;
+  let rechargeNotif: any = null;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(userRef);
+    const data = normalizeUser(snap.data());
+    const raw = snap.data() || {};
+    let tickets = Number(raw.game_tickets || 0);
+    const patch: any = { game_ticket_day: day, updated_at: nowIso() };
+    const needsRecharge = raw.game_ticket_day !== day;
+    if (needsRecharge) {
+      tickets = GAME_DAILY_TICKETS;
+      patch.game_tickets = tickets;
+    }
+    if (needsRecharge && !raw[flag]) {
+      const notifId = makeId("ntf");
+      patch[flag] = nowIso();
+      rechargeNotif = {
+        notif_id: notifId,
+        user_id: userId,
+        type: "game_tickets",
+        title: "Tickets jeux recharges",
+        body: `${GAME_DAILY_TICKETS} tickets bonus sont disponibles pour les jeux du profil. Une seule recharge est notifiee par jour.`,
+        read: false,
+        created_at: nowIso(),
+        url: "/games",
+      };
+      tx.set(doc(db, NOTIFS, notifId), rechargeNotif);
+    }
+    tx.set(userRef, patch, { merge: true });
+    status = {
+      tickets,
+      daily_tickets: GAME_DAILY_TICKETS,
+      day,
+      notice_sent: Boolean(raw[flag] || patch[flag]),
+      stats: raw.game_stats || {},
+      balances: data.balances,
+      currency: "XOF",
+      games: Object.entries(GAME_CONFIG).map(([id, cfg]) => ({ id, ...cfg })),
+    };
+  });
+  return { ...status, recharged_notification: rechargeNotif };
+}
+
+async function playGameDirect(userId: string, gameId: string) {
+  const config = GAME_CONFIG[gameId];
+  if (!config) throw new Error("Jeu indisponible.");
+  await ensureGameTicketsDirect(userId);
+  const userRef = doc(db, USERS, userId);
+  const eventId = makeId("game");
+  const roll = Math.random();
+  const won = roll < config.win_chance;
+  const spread = config.max_prize - config.min_prize;
+  const prize = won ? Math.round((config.min_prize + stableDirectNumber(`${userId}:${gameId}:${eventId}`) * Math.max(1, spread)) / 10) * 10 : 0;
+  const txnId = won ? makeId("txn") : null;
+  const notifId = won ? makeId("ntf") : null;
+  let result: any = null;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(userRef);
+    const raw = snap.data() || {};
+    const normalized = normalizeUser(raw);
+    const tickets = Number(raw.game_tickets || 0);
+    if (tickets <= 0) throw new Error("Plus de tickets disponibles. Les tickets seront recharges automatiquement.");
+    const balances = { ...normalized.balances };
+    if (won) balances.XOF = Number((Number(balances.XOF || 0) + prize).toFixed(4));
+    const gameStats = { ...(raw.game_stats || {}) };
+    const stats = { ...(gameStats[gameId] || {}) };
+    stats.plays = Number(stats.plays || 0) + 1;
+    if (won) {
+      stats.wins = Number(stats.wins || 0) + 1;
+      stats.prizes = Number(stats.prizes || 0) + prize;
+    }
+    gameStats[gameId] = stats;
+    tx.update(userRef, { balances, game_tickets: tickets - 1, game_stats: gameStats, last_game_play_at: nowIso(), updated_at: nowIso() });
+    const event = {
+      event_id: eventId,
+      user_id: userId,
+      game_id: gameId,
+      game_name: config.name,
+      won,
+      prize,
+      currency: "XOF",
+      txn_id: txnId,
+      created_at: nowIso(),
+    };
+    tx.set(doc(db, GAME_EVENTS, eventId), event);
+    let transaction: any = null;
+    if (won && txnId && notifId) {
+      transaction = {
+        txn_id: txnId,
+        type: "game_win",
+        user_id: userId,
+        participants: [userId],
+        amount: prize,
+        currency: "XOF",
+        status: "completed",
+        reference: `GAME-${eventId.slice(-8).toUpperCase()}`,
+        game_id: gameId,
+        created_at: nowIso(),
+      };
+      tx.set(doc(db, TXNS, txnId), transaction);
+      tx.set(doc(db, NOTIFS, notifId), {
+        notif_id: notifId,
+        user_id: userId,
+        type: "game_win",
+        txn_id: txnId,
+        title: "Gain jeu credite",
+        body: `+${prize} XOF credites depuis ${config.name}. Reference ${transaction.reference}.`,
+        read: false,
+        created_at: nowIso(),
+        url: `/receipt/${txnId}`,
+      });
+    }
+    result = { event, transaction, balances, tickets: tickets - 1 };
+  });
+  return {
+    ok: true,
+    result: won ? "win" : "loss",
+    won,
+    prize,
+    currency: "XOF",
+    tickets: result?.tickets ?? 0,
+    balances: result?.balances || {},
+    event: result?.event,
+    transaction: result?.transaction,
+  };
 }
 
 async function logShopRisk(userId: string, reason: string, payload: any = {}) {
@@ -789,7 +972,11 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     }
   }
 
-  if (pathname === "/auth/me") return currentProfile();
+  if (pathname === "/auth/me") {
+    const profile = await currentProfile();
+    await notifyWithdrawPausedOnce(profile.user_id).catch(() => undefined);
+    return profile;
+  }
 
   if (pathname === "/auth/logout" && method === "POST") {
     await signOut(auth);
@@ -861,6 +1048,16 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       { merge: true }
     );
     return firebaseDirectRequest("/bonus", { method: "GET" });
+  }
+
+  if (pathname === "/games/status" && method === "GET") {
+    const firebaseUser = await requireFirebaseUser();
+    return ensureGameTicketsDirect(firebaseUser.uid);
+  }
+
+  if (pathname === "/games/play" && method === "POST") {
+    const firebaseUser = await requireFirebaseUser();
+    return playGameDirect(firebaseUser.uid, String(body.game_id || "scratch"));
   }
 
   if (pathname === "/convert" && method === "POST") {
@@ -1151,6 +1348,47 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       });
     });
     return { ok: true, order, transaction, balances };
+  }
+
+  if (pathname === "/admin/notifications/withdraw-paused" && method === "POST") {
+    const profile = await currentProfile();
+    if (profile.role !== "admin") throw new Error("Admin requis.");
+    const snap = await getDocs(collection(db, USERS));
+    let sent = 0;
+    let skipped = 0;
+    let batch = writeBatch(db);
+    let writes = 0;
+    const commitBatch = async () => {
+      if (!writes) return;
+      await batch.commit();
+      batch = writeBatch(db);
+      writes = 0;
+    };
+    for (const item of snap.docs) {
+      const data = item.data();
+      if (data.role === "admin" || data[WITHDRAW_PAUSED_NOTICE_FLAG]) {
+        skipped += 1;
+        continue;
+      }
+      const notifId = makeId("ntf");
+      const createdAt = nowIso();
+      batch.set(doc(db, USERS, item.id), { [WITHDRAW_PAUSED_NOTICE_FLAG]: createdAt, updated_at: createdAt }, { merge: true });
+      batch.set(doc(db, NOTIFS, notifId), {
+        notif_id: notifId,
+        user_id: data.user_id || item.id,
+        type: "withdraw_paused",
+        title: WITHDRAW_PAUSED_NOTICE_TITLE,
+        body: WITHDRAW_PAUSED_NOTICE_BODY,
+        read: false,
+        created_at: createdAt,
+        url: "/notifications",
+      });
+      writes += 2;
+      sent += 1;
+      if (writes >= 450) await commitBatch();
+    }
+    await commitBatch();
+    return { ok: true, sent, skipped, flag: WITHDRAW_PAUSED_NOTICE_FLAG };
   }
 
   if (pathname === "/admin/shop/products" && method === "GET") {
