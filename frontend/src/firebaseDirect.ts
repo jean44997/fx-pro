@@ -71,20 +71,59 @@ const GAME_EVENTS = "fxpro_game_events";
 const RISK_LOGS = "fxpro_risk_logs";
 const SHOP_ORDERS = "fxpro_shop_orders";
 const SHOP_PRODUCTS = "fxpro_shop_products";
+const SHOP_SELLERS = "fxpro_shop_sellers";
+const SHOP_SELLER_ARTICLES = "fxpro_shop_seller_articles";
+const MOVIE_LIBRARY = "fxpro_movie_library";
 const APILAYER_SHOP_KEY = process.env.EXPO_PUBLIC_APILAYER_KEY || "";
+const TMDB_READ_TOKEN = process.env.EXPO_PUBLIC_TMDB_READ_TOKEN || "";
+const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY || "";
 const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_USD", "EUR_XOF"];
 const MAX_INLINE_PROFILE_PICTURE_CHARS = 700000;
 const WITHDRAW_PAUSED_NOTICE_FLAG = "withdraw_paused_notice_2026_05_18_at";
 const WITHDRAW_PAUSED_NOTICE_TITLE = "Retrait momentanement indisponible";
 const WITHDRAW_PAUSED_NOTICE_BODY =
   "Le retrait est momentanement indisponible pendant une mise a jour de securite et de logistique. Votre solde reste protege, les depots, transferts, achats boutique et notifications continuent normalement. FX Pro vous previendra des la reprise.";
+const SERVICES_LIMITED_NOTICE_FLAG = "services_limited_notice_2026_05_18_at";
+const SERVICES_LIMITED_NOTICE_TITLE = "Services momentanement indisponibles";
+const SERVICES_LIMITED_NOTICE_BODY =
+  "Certains services externes peuvent etre indisponibles pendant la mise a jour. Le solde, les recus, la boutique suivie, les jeux avec tickets et les notifications restent proteges.";
 const GAME_DAILY_TICKETS = 5;
 const GAME_TICKET_NOTICE_PREFIX = "game_tickets_recharged_notice_";
-const GAME_CONFIG: Record<string, { name: string; win_chance: number; min_prize: number; max_prize: number }> = {
+const GAME_CONFIG: Record<string, { name: string; win_chance: number; min_prize: number; max_prize: number; mode?: string }> = {
   scratch: { name: "Carte Neon", win_chance: 0.34, min_prize: 80, max_prize: 750 },
   vault: { name: "Coffre Flash", win_chance: 0.26, min_prize: 150, max_prize: 1400 },
   reflex: { name: "Reflexe FX", win_chance: 0.42, min_prize: 40, max_prize: 420 },
+  hero_duel: { name: "Duel Heros", win_chance: 0.36, min_prize: 120, max_prize: 1100, mode: "hero" },
+  power_match: { name: "Power Match", win_chance: 0.3, min_prize: 220, max_prize: 1800, mode: "hero" },
+  speed_run: { name: "Speed Run", win_chance: 0.44, min_prize: 60, max_prize: 620, mode: "hero" },
 };
+
+const SUPERHERO_ROSTER = [
+  { id: 1, name: "A-Bomb", slug: "1-a-bomb", publisher: "Marvel Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/1-a-bomb.jpg", stats: { intelligence: 38, strength: 100, speed: 17, durability: 80, power: 24, combat: 64 } },
+  { id: 2, name: "Abe Sapien", slug: "2-abe-sapien", publisher: "Dark Horse Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/2-abe-sapien.jpg", stats: { intelligence: 88, strength: 28, speed: 35, durability: 65, power: 100, combat: 85 } },
+  { id: 4, name: "Abomination", slug: "4-abomination", publisher: "Marvel Comics", alignment: "bad", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/4-abomination.jpg", stats: { intelligence: 63, strength: 80, speed: 53, durability: 90, power: 62, combat: 95 } },
+  { id: 20, name: "Amazo", slug: "20-amazo", publisher: "DC Comics", alignment: "bad", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/20-amazo.jpg", stats: { intelligence: 63, strength: 100, speed: 83, durability: 100, power: 100, combat: 100 } },
+  { id: 35, name: "Apocalypse", slug: "35-apocalypse", publisher: "Marvel Comics", alignment: "bad", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/35-apocalypse.jpg", stats: { intelligence: 100, strength: 100, speed: 33, durability: 100, power: 100, combat: 60 } },
+  { id: 38, name: "Aquaman", slug: "38-aquaman", publisher: "DC Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/38-aquaman.jpg", stats: { intelligence: 81, strength: 85, speed: 79, durability: 80, power: 100, combat: 80 } },
+  { id: 70, name: "Batman", slug: "70-batman", publisher: "DC Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/70-batman.jpg", stats: { intelligence: 100, strength: 26, speed: 27, durability: 50, power: 47, combat: 100 } },
+  { id: 95, name: "Black Adam", slug: "95-black-adam", publisher: "DC Comics", alignment: "bad", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/95-black-adam.jpg", stats: { intelligence: 88, strength: 100, speed: 92, durability: 100, power: 100, combat: 56 } },
+  { id: 149, name: "Captain America", slug: "149-captain-america", publisher: "Marvel Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/149-captain-america.jpg", stats: { intelligence: 69, strength: 19, speed: 38, durability: 55, power: 60, combat: 100 } },
+  { id: 213, name: "Deadpool", slug: "213-deadpool", publisher: "Marvel Comics", alignment: "neutral", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/213-deadpool.jpg", stats: { intelligence: 69, strength: 32, speed: 50, durability: 100, power: 100, combat: 100 } },
+  { id: 332, name: "Hulk", slug: "332-hulk", publisher: "Marvel Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/332-hulk.jpg", stats: { intelligence: 88, strength: 100, speed: 63, durability: 100, power: 98, combat: 85 } },
+  { id: 346, name: "Iron Man", slug: "346-iron-man", publisher: "Marvel Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/346-iron-man.jpg", stats: { intelligence: 100, strength: 85, speed: 58, durability: 85, power: 100, combat: 64 } },
+  { id: 620, name: "Spider-Man", slug: "620-spider-man", publisher: "Marvel Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/620-spider-man.jpg", stats: { intelligence: 90, strength: 55, speed: 67, durability: 75, power: 74, combat: 85 } },
+  { id: 644, name: "Superman", slug: "644-superman", publisher: "DC Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/644-superman.jpg", stats: { intelligence: 94, strength: 100, speed: 100, durability: 100, power: 100, combat: 85 } },
+  { id: 655, name: "Thanos", slug: "655-thanos", publisher: "Marvel Comics", alignment: "bad", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/655-thanos.jpg", stats: { intelligence: 100, strength: 100, speed: 33, durability: 100, power: 100, combat: 80 } },
+  { id: 717, name: "Wolverine", slug: "717-wolverine", publisher: "Marvel Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/717-wolverine.jpg", stats: { intelligence: 63, strength: 32, speed: 50, durability: 100, power: 89, combat: 100 } },
+  { id: 720, name: "Wonder Woman", slug: "720-wonder-woman", publisher: "DC Comics", alignment: "good", image: "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/720-wonder-woman.jpg", stats: { intelligence: 88, strength: 100, speed: 79, durability: 100, power: 100, combat: 100 } },
+];
+
+const MOVIE_FALLBACK_ITEMS = [
+  { id: 550, media_type: "movie", title: "Fight Club", overview: "Un employe insomniaque decouvre un cercle clandestin qui change sa vision du controle et de la consommation.", poster_url: "https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/hZkgoQYus5vegHoetLkCJzb17zJ.jpg", vote_average: 8.4, release_date: "1999-10-15", source: "fallback" },
+  { id: 1399, media_type: "tv", title: "Game of Thrones", overview: "Des familles nobles luttent pour le pouvoir pendant qu'une menace ancienne grandit au-dela du mur.", poster_url: "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/suopoADq0k8YZr4dQXcU6pToj6s.jpg", vote_average: 8.5, release_date: "2011-04-17", source: "fallback" },
+  { id: 157336, media_type: "movie", title: "Interstellar", overview: "Une equipe traverse l'espace pour chercher un futur possible a l'humanite.", poster_url: "https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg", vote_average: 8.5, release_date: "2014-11-05", source: "fallback" },
+  { id: 66732, media_type: "tv", title: "Stranger Things", overview: "Des enfants, une disparition et une force etrange bouleversent une petite ville.", poster_url: "https://image.tmdb.org/t/p/w500/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg", vote_average: 8.6, release_date: "2016-07-15", source: "fallback" },
+];
 
 const INITIAL_BALANCES: Record<string, number> = {
   EUR: 0,
@@ -676,6 +715,42 @@ async function getShopProductOverrides() {
   }
 }
 
+function cleanSellerTags(values: any[] = []) {
+  return Array.from(new Set(values.flat().map((item) => String(item || "").trim()).filter(Boolean))).slice(0, 8);
+}
+
+async function getSellerCatalogProducts() {
+  const snap = await getDocs(query(collection(db, SHOP_SELLER_ARTICLES), where("status", "==", "active")));
+  return snap.docs
+    .map((d) => d.data())
+    .filter((item: any) => !item.deleted_at)
+    .map((item: any) => ({
+      id: item.article_id,
+      title: item.title,
+      brand: item.store_name || "Vendeur certifie",
+      description: item.description || "Article publie par un vendeur KYC certifie FX Pro.",
+      category: item.category || "Vendeurs certifies",
+      image: item.image,
+      base_currency: "USD" as const,
+      base_price: Number(item.base_price || item.price || 1),
+      rating: Number((4.2 + stableDirectNumber(`${item.article_id}:rating`) * 0.7).toFixed(1)),
+      stock: Math.max(0, Number(item.stock || 0)),
+      tags: cleanSellerTags([item.tags, "vendeur certifie", "kyc"]),
+      source: "seller" as any,
+      sku: item.sku || `SELL-${String(item.article_id || "").slice(-8).toUpperCase()}`,
+      ref: item.reference || `SELL-${String(item.article_id || "").slice(-8).toUpperCase()}`,
+      seller_id: item.user_id,
+      seller_verified: true,
+      warranty: "Controle vendeur KYC FX Pro",
+      shipping: "Livraison ou retrait coordonne par le vendeur certifie",
+      availability: Number(item.stock || 0) > 0 ? "In Stock" : "Out of Stock",
+      return_policy: "Retour selon profil vendeur et mediation FX Pro",
+      minimum_order_quantity: 1,
+      images: [item.image],
+      review_count: 12 + Math.floor(stableDirectNumber(`${item.article_id}:reviews`) * 120),
+    }));
+}
+
 async function announceShopIfNeeded(userId: string) {
   const userRef = doc(db, USERS, userId);
   const snap = await getDoc(userRef);
@@ -712,6 +787,28 @@ async function notifyWithdrawPausedOnce(userId: string, userData?: any) {
       type: "withdraw_paused",
       title: WITHDRAW_PAUSED_NOTICE_TITLE,
       body: WITHDRAW_PAUSED_NOTICE_BODY,
+      read: false,
+      created_at: createdAt,
+      url: "/notifications",
+    }),
+  ]);
+  return true;
+}
+
+async function notifyServicesLimitedOnce(userId: string, userData?: any) {
+  const userRef = doc(db, USERS, userId);
+  const data = userData || (await getDoc(userRef)).data();
+  if (data?.[SERVICES_LIMITED_NOTICE_FLAG]) return false;
+  const notifId = makeId("ntf");
+  const createdAt = nowIso();
+  await Promise.all([
+    setDoc(userRef, { [SERVICES_LIMITED_NOTICE_FLAG]: createdAt, updated_at: createdAt }, { merge: true }),
+    setDoc(doc(db, NOTIFS, notifId), {
+      notif_id: notifId,
+      user_id: userId,
+      type: "services_limited",
+      title: SERVICES_LIMITED_NOTICE_TITLE,
+      body: SERVICES_LIMITED_NOTICE_BODY,
       read: false,
       created_at: createdAt,
       url: "/notifications",
@@ -770,9 +867,32 @@ async function ensureGameTicketsDirect(userId: string) {
       balances: data.balances,
       currency: "XOF",
       games: Object.entries(GAME_CONFIG).map(([id, cfg]) => ({ id, ...cfg })),
+      heroes: SUPERHERO_ROSTER,
     };
   });
   return { ...status, recharged_notification: rechargeNotif };
+}
+
+function heroPowerScore(hero: any, mode = "hero_duel") {
+  const stats = hero?.stats || {};
+  const weights =
+    mode === "speed_run"
+      ? { speed: 2, combat: 1.3, power: 1, durability: 0.8, strength: 0.6, intelligence: 0.8 }
+      : mode === "power_match"
+        ? { power: 1.8, strength: 1.5, durability: 1.2, combat: 1, speed: 0.8, intelligence: 0.9 }
+        : { combat: 1.5, intelligence: 1.25, power: 1.2, durability: 1, strength: 0.9, speed: 0.8 };
+  return Math.round(Object.entries(weights).reduce((sum, [key, weight]) => sum + Number(stats[key] || 0) * Number(weight), 0));
+}
+
+function heroRound(userId: string, gameId: string, eventId: string, roll: number) {
+  const firstIndex = Math.floor(stableDirectNumber(`${userId}:${gameId}:${eventId}:a`) * SUPERHERO_ROSTER.length) % SUPERHERO_ROSTER.length;
+  let secondIndex = Math.floor(stableDirectNumber(`${userId}:${gameId}:${eventId}:b`) * SUPERHERO_ROSTER.length) % SUPERHERO_ROSTER.length;
+  if (firstIndex === secondIndex) secondIndex = (secondIndex + 7) % SUPERHERO_ROSTER.length;
+  const player = SUPERHERO_ROSTER[firstIndex];
+  const rival = SUPERHERO_ROSTER[secondIndex];
+  const player_score = heroPowerScore(player, gameId) + Math.floor(stableDirectNumber(`${eventId}:boost-a`) * 60);
+  const rival_score = heroPowerScore(rival, gameId) + Math.floor(stableDirectNumber(`${eventId}:boost-b`) * 60);
+  return { player, rival, player_score, rival_score, margin: player_score - rival_score, rule: "ticket_required", seed_hint: `${eventId.slice(-10)}${Math.round(roll * 1000)}` };
 }
 
 async function playGameDirect(userId: string, gameId: string) {
@@ -782,7 +902,9 @@ async function playGameDirect(userId: string, gameId: string) {
   const userRef = doc(db, USERS, userId);
   const eventId = makeId("game");
   const roll = Math.random();
-  const won = roll < config.win_chance;
+  const details = config.mode === "hero" ? heroRound(userId, gameId, eventId, roll) : null;
+  const adjustedChance = Math.max(0.08, Math.min(0.72, config.win_chance + (details ? Math.max(-180, Math.min(180, details.margin)) / 1600 : 0)));
+  const won = roll < adjustedChance;
   const spread = config.max_prize - config.min_prize;
   const prize = won ? Math.round((config.min_prize + stableDirectNumber(`${userId}:${gameId}:${eventId}`) * Math.max(1, spread)) / 10) * 10 : 0;
   const txnId = won ? makeId("txn") : null;
@@ -815,6 +937,7 @@ async function playGameDirect(userId: string, gameId: string) {
       currency: "XOF",
       txn_id: txnId,
       created_at: nowIso(),
+      ...(details ? { details } : {}),
     };
     tx.set(doc(db, GAME_EVENTS, eventId), event);
     let transaction: any = null;
@@ -873,17 +996,18 @@ async function logShopRisk(userId: string, reason: string, payload: any = {}) {
 
 async function getShopCatalog(currency?: string, queryText?: string, userId?: string) {
   const ratesPayload = await getRates();
-  const [remoteProducts, dummyProducts, freeProducts, fakeStoreProducts, escuelajsProducts, overrides] = await Promise.all([
+  const [remoteProducts, dummyProducts, freeProducts, fakeStoreProducts, escuelajsProducts, sellerProducts, overrides] = await Promise.all([
     fetchApilayerShopProducts(APILAYER_SHOP_KEY, queryText || "market"),
     fetchDummyJsonShopProducts(150),
     fetchFreeEcommerceShopProducts(),
     fetchFakeStoreShopProducts(),
     fetchEscuelajsShopProducts(),
+    getSellerCatalogProducts(),
     getShopProductOverrides(),
   ]);
   if (userId) await announceShopIfNeeded(userId);
   return buildShopCatalogPayload({
-    remoteProducts,
+    remoteProducts: [...sellerProducts, ...remoteProducts],
     dummyProducts,
     freeProducts,
     fakeStoreProducts,
@@ -897,6 +1021,143 @@ async function getShopCatalog(currency?: string, queryText?: string, userId?: st
 async function getUserShopOrders(userId: string) {
   const snap = await getDocs(query(collection(db, SHOP_ORDERS), where("user_id", "==", userId)));
   return { items: sortByDateDesc(snap.docs.map((d) => d.data())) };
+}
+
+function sellerProfilePayload(raw: any = {}, user: any = {}) {
+  const verified = user.kyc_status === "verified";
+  return {
+    seller_id: raw?.seller_id || `seller_${user.user_id}`,
+    user_id: user.user_id,
+    store_name: raw?.store_name || `Boutique de ${user.name || "vendeur"}`,
+    bio: raw?.bio || "Vendeur FX Pro avec articles suivis et profil controle.",
+    city: raw?.city || "",
+    support_phone: raw?.support_phone || user.phone || "",
+    pickup_zone: raw?.pickup_zone || "Coordination apres commande",
+    status: verified ? "active" : "kyc_required",
+    kyc_required: !verified,
+    kyc_status: user.kyc_status || "pending",
+    benefits: [
+      "Badge vendeur certifie KYC",
+      "Gestion create / modifier / supprimer",
+      "Suivi commandes et recus FX Pro",
+      "Mise en avant dans le catalogue",
+      "Mediation client et historique vendeur",
+    ],
+    created_at: raw?.created_at,
+    updated_at: raw?.updated_at || nowIso(),
+  };
+}
+
+function cleanSellerArticleDirect(body: any, user: any, seller: any, articleId: string): any {
+  const title = String(body.title || "").trim();
+  const description = String(body.description || "").trim();
+  const image = String(body.image || "").trim();
+  const price = Number(body.price);
+  const stock = Math.max(0, Math.min(999, Math.floor(Number(body.stock || 0))));
+  if (title.length < 3) throw new Error("Nom d'article trop court.");
+  if (description.length < 12) throw new Error("Description trop courte.");
+  if (!/^https?:\/\//i.test(image)) throw new Error("Image produit HTTP/HTTPS requise.");
+  if (!Number.isFinite(price) || price <= 0) throw new Error("Prix invalide.");
+  return {
+    article_id: articleId,
+    user_id: user.user_id,
+    seller_id: seller.seller_id,
+    store_name: seller.store_name,
+    title: title.slice(0, 120),
+    description: description.slice(0, 500),
+    category: String(body.category || "Vendeur certifie").trim().slice(0, 80),
+    image,
+    base_price: Number(price.toFixed(2)),
+    price: Number(price.toFixed(2)),
+    stock,
+    tags: cleanSellerTags([Array.isArray(body.tags) ? body.tags : String(body.tags || "").split(","), "vendeur certifie", "kyc"]),
+    status: "active",
+    sku: `SELL-${articleId.slice(-8).toUpperCase()}`,
+    reference: `SELL-${articleId.slice(-8).toUpperCase()}`,
+    updated_at: nowIso(),
+  };
+}
+
+function tmdbImage(path?: string, size = "w500") {
+  return path ? `https://image.tmdb.org/t/p/${size}${path}` : "";
+}
+
+function normalizeTmdbItem(raw: any, mediaType?: string) {
+  const kind = mediaType || raw?.media_type || (raw?.name ? "tv" : "movie");
+  if (!["movie", "tv"].includes(kind)) return null;
+  const title = raw?.title || raw?.name || raw?.original_title || raw?.original_name;
+  if (!title) return null;
+  return {
+    id: Number(raw.id),
+    media_type: kind,
+    title,
+    overview: raw?.overview || "Synopsis indisponible pour le moment.",
+    poster_url: tmdbImage(raw?.poster_path, "w500"),
+    backdrop_url: tmdbImage(raw?.backdrop_path, "w780"),
+    vote_average: Number(Number(raw?.vote_average || 0).toFixed(1)),
+    vote_count: Number(raw?.vote_count || 0),
+    release_date: raw?.release_date || raw?.first_air_date || "",
+    popularity: Number(raw?.popularity || 0),
+    source: "tmdb",
+  };
+}
+
+async function tmdbFetchDirect(path: string, params: Record<string, any> = {}) {
+  if (!TMDB_READ_TOKEN && !TMDB_API_KEY) throw new Error("TMDB credentials missing");
+  const qs = new URLSearchParams({ ...params, ...(TMDB_READ_TOKEN ? {} : { api_key: TMDB_API_KEY }) }).toString();
+  const res = await fetch(`https://api.themoviedb.org/3${path}?${qs}`, {
+    headers: TMDB_READ_TOKEN ? { Authorization: `Bearer ${TMDB_READ_TOKEN}`, Accept: "application/json" } : { Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`TMDB status ${res.status}`);
+  return res.json();
+}
+
+async function getMovieLibraryDirect(userId: string) {
+  const snap = await getDocs(query(collection(db, MOVIE_LIBRARY), where("user_id", "==", userId)));
+  return sortByDateDesc(snap.docs.map((d) => d.data()));
+}
+
+async function buildMoviesCatalogDirect(userId: string, kind = "all", text = "", page = 1) {
+  try {
+    const language = "fr-FR";
+    const safePage = Math.max(1, Math.min(5, Number(page || 1)));
+    let items: any[] = [];
+    if (text.trim()) {
+      const payload = await tmdbFetchDirect("/search/multi", { query: text.trim(), page: safePage, language, include_adult: "false" });
+      items = (payload.results || []).map((raw: any) => normalizeTmdbItem(raw)).filter(Boolean);
+    } else {
+      const endpoints: [string, string][] = [];
+      if (kind === "all" || kind === "movie") endpoints.push(["/trending/movie/week", "movie"], ["/movie/popular", "movie"]);
+      if (kind === "all" || kind === "tv") endpoints.push(["/trending/tv/week", "tv"], ["/tv/popular", "tv"]);
+      const responses = await Promise.all(endpoints.map(([path]) => tmdbFetchDirect(path, { page: safePage, language })));
+      responses.forEach((payload, index) => {
+        const mediaType = endpoints[index][1];
+        items.push(...(payload.results || []).map((raw: any) => normalizeTmdbItem(raw, mediaType)).filter(Boolean));
+      });
+    }
+    const seen = new Set();
+    const unique = items
+      .sort((a, b) => Number(b.popularity || 0) - Number(a.popularity || 0))
+      .filter((item) => {
+        const key = `${item.media_type}:${item.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 60);
+    const library = await getMovieLibraryDirect(userId);
+    const marks = new Map(library.map((item: any) => [`${item.media_type}:${item.tmdb_id}`, item]));
+    unique.forEach((item) => {
+      const mark: any = marks.get(`${item.media_type}:${item.id}`);
+      item.favorite = Boolean(mark?.favorite);
+      item.watchlist = Boolean(mark?.watchlist);
+      item.watched = Boolean(mark?.watched);
+    });
+    return { items: unique, source: "tmdb", page: safePage, kind, query: text, attribution: "This product uses the TMDB API but is not endorsed or certified by TMDB." };
+  } catch {
+    await notifyServicesLimitedOnce(userId).catch(() => undefined);
+    return { items: MOVIE_FALLBACK_ITEMS, source: "fallback", page, kind, query: text, attribution: "This product uses the TMDB API but is not endorsed or certified by TMDB." };
+  }
 }
 
 export function subscribeFirebaseNotifications(
@@ -975,6 +1236,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   if (pathname === "/auth/me") {
     const profile = await currentProfile();
     await notifyWithdrawPausedOnce(profile.user_id).catch(() => undefined);
+    await notifyServicesLimitedOnce(profile.user_id).catch(() => undefined);
     return profile;
   }
 
@@ -1223,6 +1485,75 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     return getUserShopOrders(firebaseUser.uid);
   }
 
+  if (pathname === "/shop/seller/profile" && method === "GET") {
+    const firebaseUser = await requireFirebaseUser();
+    const profile = await currentProfile();
+    const sellerSnap = await getDoc(doc(db, SHOP_SELLERS, firebaseUser.uid));
+    const seller = sellerProfilePayload(sellerSnap.data(), profile);
+    const articlesSnap = await getDocs(query(collection(db, SHOP_SELLER_ARTICLES), where("user_id", "==", firebaseUser.uid)));
+    return { profile: seller, articles: sortByDateDesc(articlesSnap.docs.map((d) => d.data()).filter((item: any) => !item.deleted_at)) };
+  }
+
+  if (pathname === "/shop/seller/profile" && method === "PATCH") {
+    const firebaseUser = await requireFirebaseUser();
+    const profile = await currentProfile();
+    const current = sellerProfilePayload((await getDoc(doc(db, SHOP_SELLERS, firebaseUser.uid))).data(), profile);
+    const patch = {
+      seller_id: current.seller_id,
+      user_id: firebaseUser.uid,
+      store_name: String(body.store_name || current.store_name).trim().slice(0, 80),
+      bio: String(body.bio || current.bio).trim().slice(0, 300),
+      city: String(body.city || current.city || "").trim().slice(0, 80),
+      support_phone: String(body.support_phone || current.support_phone || "").trim().slice(0, 40),
+      pickup_zone: String(body.pickup_zone || current.pickup_zone || "").trim().slice(0, 120),
+      status: profile.kyc_status === "verified" ? "active" : "kyc_required",
+      kyc_status: profile.kyc_status || "pending",
+      updated_at: nowIso(),
+      created_at: current.created_at || nowIso(),
+    };
+    await setDoc(doc(db, SHOP_SELLERS, firebaseUser.uid), patch, { merge: true });
+    return { profile: sellerProfilePayload(patch, profile) };
+  }
+
+  if (pathname === "/shop/seller/articles" && method === "POST") {
+    const firebaseUser = await requireFirebaseUser();
+    const profile = await currentProfile();
+    if (profile.kyc_status !== "verified") throw new Error("KYC certifie obligatoire pour publier un article.");
+    const seller = sellerProfilePayload((await getDoc(doc(db, SHOP_SELLERS, firebaseUser.uid))).data(), profile);
+    const articleId = `seller_${firebaseUser.uid}_${makeId("art").slice(-8)}`;
+    const article = cleanSellerArticleDirect(body, profile, seller, articleId);
+    article.created_at = nowIso();
+    await setDoc(doc(db, SHOP_SELLER_ARTICLES, articleId), article);
+    return { ok: true, article };
+  }
+
+  if (pathname.startsWith("/shop/seller/articles/") && method === "PATCH") {
+    const firebaseUser = await requireFirebaseUser();
+    const profile = await currentProfile();
+    if (profile.kyc_status !== "verified") throw new Error("KYC certifie obligatoire pour modifier un article.");
+    const articleId = decodeURIComponent(pathname.split("/").pop() || "");
+    const articleRef = doc(db, SHOP_SELLER_ARTICLES, articleId);
+    const existing = (await getDoc(articleRef)).data();
+    if (!existing || existing.user_id !== firebaseUser.uid || existing.deleted_at) throw new Error("Article introuvable.");
+    const seller = sellerProfilePayload((await getDoc(doc(db, SHOP_SELLERS, firebaseUser.uid))).data(), profile);
+    const patch = cleanSellerArticleDirect(body, profile, seller, articleId);
+    patch.created_at = existing.created_at || nowIso();
+    await setDoc(articleRef, patch, { merge: true });
+    return { ok: true, article: patch };
+  }
+
+  if (pathname.startsWith("/shop/seller/articles/") && method === "DELETE") {
+    const firebaseUser = await requireFirebaseUser();
+    const profile = await currentProfile();
+    if (profile.kyc_status !== "verified") throw new Error("KYC certifie obligatoire pour supprimer un article.");
+    const articleId = decodeURIComponent(pathname.split("/").pop() || "");
+    const articleRef = doc(db, SHOP_SELLER_ARTICLES, articleId);
+    const existing = (await getDoc(articleRef)).data();
+    if (!existing || existing.user_id !== firebaseUser.uid || existing.deleted_at) throw new Error("Article introuvable.");
+    await setDoc(articleRef, { status: "deleted", deleted_at: nowIso(), updated_at: nowIso() }, { merge: true });
+    return { ok: true };
+  }
+
   if (pathname === "/shop/checkout" && method === "POST") {
     const firebaseUser = await requireFirebaseUser();
     const profile = await currentProfile();
@@ -1348,6 +1679,44 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       });
     });
     return { ok: true, order, transaction, balances };
+  }
+
+  if (pathname === "/movies/catalog" && method === "GET") {
+    const firebaseUser = await requireFirebaseUser();
+    const kind = ["all", "movie", "tv"].includes(url.searchParams.get("kind") || "") ? url.searchParams.get("kind") || "all" : "all";
+    return buildMoviesCatalogDirect(firebaseUser.uid, kind, url.searchParams.get("q") || "", Number(url.searchParams.get("page") || 1));
+  }
+
+  if (pathname === "/movies/library" && method === "GET") {
+    const firebaseUser = await requireFirebaseUser();
+    return { items: await getMovieLibraryDirect(firebaseUser.uid) };
+  }
+
+  if (pathname === "/movies/library/toggle" && method === "POST") {
+    const firebaseUser = await requireFirebaseUser();
+    const mediaType = String(body.media_type || "movie");
+    const listType = String(body.list_type || "watchlist");
+    if (!["movie", "tv"].includes(mediaType)) throw new Error("Type media invalide.");
+    if (!["favorite", "watchlist", "watched"].includes(listType)) throw new Error("Liste invalide.");
+    const key = `${firebaseUser.uid}_${mediaType}_${Number(body.tmdb_id)}`;
+    const ref = doc(db, MOVIE_LIBRARY, key);
+    const existing = (await getDoc(ref)).data() || {};
+    const patch = {
+      ...existing,
+      user_id: firebaseUser.uid,
+      tmdb_id: Number(body.tmdb_id),
+      media_type: mediaType,
+      [listType]: Boolean(body.active),
+      item: body.item || existing.item || {},
+      created_at: existing.created_at || nowIso(),
+      updated_at: nowIso(),
+    };
+    if (!patch.favorite && !patch.watchlist && !patch.watched) {
+      await deleteDoc(ref).catch(() => undefined);
+      return { ok: true, removed: true };
+    }
+    await setDoc(ref, patch, { merge: true });
+    return { ok: true, item: patch };
   }
 
   if (pathname === "/admin/notifications/withdraw-paused" && method === "POST") {

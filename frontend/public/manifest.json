@@ -2,7 +2,7 @@
   "id": "/",
   "name": "FX Pro 2026",
   "short_name": "FX Pro",
-  "description": "FX Pro 2026 wallet, boutique, transfers, conversion and alerts.",
+  "description": "FX Pro 2026 wallet, boutique, films, games, transfers, conversion and alerts.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,7 +10,7 @@
   "orientation": "portrait",
   "background_color": "#050505",
   "theme_color": "#f51010",
-  "categories": ["finance", "shopping", "productivity"],
+  "categories": ["finance", "shopping", "entertainment", "productivity"],
   "lang": "fr",
   "dir": "ltr",
   "icons": [
@@ -91,6 +91,12 @@
       "name": "Jeux bonus",
       "short_name": "Jeux",
       "url": "/games",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Films & series",
+      "short_name": "Films",
+      "url": "/movies",
       "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
     },
     {

@@ -12,7 +12,7 @@ export type ShopProduct = {
   rating: number;
   stock: number;
   tags: string[];
-  source: "apilayer" | "dummyjson" | "freeapi" | "fakestore" | "escuelajs" | "generated" | "fallback" | "firebase";
+  source: "apilayer" | "dummyjson" | "freeapi" | "fakestore" | "escuelajs" | "generated" | "fallback" | "firebase" | "seller";
   sku?: string;
   ref?: string;
   barcode?: string;
@@ -26,6 +26,8 @@ export type ShopProduct = {
   review_count?: number;
   admin_managed?: boolean;
   hidden?: boolean;
+  seller_id?: string;
+  seller_verified?: boolean;
 };
 
 export type ShopPromotion = {
@@ -621,7 +623,7 @@ export function buildGeneratedMarketProducts(): ShopProduct[] {
         id,
         title,
         brand,
-        description: `${noun} ${style}, selection ${year} coherente avec une photo produit reelle, une reference boutique unique et un prix reduit pour attirer les clients FX Pro.`,
+        description: `${noun} ${style}, selection ${year} avec une image representative du rayon, une reference boutique unique et un prix reduit pour attirer les clients FX Pro.`,
         category: pack.category,
         image,
         base_currency: "USD",
@@ -1115,12 +1117,12 @@ export function buildShopCatalogPayload({
   const merged = applyShopOverrides(
     dedupeShopProducts([
       ...remoteProducts,
+      ...dummyProducts,
       ...freeProducts,
       ...fakeStoreProducts,
       ...escuelajsProducts,
-      ...generatedProducts,
-      ...dummyProducts,
       ...FALLBACK_SHOP_PRODUCTS,
+      ...generatedProducts,
     ]),
     overrides
   ).slice(0, MAX_SHOP_PRODUCTS);

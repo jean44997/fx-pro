@@ -46,6 +46,10 @@ FALLBACK_RATES = {
     "KES": 140.0, "GHS": 13.0, "SEK": 11.4, "AED": 3.95,
 }
 APILAYER_SHOP_KEY = os.environ.get("APILAYER_SHOP_KEY") or os.environ.get("EXPO_PUBLIC_APILAYER_KEY", "")
+TMDB_READ_TOKEN = os.environ.get("TMDB_READ_TOKEN", "").strip()
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "").strip()
+TMDB_API_BASE = "https://api.themoviedb.org/3"
+TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p"
 SHOP_PICKUP_AVAILABLE = False
 SHOP_PICKUP_MESSAGE = (
     "Le retrait en agence est momentanement indisponible pendant la mise a jour logistique. "
@@ -61,12 +65,21 @@ WITHDRAW_PAUSED_NOTICE_BODY = (
     "Votre solde reste protege, les depots, transferts, achats boutique et notifications continuent normalement. "
     "FX Pro vous previendra des la reprise."
 )
+SERVICES_LIMITED_NOTICE_FLAG = "services_limited_notice_2026_05_18_at"
+SERVICES_LIMITED_NOTICE_TITLE = "Services momentanement indisponibles"
+SERVICES_LIMITED_NOTICE_BODY = (
+    "Certains services externes peuvent etre indisponibles pendant la mise a jour. "
+    "Le solde, les recus, la boutique suivie, les jeux avec tickets et les notifications restent proteges."
+)
 GAME_DAILY_TICKETS = 5
 GAME_TICKET_NOTICE_PREFIX = "game_tickets_recharged_notice_"
 GAME_CONFIG = {
     "scratch": {"name": "Carte Neon", "win_chance": 0.34, "min_prize": 80, "max_prize": 750},
     "vault": {"name": "Coffre Flash", "win_chance": 0.26, "min_prize": 150, "max_prize": 1400},
     "reflex": {"name": "Reflexe FX", "win_chance": 0.42, "min_prize": 40, "max_prize": 420},
+    "hero_duel": {"name": "Duel Heros", "win_chance": 0.36, "min_prize": 120, "max_prize": 1100, "mode": "hero"},
+    "power_match": {"name": "Power Match", "win_chance": 0.30, "min_prize": 220, "max_prize": 1800, "mode": "hero"},
+    "speed_run": {"name": "Speed Run", "win_chance": 0.44, "min_prize": 60, "max_prize": 620, "mode": "hero"},
 }
 MAX_SHOP_PRODUCTS = 1400
 SHOP_FALLBACK_PRODUCTS = [
@@ -82,6 +95,40 @@ SHOP_FALLBACK_PRODUCTS = [
     {"id": "fxp_smart_tracker", "title": "Tracker intelligent", "brand": "Locate+", "description": "Localisation d'objets, alerte sonore et format discret pour sac, cle ou bagage.", "category": "Tech", "image": "https://images.unsplash.com/photo-1583394838336-acd977736f90?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 39.0, "rating": 4.4, "stock": 28, "tags": ["Securite", "Voyage", "Mobile"], "source": "fallback"},
     {"id": "fxp_skin_care", "title": "Routine soin essentielle", "brand": "Luma", "description": "Kit compact, texture legere et format adapte aux deplacements.", "category": "Bien-etre", "image": "https://images.unsplash.com/photo-1596462502278-27bfdc403348?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 58.0, "rating": 4.5, "stock": 20, "tags": ["Soin", "Voyage", "Premium"], "source": "fallback"},
     {"id": "fxp_home_speaker", "title": "Mini enceinte maison", "brand": "SoundNest", "description": "Son ample, Bluetooth stable et finition textile moderne.", "category": "Tech", "image": "https://images.unsplash.com/photo-1545454675-3531b543be5d?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 88.0, "rating": 4.7, "stock": 14, "tags": ["Audio", "Maison", "Bluetooth"], "source": "fallback"},
+]
+
+SUPERHERO_ROSTER = [
+    {"id": 1, "name": "A-Bomb", "slug": "1-a-bomb", "publisher": "Marvel Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/1-a-bomb.jpg", "stats": {"intelligence": 38, "strength": 100, "speed": 17, "durability": 80, "power": 24, "combat": 64}},
+    {"id": 2, "name": "Abe Sapien", "slug": "2-abe-sapien", "publisher": "Dark Horse Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/2-abe-sapien.jpg", "stats": {"intelligence": 88, "strength": 28, "speed": 35, "durability": 65, "power": 100, "combat": 85}},
+    {"id": 4, "name": "Abomination", "slug": "4-abomination", "publisher": "Marvel Comics", "alignment": "bad", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/4-abomination.jpg", "stats": {"intelligence": 63, "strength": 80, "speed": 53, "durability": 90, "power": 62, "combat": 95}},
+    {"id": 6, "name": "Absorbing Man", "slug": "6-absorbing-man", "publisher": "Marvel Comics", "alignment": "bad", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/6-absorbing-man.jpg", "stats": {"intelligence": 38, "strength": 80, "speed": 25, "durability": 100, "power": 98, "combat": 64}},
+    {"id": 20, "name": "Amazo", "slug": "20-amazo", "publisher": "DC Comics", "alignment": "bad", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/20-amazo.jpg", "stats": {"intelligence": 63, "strength": 100, "speed": 83, "durability": 100, "power": 100, "combat": 100}},
+    {"id": 30, "name": "Ant-Man", "slug": "30-ant-man", "publisher": "Giant-Man", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/30-ant-man.jpg", "stats": {"intelligence": 100, "strength": 18, "speed": 23, "durability": 28, "power": 32, "combat": 32}},
+    {"id": 35, "name": "Apocalypse", "slug": "35-apocalypse", "publisher": "Marvel Comics", "alignment": "bad", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/35-apocalypse.jpg", "stats": {"intelligence": 100, "strength": 100, "speed": 33, "durability": 100, "power": 100, "combat": 60}},
+    {"id": 38, "name": "Aquaman", "slug": "38-aquaman", "publisher": "DC Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/38-aquaman.jpg", "stats": {"intelligence": 81, "strength": 85, "speed": 79, "durability": 80, "power": 100, "combat": 80}},
+    {"id": 60, "name": "Bane", "slug": "60-bane", "publisher": "DC Comics", "alignment": "bad", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/60-bane.jpg", "stats": {"intelligence": 88, "strength": 38, "speed": 23, "durability": 56, "power": 51, "combat": 95}},
+    {"id": 70, "name": "Batman", "slug": "70-batman", "publisher": "DC Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/70-batman.jpg", "stats": {"intelligence": 100, "strength": 26, "speed": 27, "durability": 50, "power": 47, "combat": 100}},
+    {"id": 75, "name": "Beast", "slug": "75-beast", "publisher": "Marvel Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/75-beast.jpg", "stats": {"intelligence": 94, "strength": 48, "speed": 38, "durability": 60, "power": 43, "combat": 85}},
+    {"id": 95, "name": "Black Adam", "slug": "95-black-adam", "publisher": "DC Comics", "alignment": "bad", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/95-black-adam.jpg", "stats": {"intelligence": 88, "strength": 100, "speed": 92, "durability": 100, "power": 100, "combat": 56}},
+    {"id": 106, "name": "Black Panther", "slug": "106-black-panther", "publisher": "Marvel Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/106-black-panther.jpg", "stats": {"intelligence": 88, "strength": 16, "speed": 30, "durability": 60, "power": 41, "combat": 100}},
+    {"id": 149, "name": "Captain America", "slug": "149-captain-america", "publisher": "Marvel Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/149-captain-america.jpg", "stats": {"intelligence": 69, "strength": 19, "speed": 38, "durability": 55, "power": 60, "combat": 100}},
+    {"id": 157, "name": "Captain Marvel", "slug": "157-captain-marvel", "publisher": "Binary", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/157-captain-marvel.jpg", "stats": {"intelligence": 84, "strength": 88, "speed": 71, "durability": 95, "power": 100, "combat": 90}},
+    {"id": 213, "name": "Deadpool", "slug": "213-deadpool", "publisher": "Marvel Comics", "alignment": "neutral", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/213-deadpool.jpg", "stats": {"intelligence": 69, "strength": 32, "speed": 50, "durability": 100, "power": 100, "combat": 100}},
+    {"id": 332, "name": "Hulk", "slug": "332-hulk", "publisher": "Marvel Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/332-hulk.jpg", "stats": {"intelligence": 88, "strength": 100, "speed": 63, "durability": 100, "power": 98, "combat": 85}},
+    {"id": 346, "name": "Iron Man", "slug": "346-iron-man", "publisher": "Marvel Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/346-iron-man.jpg", "stats": {"intelligence": 100, "strength": 85, "speed": 58, "durability": 85, "power": 100, "combat": 64}},
+    {"id": 370, "name": "Joker", "slug": "370-joker", "publisher": "DC Comics", "alignment": "bad", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/370-joker.jpg", "stats": {"intelligence": 100, "strength": 10, "speed": 12, "durability": 60, "power": 43, "combat": 70}},
+    {"id": 620, "name": "Spider-Man", "slug": "620-spider-man", "publisher": "Marvel Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/620-spider-man.jpg", "stats": {"intelligence": 90, "strength": 55, "speed": 67, "durability": 75, "power": 74, "combat": 85}},
+    {"id": 644, "name": "Superman", "slug": "644-superman", "publisher": "Superman Prime One-Million", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/644-superman.jpg", "stats": {"intelligence": 94, "strength": 100, "speed": 100, "durability": 100, "power": 100, "combat": 85}},
+    {"id": 655, "name": "Thanos", "slug": "655-thanos", "publisher": "Marvel Comics", "alignment": "bad", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/655-thanos.jpg", "stats": {"intelligence": 100, "strength": 100, "speed": 33, "durability": 100, "power": 100, "combat": 80}},
+    {"id": 717, "name": "Wolverine", "slug": "717-wolverine", "publisher": "Marvel Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/717-wolverine.jpg", "stats": {"intelligence": 63, "strength": 32, "speed": 50, "durability": 100, "power": 89, "combat": 100}},
+    {"id": 720, "name": "Wonder Woman", "slug": "720-wonder-woman", "publisher": "DC Comics", "alignment": "good", "image": "https://cdn.jsdelivr.net/gh/akabab/superhero-api@0.3.0/api/images/md/720-wonder-woman.jpg", "stats": {"intelligence": 88, "strength": 100, "speed": 79, "durability": 100, "power": 100, "combat": 100}},
+]
+
+MOVIE_FALLBACK_ITEMS = [
+    {"id": 550, "media_type": "movie", "title": "Fight Club", "overview": "Un employe insomniaque decouvre un cercle clandestin qui change sa vision du controle et de la consommation.", "poster_url": "https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/hZkgoQYus5vegHoetLkCJzb17zJ.jpg", "vote_average": 8.4, "release_date": "1999-10-15", "source": "fallback"},
+    {"id": 1399, "media_type": "tv", "title": "Game of Thrones", "overview": "Des familles nobles luttent pour le pouvoir pendant qu'une menace ancienne grandit au-dela du mur.", "poster_url": "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/suopoADq0k8YZr4dQXcU6pToj6s.jpg", "vote_average": 8.5, "release_date": "2011-04-17", "source": "fallback"},
+    {"id": 157336, "media_type": "movie", "title": "Interstellar", "overview": "Une equipe traverse l'espace pour chercher un futur possible a l'humanite.", "poster_url": "https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg", "vote_average": 8.5, "release_date": "2014-11-05", "source": "fallback"},
+    {"id": 66732, "media_type": "tv", "title": "Stranger Things", "overview": "Des enfants, une disparition et une force etrange bouleversent une petite ville.", "poster_url": "https://image.tmdb.org/t/p/w500/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg", "vote_average": 8.6, "release_date": "2016-07-15", "source": "fallback"},
 ]
 
 BONUS_MIN_WINDOW_DAYS = 7
@@ -542,6 +589,29 @@ async def notify_withdraw_paused_once(user_id: str) -> bool:
     return True
 
 
+async def notify_services_limited_once(user_id: str) -> bool:
+    created_at = now_utc()
+    updated = await db.users.update_one(
+        {"user_id": user_id, SERVICES_LIMITED_NOTICE_FLAG: {"$exists": False}},
+        {"$set": {SERVICES_LIMITED_NOTICE_FLAG: created_at, "updated_at": created_at}},
+    )
+    if updated.modified_count <= 0:
+        return False
+    notif = {
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "type": "services_limited",
+        "title": SERVICES_LIMITED_NOTICE_TITLE,
+        "body": SERVICES_LIMITED_NOTICE_BODY,
+        "read": False,
+        "created_at": created_at,
+        "url": "/notifications",
+    }
+    await db.notifications.insert_one(notif)
+    await send_push_to_user(user_id, notif["title"], notif["body"], None, "services_limited", notif["notif_id"])
+    return True
+
+
 def game_today_key() -> str:
     return now_utc().date().isoformat()
 
@@ -587,6 +657,40 @@ async def ensure_game_tickets(user_id: str) -> dict:
         "stats": fresh.get("game_stats") or {},
         "currency": "XOF",
         "games": [{"id": key, **cfg} for key, cfg in GAME_CONFIG.items()],
+        "heroes": SUPERHERO_ROSTER,
+    }
+
+
+def hero_power_score(hero: dict, mode: str = "hero_duel") -> int:
+    stats = hero.get("stats") or {}
+    if mode == "speed_run":
+        weights = {"speed": 2.0, "combat": 1.3, "power": 1.0, "durability": 0.8, "strength": 0.6, "intelligence": 0.8}
+    elif mode == "power_match":
+        weights = {"power": 1.8, "strength": 1.5, "durability": 1.2, "combat": 1.0, "speed": 0.8, "intelligence": 0.9}
+    else:
+        weights = {"combat": 1.5, "intelligence": 1.25, "power": 1.2, "durability": 1.0, "strength": 0.9, "speed": 0.8}
+    return int(sum(float(stats.get(key) or 0) * value for key, value in weights.items()))
+
+
+def build_hero_round(user_id: str, game_id: str, seed: str, roll: float) -> dict:
+    pool = SUPERHERO_ROSTER
+    first_index = int(stable_random(seed + ":hero-a") * len(pool)) % len(pool)
+    second_index = int(stable_random(seed + ":hero-b") * len(pool)) % len(pool)
+    if first_index == second_index:
+        second_index = (second_index + 7) % len(pool)
+    player = pool[first_index]
+    rival = pool[second_index]
+    player_score = hero_power_score(player, game_id) + int(stable_random(seed + ":boost-a") * 60)
+    rival_score = hero_power_score(rival, game_id) + int(stable_random(seed + ":boost-b") * 60)
+    margin = player_score - rival_score
+    return {
+        "player": player,
+        "rival": rival,
+        "player_score": player_score,
+        "rival_score": rival_score,
+        "margin": margin,
+        "rule": "ticket_required",
+        "seed_hint": hashlib.sha256(f"{user_id}:{game_id}:{roll}".encode()).hexdigest()[:10],
     }
 
 
@@ -600,7 +704,11 @@ async def play_game(user: dict, game_id: str) -> dict:
     if tickets <= 0:
         raise HTTPException(status_code=400, detail="Plus de tickets disponibles. Les tickets seront recharges automatiquement.")
     roll = secrets.randbelow(10000) / 10000
-    won = roll < float(config["win_chance"])
+    hero_round = build_hero_round(user["user_id"], game_id, f"{user['user_id']}:{game_id}:{now_utc().isoformat()}:{roll}", roll) if config.get("mode") == "hero" else None
+    hero_adjustment = 0.0
+    if hero_round:
+        hero_adjustment = clamp(hero_round["margin"], -180, 180) / 1600
+    won = roll < clamp(float(config["win_chance"]) + hero_adjustment, 0.08, 0.72)
     seed = f"{user['user_id']}:{game_id}:{now_utc().isoformat()}:{roll}"
     prize = 0
     if won:
@@ -638,6 +746,8 @@ async def play_game(user: dict, game_id: str) -> dict:
         "txn_id": txn_id,
         "created_at": now_utc(),
     }
+    if hero_round:
+        event["details"] = hero_round
     await db.game_events.insert_one(event)
     if won and txn_id:
         txn = {
@@ -782,6 +892,32 @@ class GamePlayIn(BaseModel):
     game_id: str = "scratch"
 
 
+class SellerProfileIn(BaseModel):
+    store_name: Optional[str] = None
+    bio: Optional[str] = None
+    city: Optional[str] = None
+    support_phone: Optional[str] = None
+    pickup_zone: Optional[str] = None
+
+
+class SellerArticleIn(BaseModel):
+    title: str
+    description: str
+    category: str = "Vendeur certifie"
+    image: str
+    price: float
+    stock: int = 1
+    tags: List[str] = Field(default_factory=list)
+
+
+class MovieLibraryToggleIn(BaseModel):
+    tmdb_id: int
+    media_type: str = "movie"
+    list_type: str = "watchlist"
+    item: Optional[Dict[str, Any]] = None
+    active: bool = True
+
+
 # ============ Auth ============
 @api.post("/auth/register")
 async def register(data: RegisterIn):
@@ -892,6 +1028,7 @@ async def google_session(data: GoogleSessionIn):
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     await notify_withdraw_paused_once(user["user_id"])
+    await notify_services_limited_once(user["user_id"])
     return user
 
 
@@ -1228,7 +1365,7 @@ def build_generated_market_products() -> List[dict]:
                 "id": product_id,
                 "title": title,
                 "brand": brand,
-                "description": f"{noun} {style}, selection {year} coherente avec une photo produit reelle, une reference boutique unique et un prix reduit pour attirer les clients FX Pro.",
+                "description": f"{noun} {style}, selection {year} avec une image representative du rayon, une reference boutique unique et un prix reduit pour attirer les clients FX Pro.",
                 "category": pack["category"],
                 "image": image,
                 "base_currency": "USD",
@@ -1574,6 +1711,41 @@ async def get_shop_overrides() -> List[dict]:
       return []
 
 
+async def get_seller_catalog_products() -> List[dict]:
+    items = await db.shop_seller_articles.find(
+        {"status": "active", "deleted_at": {"$exists": False}},
+        {"_id": 0},
+    ).sort("updated_at", -1).limit(300).to_list(300)
+    products = []
+    for item in items:
+        products.append({
+            "id": item["article_id"],
+            "title": item["title"],
+            "brand": item.get("store_name") or "Vendeur certifie",
+            "description": item.get("description") or "Article publie par un vendeur KYC certifie FX Pro.",
+            "category": item.get("category") or "Vendeurs certifies",
+            "image": item.get("image") or SHOP_FALLBACK_PRODUCTS[0]["image"],
+            "base_currency": "USD",
+            "base_price": round_shop_money(float(item.get("base_price") or item.get("price") or 1), "USD"),
+            "rating": round_shop_money(4.2 + stable_shop_number(item["article_id"]) * 0.7, "USD"),
+            "stock": max(0, int(item.get("stock") or 0)),
+            "tags": clean_shop_tags([item.get("tags") or [], "vendeur certifie", "kyc"]),
+            "source": "seller",
+            "sku": item.get("sku") or f"SELL-{item['article_id'][-8:].upper()}",
+            "ref": item.get("reference") or f"SELL-{item['article_id'][-8:].upper()}",
+            "seller_id": item.get("user_id"),
+            "seller_verified": True,
+            "warranty": item.get("warranty") or "Controle vendeur KYC FX Pro",
+            "shipping": item.get("shipping") or "Livraison ou retrait coordonne par le vendeur certifie",
+            "availability": "In Stock" if int(item.get("stock") or 0) > 0 else "Out of Stock",
+            "return_policy": "Retour selon profil vendeur et mediation FX Pro",
+            "minimum_order_quantity": 1,
+            "images": [item.get("image") or SHOP_FALLBACK_PRODUCTS[0]["image"]],
+            "review_count": 12 + int(stable_shop_number(item["article_id"] + ":reviews") * 120),
+        })
+    return products
+
+
 def apply_shop_overrides(products: List[dict], overrides: List[dict]) -> List[dict]:
     if not overrides:
         return products
@@ -1648,18 +1820,19 @@ async def announce_shop_available(user_id: str) -> None:
 async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack", user_id: Optional[str] = None) -> dict:
     rates_doc = await get_active_rates("EUR")
     rates = rates_doc.get("rates") or FALLBACK_RATES
-    remote, dummy, free, fake, escuela, overrides = await asyncio.gather(
+    remote, dummy, free, fake, escuela, seller_products, overrides = await asyncio.gather(
         fetch_apilayer_shop_products(query),
         fetch_dummyjson_shop_products(150),
         fetch_free_ecommerce_shop_products(),
         fetch_fakestore_shop_products(),
         fetch_escuelajs_shop_products(),
+        get_seller_catalog_products(),
         get_shop_overrides(),
     )
     if user_id:
         await announce_shop_available(user_id)
     generated = build_generated_market_products()
-    products = apply_shop_overrides(dedupe_shop_products(remote + free + fake + escuela + generated + dummy + SHOP_FALLBACK_PRODUCTS), overrides)[:MAX_SHOP_PRODUCTS]
+    products = apply_shop_overrides(dedupe_shop_products(seller_products + remote + dummy + free + fake + escuela + SHOP_FALLBACK_PRODUCTS + generated), overrides)[:MAX_SHOP_PRODUCTS]
     product_ids = {p["id"] for p in products}
     admin_promos = []
     for override in overrides:
@@ -1682,7 +1855,7 @@ async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack"
         promo = promo_map.get(product["id"])
         price = round_shop_money(original * (1 - (promo["discount_percent"] / 100)), code) if promo else original
         priced.append({**product, "original_price": original, "price": price, "currency": code, "promotion": promo})
-    source = "mixed" if (remote or dummy or free or fake or escuela or generated) else "fallback"
+    source = "mixed" if (seller_products or remote or dummy or free or fake or escuela or generated) else "fallback"
     return {
         "products": priced,
         "promotions": promotions,
@@ -1746,6 +1919,194 @@ def calculate_shop_cart(products: List[dict], lines: List[ShopCartLineIn], order
         "debit_amount": debit,
         "price_snapshot_hash": f"sp_{snapshot}",
     }
+
+
+def seller_public_profile(profile: Optional[dict], user: dict) -> dict:
+    kyc_verified = user.get("kyc_status") == "verified"
+    base = profile or {}
+    return {
+        "seller_id": base.get("seller_id") or f"seller_{user['user_id']}",
+        "user_id": user["user_id"],
+        "store_name": base.get("store_name") or f"Boutique de {user.get('name') or 'vendeur'}",
+        "bio": base.get("bio") or "Vendeur FX Pro avec articles suivis et profil controle.",
+        "city": base.get("city") or "",
+        "support_phone": base.get("support_phone") or user.get("phone") or "",
+        "pickup_zone": base.get("pickup_zone") or "Coordination apres commande",
+        "status": "active" if kyc_verified else "kyc_required",
+        "kyc_required": not kyc_verified,
+        "kyc_status": user.get("kyc_status") or "pending",
+        "benefits": [
+            "Badge vendeur certifie KYC",
+            "Gestion create / modifier / supprimer",
+            "Suivi commandes et recus FX Pro",
+            "Mise en avant dans le catalogue",
+            "Mediation client et historique vendeur",
+        ],
+        "updated_at": base.get("updated_at") or now_utc(),
+    }
+
+
+async def require_verified_seller(user: dict) -> dict:
+    if user.get("kyc_status") != "verified":
+        raise HTTPException(status_code=403, detail="KYC certifie obligatoire pour vendre, modifier ou supprimer un article.")
+    profile = await db.shop_sellers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not profile:
+        profile = seller_public_profile(None, user)
+        profile.update({"created_at": now_utc(), "updated_at": now_utc()})
+        await db.shop_sellers.update_one({"user_id": user["user_id"]}, {"$set": profile}, upsert=True)
+    return profile
+
+
+def clean_seller_article(data: SellerArticleIn, user: dict, profile: dict, article_id: Optional[str] = None) -> dict:
+    title = data.title.strip()
+    description = data.description.strip()
+    image = data.image.strip()
+    if len(title) < 3:
+        raise HTTPException(status_code=400, detail="Nom d'article trop court")
+    if len(description) < 12:
+        raise HTTPException(status_code=400, detail="Description trop courte")
+    if not image.startswith("http"):
+        raise HTTPException(status_code=400, detail="Image produit HTTP/HTTPS requise")
+    if data.price <= 0:
+        raise HTTPException(status_code=400, detail="Prix invalide")
+    if data.stock < 0:
+        raise HTTPException(status_code=400, detail="Stock invalide")
+    aid = article_id or f"seller_{user['user_id']}_{uuid.uuid4().hex[:8]}"
+    return {
+        "article_id": aid,
+        "user_id": user["user_id"],
+        "seller_id": profile.get("seller_id") or f"seller_{user['user_id']}",
+        "store_name": profile.get("store_name") or f"Boutique de {user.get('name')}",
+        "title": title[:120],
+        "description": description[:500],
+        "category": (data.category or "Vendeur certifie").strip()[:80],
+        "image": image,
+        "base_price": round_shop_money(float(data.price), "USD"),
+        "price": round_shop_money(float(data.price), "USD"),
+        "stock": max(0, min(999, int(data.stock))),
+        "tags": clean_shop_tags([data.tags, "vendeur certifie", "kyc"]),
+        "status": "active",
+        "sku": f"SELL-{aid[-8:].upper()}",
+        "reference": f"SELL-{aid[-8:].upper()}",
+        "updated_at": now_utc(),
+    }
+
+
+def tmdb_headers() -> Dict[str, str]:
+    headers = {"Accept": "application/json"}
+    if TMDB_READ_TOKEN:
+        headers["Authorization"] = f"Bearer {TMDB_READ_TOKEN}"
+    return headers
+
+
+def tmdb_auth_params(params: Optional[dict] = None) -> dict:
+    out = dict(params or {})
+    if not TMDB_READ_TOKEN and TMDB_API_KEY:
+        out["api_key"] = TMDB_API_KEY
+    return out
+
+
+def tmdb_image(path: Optional[str], size: str = "w500") -> str:
+    return f"{TMDB_IMAGE_BASE}/{size}{path}" if path else ""
+
+
+def normalize_tmdb_item(raw: dict, media_type: Optional[str] = None) -> Optional[dict]:
+    kind = media_type or raw.get("media_type") or ("tv" if raw.get("name") else "movie")
+    if kind not in ["movie", "tv"]:
+        return None
+    title = raw.get("title") or raw.get("name") or raw.get("original_title") or raw.get("original_name")
+    if not title:
+        return None
+    release_date = raw.get("release_date") or raw.get("first_air_date") or ""
+    return {
+        "id": int(raw.get("id") or 0),
+        "media_type": kind,
+        "title": title,
+        "overview": raw.get("overview") or "Synopsis indisponible pour le moment.",
+        "poster_url": tmdb_image(raw.get("poster_path"), "w500"),
+        "backdrop_url": tmdb_image(raw.get("backdrop_path"), "w780"),
+        "vote_average": round(float(raw.get("vote_average") or 0), 1),
+        "vote_count": int(raw.get("vote_count") or 0),
+        "release_date": release_date,
+        "popularity": float(raw.get("popularity") or 0),
+        "source": "tmdb",
+    }
+
+
+async def tmdb_get(path: str, params: Optional[dict] = None) -> dict:
+    if not TMDB_READ_TOKEN and not TMDB_API_KEY:
+        raise RuntimeError("TMDB credentials missing")
+    async with httpx.AsyncClient(timeout=8) as client:
+        response = await client.get(f"{TMDB_API_BASE}{path}", headers=tmdb_headers(), params=tmdb_auth_params(params))
+    if response.status_code >= 400:
+        raise RuntimeError(f"TMDB status {response.status_code}")
+    return response.json()
+
+
+async def notify_movie_service_issue(user_id: str) -> None:
+    flag = "movies_service_notice_2026_05_18_at"
+    created_at = now_utc()
+    updated = await db.users.update_one(
+        {"user_id": user_id, flag: {"$exists": False}},
+        {"$set": {flag: created_at, "updated_at": created_at}},
+    )
+    if updated.modified_count <= 0:
+        return
+    notif = {
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "type": "movies_service",
+        "title": "Films et series en mode secours",
+        "body": "Le service films utilise un catalogue de secours si TMDB est indisponible. Favoris et listes restent sauvegardes.",
+        "read": False,
+        "created_at": created_at,
+        "url": "/movies",
+    }
+    await db.notifications.insert_one(notif)
+    await send_push_to_user(user_id, notif["title"], notif["body"], None, "movies_service", notif["notif_id"])
+
+
+async def build_movies_catalog(user_id: str, kind: str = "all", query: str = "", page: int = 1) -> dict:
+    page = max(1, min(5, int(page or 1)))
+    language = "fr-FR"
+    try:
+        if query.strip():
+            payload = await tmdb_get("/search/multi", {"query": query.strip(), "page": page, "language": language, "include_adult": "false"})
+            items = [item for item in (normalize_tmdb_item(raw) for raw in payload.get("results", [])) if item]
+        else:
+            endpoints = []
+            if kind in ["all", "movie"]:
+                endpoints.extend([("/trending/movie/week", "movie"), ("/movie/popular", "movie")])
+            if kind in ["all", "tv"]:
+                endpoints.extend([("/trending/tv/week", "tv"), ("/tv/popular", "tv")])
+            responses = await asyncio.gather(*[tmdb_get(path, {"page": page, "language": language}) for path, _ in endpoints])
+            items = []
+            for payload, (_, media_type) in zip(responses, endpoints):
+                items.extend([item for item in (normalize_tmdb_item(raw, media_type) for raw in payload.get("results", [])) if item])
+        seen = set()
+        unique = []
+        for item in sorted(items, key=lambda i: (i.get("popularity") or 0, i.get("vote_average") or 0), reverse=True):
+            key = f"{item['media_type']}:{item['id']}"
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(item)
+        library = await get_movie_library(user_id)
+        marks = {f"{item['media_type']}:{item['tmdb_id']}": item for item in library}
+        for item in unique:
+            mark = marks.get(f"{item['media_type']}:{item['id']}")
+            item["favorite"] = bool(mark and mark.get("favorite"))
+            item["watchlist"] = bool(mark and mark.get("watchlist"))
+            item["watched"] = bool(mark and mark.get("watched"))
+        return {"items": unique[:60], "source": "tmdb", "page": page, "kind": kind, "query": query, "attribution": "This product uses the TMDB API but is not endorsed or certified by TMDB."}
+    except Exception as exc:
+        logger.warning("TMDB catalog failed: %s", exc)
+        await notify_movie_service_issue(user_id)
+        return {"items": MOVIE_FALLBACK_ITEMS, "source": "fallback", "page": page, "kind": kind, "query": query, "attribution": "This product uses the TMDB API but is not endorsed or certified by TMDB."}
+
+
+async def get_movie_library(user_id: str) -> List[dict]:
+    return await db.movie_library.find({"user_id": user_id}, {"_id": 0}).sort("updated_at", -1).limit(300).to_list(300)
 
 
 @api.get("/rates")
@@ -2242,6 +2603,103 @@ async def games_play(data: GamePlayIn, user: dict = Depends(get_current_user)):
 async def shop_orders(user: dict = Depends(get_current_user)):
     items = await db.shop_orders.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
     return {"items": items}
+
+
+@api.get("/shop/seller/profile")
+async def shop_seller_profile(user: dict = Depends(get_current_user)):
+    profile = await db.shop_sellers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    articles = await db.shop_seller_articles.find(
+        {"user_id": user["user_id"], "deleted_at": {"$exists": False}},
+        {"_id": 0},
+    ).sort("updated_at", -1).limit(100).to_list(100)
+    return {"profile": seller_public_profile(profile, user), "articles": articles}
+
+
+@api.patch("/shop/seller/profile")
+async def patch_shop_seller_profile(data: SellerProfileIn, user: dict = Depends(get_current_user)):
+    profile = seller_public_profile(await db.shop_sellers.find_one({"user_id": user["user_id"]}, {"_id": 0}), user)
+    patch = {
+        "seller_id": profile["seller_id"],
+        "user_id": user["user_id"],
+        "store_name": (data.store_name or profile["store_name"]).strip()[:80],
+        "bio": (data.bio or profile["bio"]).strip()[:300],
+        "city": (data.city or profile["city"]).strip()[:80],
+        "support_phone": (data.support_phone or profile["support_phone"]).strip()[:40],
+        "pickup_zone": (data.pickup_zone or profile["pickup_zone"]).strip()[:120],
+        "status": "active" if user.get("kyc_status") == "verified" else "kyc_required",
+        "kyc_status": user.get("kyc_status") or "pending",
+        "updated_at": now_utc(),
+        "created_at": profile.get("created_at") or now_utc(),
+    }
+    await db.shop_sellers.update_one({"user_id": user["user_id"]}, {"$set": patch}, upsert=True)
+    return {"profile": seller_public_profile(patch, user)}
+
+
+@api.post("/shop/seller/articles")
+async def create_seller_article(data: SellerArticleIn, user: dict = Depends(get_current_user)):
+    profile = await require_verified_seller(user)
+    item = clean_seller_article(data, user, profile)
+    item["created_at"] = now_utc()
+    await db.shop_seller_articles.insert_one(item)
+    return {"ok": True, "article": item}
+
+
+@api.patch("/shop/seller/articles/{article_id}")
+async def update_seller_article(article_id: str, data: SellerArticleIn, user: dict = Depends(get_current_user)):
+    profile = await require_verified_seller(user)
+    existing = await db.shop_seller_articles.find_one({"article_id": article_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not existing or existing.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Article introuvable")
+    patch = clean_seller_article(data, user, profile, article_id)
+    patch["created_at"] = existing.get("created_at") or now_utc()
+    await db.shop_seller_articles.update_one({"article_id": article_id, "user_id": user["user_id"]}, {"$set": patch})
+    return {"ok": True, "article": patch}
+
+
+@api.delete("/shop/seller/articles/{article_id}")
+async def delete_seller_article(article_id: str, user: dict = Depends(get_current_user)):
+    await require_verified_seller(user)
+    updated = await db.shop_seller_articles.update_one(
+        {"article_id": article_id, "user_id": user["user_id"], "deleted_at": {"$exists": False}},
+        {"$set": {"status": "deleted", "deleted_at": now_utc(), "updated_at": now_utc()}},
+    )
+    if updated.modified_count <= 0:
+        raise HTTPException(status_code=404, detail="Article introuvable")
+    return {"ok": True}
+
+
+@api.get("/movies/catalog")
+async def movies_catalog(kind: str = "all", q: str = "", page: int = 1, user: dict = Depends(get_current_user)):
+    clean_kind = kind if kind in ["all", "movie", "tv"] else "all"
+    return await build_movies_catalog(user["user_id"], clean_kind, q, page)
+
+
+@api.get("/movies/library")
+async def movies_library(user: dict = Depends(get_current_user)):
+    return {"items": await get_movie_library(user["user_id"])}
+
+
+@api.post("/movies/library/toggle")
+async def toggle_movie_library(data: MovieLibraryToggleIn, user: dict = Depends(get_current_user)):
+    if data.media_type not in ["movie", "tv"]:
+        raise HTTPException(status_code=400, detail="Type media invalide")
+    if data.list_type not in ["favorite", "watchlist", "watched"]:
+        raise HTTPException(status_code=400, detail="Liste invalide")
+    key = {"user_id": user["user_id"], "tmdb_id": int(data.tmdb_id), "media_type": data.media_type}
+    existing = await db.movie_library.find_one(key, {"_id": 0}) or {}
+    patch = {
+        **existing,
+        **key,
+        data.list_type: bool(data.active),
+        "item": data.item or existing.get("item") or {},
+        "updated_at": now_utc(),
+        "created_at": existing.get("created_at") or now_utc(),
+    }
+    if not (patch.get("favorite") or patch.get("watchlist") or patch.get("watched")):
+        await db.movie_library.delete_one(key)
+        return {"ok": True, "removed": True}
+    await db.movie_library.update_one(key, {"$set": patch}, upsert=True)
+    return {"ok": True, "item": patch}
 
 
 @api.get("/admin/shop/products")
@@ -2918,6 +3376,12 @@ async def startup_seed():
     await db.shop_orders.create_index("created_at")
     await db.shop_orders.create_index([("user_id", 1), ("client_order_id", 1)])
     await db.shop_products.create_index("product_id", unique=True)
+    await db.shop_sellers.create_index("user_id", unique=True)
+    await db.shop_seller_articles.create_index("article_id", unique=True)
+    await db.shop_seller_articles.create_index([("user_id", 1), ("updated_at", -1)])
+    await db.shop_seller_articles.create_index([("status", 1), ("updated_at", -1)])
+    await db.movie_library.create_index([("user_id", 1), ("tmdb_id", 1), ("media_type", 1)], unique=True)
+    await db.movie_library.create_index([("user_id", 1), ("updated_at", -1)])
     await db.bonus_program.create_index("user_id", unique=True)
     await db.bonus_events.create_index("created_at")
     await db.risk_logs.create_index("created_at")

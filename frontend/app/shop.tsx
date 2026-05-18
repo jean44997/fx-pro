@@ -34,7 +34,17 @@ import {
 } from "../src/shopCatalog";
 
 type CartState = Record<string, number>;
-type ShopSection = "buy" | "orders" | "promos" | "help";
+type ShopSection = "buy" | "orders" | "promos" | "seller" | "help";
+
+const EMPTY_SELLER_FORM = {
+  title: "",
+  description: "",
+  category: "Vendeurs certifies",
+  image: "",
+  price: "",
+  stock: "1",
+  tags: "",
+};
 
 export default function Shop() {
   const router = useRouter();
@@ -49,6 +59,12 @@ export default function Shop() {
   const [catalog, setCatalog] = useState<ShopCatalogPayload | null>(null);
   const [rates, setRates] = useState<Record<string, number>>({});
   const [orders, setOrders] = useState<any[]>([]);
+  const [seller, setSeller] = useState<any>(null);
+  const [sellerArticles, setSellerArticles] = useState<any[]>([]);
+  const [sellerSaving, setSellerSaving] = useState(false);
+  const [sellerForm, setSellerForm] = useState(EMPTY_SELLER_FORM);
+  const [sellerProfileForm, setSellerProfileForm] = useState({ store_name: "", bio: "", city: "", support_phone: "", pickup_zone: "" });
+  const [editingArticle, setEditingArticle] = useState<any>(null);
   const [cart, setCart] = useState<CartState>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -62,14 +78,16 @@ export default function Shop() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [catalogResponse, ratesResponse, orderResponse] = await Promise.all([
+      const [catalogResponse, ratesResponse, orderResponse, sellerResponse] = await Promise.all([
         api.get(`/shop/catalog?currency=${encodeURIComponent(currency)}&q=market`),
         api.get("/rates").catch(() => ({ rates: {} })),
         api.get("/shop/orders").catch(() => ({ items: [] })),
+        api.get("/shop/seller/profile").catch(() => null),
       ]);
       setCatalog(catalogResponse);
       setRates(ratesResponse.rates || {});
       setOrders(Array.isArray(orderResponse.items) ? orderResponse.items : []);
+      if (sellerResponse) syncSellerState(sellerResponse);
     } catch {
       const [fallbackRates, dummyProducts, freeProducts, fakeStoreProducts, escuelajsProducts] = await Promise.all([
         api.get("/rates").catch(() => ({ rates: {} })),
@@ -84,6 +102,19 @@ export default function Shop() {
       setLoading(false);
     }
   }, [currency]);
+
+  const syncSellerState = (payload: any) => {
+    setSeller(payload?.profile || null);
+    setSellerArticles(Array.isArray(payload?.articles) ? payload.articles : []);
+    const profile = payload?.profile || {};
+    setSellerProfileForm({
+      store_name: profile.store_name || "",
+      bio: profile.bio || "",
+      city: profile.city || "",
+      support_phone: profile.support_phone || "",
+      pickup_zone: profile.pickup_zone || "",
+    });
+  };
 
   useEffect(() => {
     load();
@@ -239,6 +270,84 @@ export default function Shop() {
     }
   };
 
+  const reloadSeller = async () => {
+    const payload = await api.get("/shop/seller/profile");
+    syncSellerState(payload);
+  };
+
+  const saveSellerProfile = async () => {
+    setSellerSaving(true);
+    try {
+      const payload = await api.patch("/shop/seller/profile", sellerProfileForm);
+      setSeller(payload.profile);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    } catch (e: any) {
+      Alert.alert("Profil vendeur", e.message || "Mise a jour impossible.");
+    } finally {
+      setSellerSaving(false);
+    }
+  };
+
+  const submitSellerArticle = async () => {
+    const payload = {
+      title: sellerForm.title,
+      description: sellerForm.description,
+      category: sellerForm.category,
+      image: sellerForm.image,
+      price: Number(String(sellerForm.price).replace(",", ".")),
+      stock: Number(sellerForm.stock),
+      tags: sellerForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+    };
+    setSellerSaving(true);
+    try {
+      if (editingArticle?.article_id) await api.patch(`/shop/seller/articles/${encodeURIComponent(editingArticle.article_id)}`, payload);
+      else await api.post("/shop/seller/articles", payload);
+      setSellerForm(EMPTY_SELLER_FORM);
+      setEditingArticle(null);
+      await Promise.all([reloadSeller(), load()]);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    } catch (e: any) {
+      Alert.alert("Article vendeur", e.message || "Publication impossible.");
+    } finally {
+      setSellerSaving(false);
+    }
+  };
+
+  const editSellerArticle = (article: any) => {
+    setEditingArticle(article);
+    setSellerForm({
+      title: article.title || "",
+      description: article.description || "",
+      category: article.category || "Vendeurs certifies",
+      image: article.image || "",
+      price: String(article.base_price || article.price || ""),
+      stock: String(article.stock ?? 1),
+      tags: Array.isArray(article.tags) ? article.tags.join(", ") : "",
+    });
+    setActiveSection("seller");
+  };
+
+  const deleteSellerArticle = (article: any) => {
+    Alert.alert("Supprimer l'article", "Cette annonce sera retiree du catalogue vendeur.", [
+      { text: "Annuler", style: "cancel" },
+      {
+        text: "Supprimer",
+        style: "destructive",
+        onPress: async () => {
+          setSellerSaving(true);
+          try {
+            await api.del(`/shop/seller/articles/${encodeURIComponent(article.article_id)}`);
+            await Promise.all([reloadSeller(), load()]);
+          } catch (e: any) {
+            Alert.alert("Suppression impossible", e.message || "Reessaie dans un instant.");
+          } finally {
+            setSellerSaving(false);
+          }
+        },
+      },
+    ]);
+  };
+
   return (
     <GradientBg>
       <SafeAreaView style={{ flex: 1 }}>
@@ -286,6 +395,7 @@ export default function Shop() {
               ["buy", "Acheter", "storefront-outline"],
               ["orders", "Commandes", "receipt-outline"],
               ["promos", "Promos", "pricetags-outline"],
+              ["seller", "Vendeur", "shield-checkmark-outline"],
               ["help", "Aide", "shield-checkmark-outline"],
             ].map(([key, label, icon]) => {
               const active = activeSection === key;
@@ -449,6 +559,105 @@ export default function Shop() {
                       <PromoCard key={product.id} product={product} index={index} onOpen={() => setSelected(product)} onAdd={() => addToCart(product.id)} />
                     ))}
                   </View>
+                </>
+              ) : null}
+
+              {activeSection === "seller" ? (
+                <>
+                  <SectionTitle title="Espace vendeur" subtitle="Vendre demande un profil KYC certifie. Les articles publies restent modifiables et supprimables par leur vendeur." />
+                  <InfoBanner
+                    icon={user?.kyc_status === "verified" ? "shield-checkmark" : "lock-closed"}
+                    title={user?.kyc_status === "verified" ? "Vendeur certifie actif" : "KYC obligatoire"}
+                    text={
+                      user?.kyc_status === "verified"
+                        ? "Votre profil peut publier, modifier et supprimer ses propres articles."
+                        : "Activez le KYC renforce avant de publier: les boutons vendeur restent verrouilles tant que le profil n'est pas certifie."
+                    }
+                    compact
+                  />
+
+                  <View style={styles.sellerPanel}>
+                    <Text style={styles.sellerPanelTitle}>Profil boutique</Text>
+                    <SellerInput label="Nom boutique" value={sellerProfileForm.store_name} onChangeText={(store_name: string) => setSellerProfileForm((v) => ({ ...v, store_name }))} />
+                    <SellerInput label="Bio vendeur" value={sellerProfileForm.bio} onChangeText={(bio: string) => setSellerProfileForm((v) => ({ ...v, bio }))} multiline />
+                    <View style={styles.sellerInline}>
+                      <SellerInput label="Ville" value={sellerProfileForm.city} onChangeText={(city: string) => setSellerProfileForm((v) => ({ ...v, city }))} style={{ flex: 1 }} />
+                      <SellerInput label="Telephone" value={sellerProfileForm.support_phone} onChangeText={(support_phone: string) => setSellerProfileForm((v) => ({ ...v, support_phone }))} style={{ flex: 1 }} />
+                    </View>
+                    <SellerInput label="Zone livraison/retrait" value={sellerProfileForm.pickup_zone} onChangeText={(pickup_zone: string) => setSellerProfileForm((v) => ({ ...v, pickup_zone }))} />
+                    <PrimaryButton title="Enregistrer profil vendeur" loading={sellerSaving} icon={<Ionicons name="save-outline" size={16} color="#000" />} onPress={saveSellerProfile} />
+                    <View style={styles.sellerBenefits}>
+                      {(seller?.benefits || ["Badge KYC", "Gestion articles", "Suivi commandes"]).map((benefit: string) => (
+                        <InfoTiny key={benefit} icon="checkmark-circle" text={benefit} color={Colors.green} />
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={[styles.sellerPanel, user?.kyc_status !== "verified" && styles.sellerLockedPanel]}>
+                    <View style={styles.sellerPanelHeader}>
+                      <Text style={styles.sellerPanelTitle}>{editingArticle ? "Modifier l'article" : "Nouvel article"}</Text>
+                      {editingArticle ? (
+                        <Pressable onPress={() => { setEditingArticle(null); setSellerForm(EMPTY_SELLER_FORM); }} style={styles.cancelEdit}>
+                          <Ionicons name="close" size={14} color={Colors.cyan} />
+                          <Text style={styles.cancelEditText}>Annuler</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                    {user?.kyc_status !== "verified" ? (
+                      <PrimaryButton title="Activer le KYC pour vendre" icon={<Ionicons name="shield-checkmark" size={16} color="#000" />} onPress={() => router.push("/kyc")} />
+                    ) : (
+                      <>
+                        <SellerInput label="Nom article" value={sellerForm.title} onChangeText={(title: string) => setSellerForm((v) => ({ ...v, title }))} />
+                        <SellerInput label="Description" value={sellerForm.description} onChangeText={(description: string) => setSellerForm((v) => ({ ...v, description }))} multiline />
+                        <SellerInput label="URL image produit" value={sellerForm.image} onChangeText={(image: string) => setSellerForm((v) => ({ ...v, image }))} />
+                        <View style={styles.sellerInline}>
+                          <SellerInput label="Categorie" value={sellerForm.category} onChangeText={(category: string) => setSellerForm((v) => ({ ...v, category }))} style={{ flex: 1 }} />
+                          <SellerInput label="Prix USD" value={sellerForm.price} onChangeText={(price: string) => setSellerForm((v) => ({ ...v, price }))} keyboardType="decimal-pad" style={{ flex: 1 }} />
+                          <SellerInput label="Stock" value={sellerForm.stock} onChangeText={(stock: string) => setSellerForm((v) => ({ ...v, stock }))} keyboardType="number-pad" style={{ flex: 0.75 }} />
+                        </View>
+                        <SellerInput label="Tags separes par virgules" value={sellerForm.tags} onChangeText={(tags: string) => setSellerForm((v) => ({ ...v, tags }))} />
+                        <PrimaryButton
+                          title={editingArticle ? "Modifier l'article" : "Publier l'article"}
+                          loading={sellerSaving}
+                          icon={<Ionicons name={editingArticle ? "create-outline" : "cloud-upload-outline"} size={16} color="#000" />}
+                          onPress={submitSellerArticle}
+                        />
+                      </>
+                    )}
+                  </View>
+
+                  <SectionTitle title="Mes articles" subtitle={`${sellerArticles.length} annonce(s) vendeur sur ce profil.`} />
+                  {sellerArticles.length ? (
+                    <View style={styles.sellerList}>
+                      {sellerArticles.map((article) => (
+                        <View key={article.article_id} style={styles.sellerArticleCard}>
+                          <Image source={{ uri: article.image }} style={styles.sellerArticleImage} resizeMode="cover" />
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={styles.sellerArticleTitle} numberOfLines={1}>{article.title}</Text>
+                            <Text style={styles.sellerArticleDesc} numberOfLines={2}>{article.description}</Text>
+                            <View style={styles.metaLine}>
+                              <InfoTiny icon="shield-checkmark" text="KYC" color={Colors.green} />
+                              <InfoTiny icon="cube-outline" text={`${article.stock || 0} stock`} color={Colors.cyan} />
+                              <InfoTiny icon="cash-outline" text={`USD ${article.base_price || article.price || 0}`} color={Colors.yellow} />
+                            </View>
+                          </View>
+                          <View style={styles.sellerActions}>
+                            <Pressable onPress={() => editSellerArticle(article)} style={styles.sellerActionBtn}>
+                              <Ionicons name="create-outline" size={17} color="#000" />
+                            </Pressable>
+                            <Pressable onPress={() => deleteSellerArticle(article)} style={[styles.sellerActionBtn, { backgroundColor: Colors.danger }]}>
+                              <Ionicons name="trash-outline" size={17} color="#000" />
+                            </Pressable>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <View style={styles.emptyOrders}>
+                      <Ionicons name="storefront-outline" size={24} color={Colors.textMuted} />
+                      <Text style={styles.emptyOrdersText}>Aucun article vendeur pour le moment.</Text>
+                    </View>
+                  )}
                 </>
               ) : null}
 
@@ -622,6 +831,22 @@ function InfoTiny({ icon, text, color }: { icon: any; text: string; color: strin
     <View style={styles.infoTiny}>
       <Ionicons name={icon} size={12} color={color} />
       <Text style={styles.infoTinyText}>{text}</Text>
+    </View>
+  );
+}
+
+function SellerInput({ label, value, onChangeText, multiline, keyboardType, style }: any) {
+  return (
+    <View style={[styles.sellerInputWrap, style]}>
+      <Text style={styles.sellerInputLabel}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        multiline={multiline}
+        keyboardType={keyboardType}
+        placeholderTextColor={Colors.textMuted}
+        style={[styles.sellerInput, multiline && styles.sellerInputMulti]}
+      />
     </View>
   );
 }
@@ -923,6 +1148,25 @@ const styles = StyleSheet.create({
   totalValue: { color: "#fff", fontSize: 17, fontWeight: "900", marginTop: 4 },
   balanceHint: { color: Colors.textSoft, fontSize: 11, marginTop: 4 },
   payWarning: { color: Colors.yellow, fontSize: 12, lineHeight: 18, marginTop: 10, fontWeight: "800" },
+  sellerPanel: { marginHorizontal: 16, marginTop: 10, borderRadius: 20, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.055)", padding: 14 },
+  sellerLockedPanel: { borderColor: "rgba(255,215,0,0.32)", backgroundColor: "rgba(255,215,0,0.055)" },
+  sellerPanelHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  sellerPanelTitle: { color: "#fff", fontSize: 16, fontWeight: "900", marginBottom: 10 },
+  sellerInline: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "flex-start" },
+  sellerInputWrap: { marginBottom: 10, minWidth: 0 },
+  sellerInputLabel: { color: Colors.textMuted, fontSize: 10, fontWeight: "900", textTransform: "uppercase", letterSpacing: 1.1, marginBottom: 5 },
+  sellerInput: { minHeight: 44, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(0,0,0,0.22)", color: "#fff", paddingHorizontal: 12, paddingVertical: Platform.OS === "web" ? 11 : 8, fontSize: 13, fontWeight: "700" },
+  sellerInputMulti: { minHeight: 82, textAlignVertical: "top" },
+  sellerBenefits: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 8 },
+  cancelEdit: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: Colors.cyan },
+  cancelEditText: { color: Colors.cyan, fontWeight: "900", fontSize: 11 },
+  sellerList: { paddingHorizontal: 16, gap: 10 },
+  sellerArticleCard: { borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.055)", padding: 10, flexDirection: "row", alignItems: "center", gap: 10 },
+  sellerArticleImage: { width: 74, height: 74, borderRadius: 14, backgroundColor: "#fff" },
+  sellerArticleTitle: { color: "#fff", fontWeight: "900", fontSize: 13 },
+  sellerArticleDesc: { color: Colors.textSoft, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  sellerActions: { gap: 8 },
+  sellerActionBtn: { width: 36, height: 36, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: Colors.cyan },
   helpBox: { marginHorizontal: 16, marginTop: 12, borderRadius: 20, borderWidth: 1, borderColor: Colors.border, padding: 14, backgroundColor: "rgba(255,255,255,0.055)", gap: 9 },
   helpText: { color: Colors.textSoft, fontSize: 12, lineHeight: 19, marginTop: 4 },
 });

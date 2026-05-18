@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
   FadeIn,
   FadeInDown,
+  FadeInRight,
   FadeInUp,
   SlideInUp,
   useAnimatedStyle,
@@ -25,12 +26,25 @@ type GameItem = {
   win_chance: number;
   min_prize: number;
   max_prize: number;
+  mode?: string;
+};
+
+type HeroItem = {
+  id: number;
+  name: string;
+  publisher?: string;
+  alignment?: string;
+  image?: string;
+  stats?: Record<string, number>;
 };
 
 const GAME_LOOK: Record<string, { icon: any; color: string; label: string }> = {
   scratch: { icon: "sparkles", color: Colors.cyan, label: "Gratte la carte au bon moment" },
   vault: { icon: "cube", color: Colors.yellow, label: "Ouvre le coffre sans forcer" },
   reflex: { icon: "flash", color: Colors.green, label: "Reflexe rapide, gain rapide" },
+  hero_duel: { icon: "people-circle", color: Colors.magenta, label: "Combat stats contre stats" },
+  power_match: { icon: "barbell", color: Colors.orange, label: "Puissance, force et resistance" },
+  speed_run: { icon: "flash", color: Colors.cyan, label: "Vitesse et reflexes en direct" },
 };
 
 export default function GamesScreen() {
@@ -52,6 +66,7 @@ export default function GamesScreen() {
   const columns = width >= 860 ? 3 : width >= 620 ? 2 : 1;
   const cardWidth = `${100 / columns}%`;
   const games: GameItem[] = status?.games || [];
+  const heroes: HeroItem[] = status?.heroes || [];
 
   const totals = useMemo<{ plays: number; wins: number; prizes: number }>(() => {
     const stats = (status?.stats || {}) as Record<string, any>;
@@ -126,7 +141,7 @@ export default function GamesScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.noticeTitle}>Tickets gratuits, credit en live</Text>
                 <Text style={styles.noticeBody}>
-                  Les tickets se rechargent automatiquement une fois par jour. Si une notification de recharge a deja ete envoyee aujourd'hui, elle ne sera pas renvoyee.
+                  Regle obligatoire: un ticket est consomme a chaque partie. Sans ticket, les jeux restent verrouilles par cadenas et aucun debit d'argent n'est possible.
                 </Text>
               </View>
             </View>
@@ -144,13 +159,16 @@ export default function GamesScreen() {
               <Text style={{ color: Colors.textSoft, marginTop: 10 }}>Chargement des jeux...</Text>
             </View>
           ) : (
-            <View style={styles.grid}>
-              {games.map((game, index) => (
-                <Animated.View key={game.id} entering={FadeInUp.delay(index * 70)} style={{ width: cardWidth as any, padding: 8 }}>
-                  <GameCard game={game} disabled={Boolean(playing) || !status?.tickets} loading={playing === game.id} onPlay={() => play(game.id)} />
-                </Animated.View>
-              ))}
-            </View>
+            <>
+              {heroes.length ? <HeroStrip heroes={heroes} /> : null}
+              <View style={styles.grid}>
+                {games.map((game, index) => (
+                  <Animated.View key={game.id} entering={FadeInUp.delay(index * 70)} style={{ width: cardWidth as any, padding: 8 }}>
+                    <GameCard game={game} disabled={Boolean(playing) || !status?.tickets} locked={!status?.tickets} loading={playing === game.id} onPlay={() => play(game.id)} />
+                  </Animated.View>
+                ))}
+              </View>
+            </>
           )}
 
           <View style={{ paddingHorizontal: 16, marginTop: 6 }}>
@@ -171,6 +189,7 @@ export default function GamesScreen() {
                   ? `${formatMoney(result?.prize || 0, "XOF")} ajoute au solde. La transaction apparait dans les recus.`
                   : "Aucun debit d'argent: seul un ticket gratuit a ete consomme."}
               </Text>
+              {result?.event?.details ? <HeroResult details={result.event.details} won={Boolean(result?.won)} /> : null}
               <PrimaryButton testID="game-result-close" title="Continuer" onPress={() => setResult(null)} />
             </Animated.View>
           </Animated.View>
@@ -180,7 +199,7 @@ export default function GamesScreen() {
   );
 }
 
-function GameCard({ game, onPlay, loading, disabled }: { game: GameItem; onPlay: () => void; loading: boolean; disabled: boolean }) {
+function GameCard({ game, onPlay, loading, disabled, locked }: { game: GameItem; onPlay: () => void; loading: boolean; disabled: boolean; locked: boolean }) {
   const look = GAME_LOOK[game.id] || GAME_LOOK.scratch;
   const tilt = useSharedValue(0);
   const animated = useAnimatedStyle(() => ({ transform: [{ translateY: tilt.value }] }));
@@ -204,16 +223,92 @@ function GameCard({ game, onPlay, loading, disabled }: { game: GameItem; onPlay:
         <Text style={styles.rangeText}>Bonus possible</Text>
         <Text style={[styles.rangeValue, { color: look.color }]}>{formatMoney(game.min_prize, "XOF")} - {formatMoney(game.max_prize, "XOF")}</Text>
       </View>
+      <View style={styles.rulesRow}>
+        <Ionicons name={locked ? "lock-closed" : "ticket-outline"} size={15} color={locked ? Colors.danger : Colors.green} />
+        <Text style={[styles.rulesText, locked && { color: Colors.danger }]}>
+          {locked ? "Cadenas: ticket requis" : "1 ticket obligatoire"}
+        </Text>
+      </View>
       <PrimaryButton
         testID={`play-${game.id}`}
-        title={disabled ? "Ticket requis" : "Jouer"}
+        title={locked ? "Cadenas ticket" : "Jouer"}
         loading={loading}
         disabled={disabled}
         onPress={onPlay}
-        icon={<Ionicons name="play" size={16} color="#000" />}
+        icon={<Ionicons name={locked ? "lock-closed" : "play"} size={16} color="#000" />}
       />
     </Animated.View>
   );
+}
+
+function HeroStrip({ heroes }: { heroes: HeroItem[] }) {
+  return (
+    <View style={styles.heroSection}>
+      <View style={styles.heroHeader}>
+        <View>
+          <Text style={styles.sectionKicker}>Nouveaux jeux</Text>
+          <Text style={styles.heroTitle}>Rosters heros en temps reel</Text>
+        </View>
+        <Ionicons name="pulse" size={20} color={Colors.cyan} />
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.heroTrack}>
+        {heroes.slice(0, 18).map((hero, index) => {
+          const total = heroTotal(hero);
+          return (
+            <Animated.View key={`${hero.id}-${hero.name}`} entering={FadeInRight.delay(index * 30)} style={styles.heroCard}>
+              <Image source={{ uri: hero.image }} style={styles.heroImage} resizeMode="cover" />
+              <View style={styles.heroShade} />
+              <View style={styles.heroCardBody}>
+                <Text style={styles.heroName} numberOfLines={1}>{hero.name}</Text>
+                <Text style={styles.heroMeta} numberOfLines={1}>{hero.publisher || "Comics"} - score {total}</Text>
+                <View style={styles.heroBars}>
+                  <HeroBar label="PWR" value={Number(hero.stats?.power || 0)} color={Colors.cyan} />
+                  <HeroBar label="CBT" value={Number(hero.stats?.combat || 0)} color={Colors.magenta} />
+                </View>
+              </View>
+            </Animated.View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+function HeroBar({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <View style={styles.heroBarRow}>
+      <Text style={styles.heroBarLabel}>{label}</Text>
+      <View style={styles.heroBarTrack}>
+        <View style={[styles.heroBarFill, { width: `${Math.max(4, Math.min(100, value))}%`, backgroundColor: color }]} />
+      </View>
+    </View>
+  );
+}
+
+function HeroResult({ details, won }: { details: any; won: boolean }) {
+  return (
+    <View style={styles.duelBox}>
+      <View style={styles.duelHero}>
+        <Image source={{ uri: details.player?.image }} style={styles.duelImage} resizeMode="cover" />
+        <Text style={styles.duelName} numberOfLines={1}>{details.player?.name || "Hero"}</Text>
+        <Text style={[styles.duelScore, { color: won ? Colors.green : Colors.textSoft }]}>{details.player_score}</Text>
+      </View>
+      <View style={styles.vsPill}>
+        <Text style={styles.vsText}>VS</Text>
+        <Text style={styles.marginText}>{Number(details.margin || 0) >= 0 ? "+" : ""}{details.margin}</Text>
+      </View>
+      <View style={styles.duelHero}>
+        <Image source={{ uri: details.rival?.image }} style={styles.duelImage} resizeMode="cover" />
+        <Text style={styles.duelName} numberOfLines={1}>{details.rival?.name || "Rival"}</Text>
+        <Text style={[styles.duelScore, { color: !won ? Colors.danger : Colors.textSoft }]}>{details.rival_score}</Text>
+      </View>
+    </View>
+  );
+}
+
+function heroTotal(hero: HeroItem) {
+  const stats = hero.stats || {};
+  return ["intelligence", "strength", "speed", "durability", "power", "combat"].reduce((sum, key) => sum + Number(stats[key] || 0), 0);
 }
 
 function MiniStat({ label, value, color }: { label: string; value: any; color: string }) {
@@ -251,6 +346,32 @@ const styles = StyleSheet.create({
   rangeBox: { marginTop: 18, padding: 12, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: Colors.border },
   rangeText: { color: Colors.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: 1 },
   rangeValue: { fontSize: 14, fontWeight: "900", marginTop: 5 },
+  rulesRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 12, marginBottom: 6 },
+  rulesText: { color: Colors.green, fontSize: 12, fontWeight: "900" },
+  heroSection: { marginTop: 8, marginBottom: 2 },
+  heroHeader: { paddingHorizontal: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  sectionKicker: { color: Colors.cyan, fontSize: 10, fontWeight: "900", letterSpacing: 2, textTransform: "uppercase" },
+  heroTitle: { color: "#fff", fontSize: 17, fontWeight: "900", marginTop: 3 },
+  heroTrack: { paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
+  heroCard: { width: 152, height: 214, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: Colors.border, backgroundColor: "#101018" },
+  heroImage: { width: "100%", height: "100%" },
+  heroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.18)" },
+  heroCardBody: { position: "absolute", left: 0, right: 0, bottom: 0, padding: 10, backgroundColor: "rgba(5,5,10,0.82)" },
+  heroName: { color: "#fff", fontWeight: "900", fontSize: 14 },
+  heroMeta: { color: Colors.textSoft, fontSize: 10, marginTop: 2 },
+  heroBars: { marginTop: 8, gap: 5 },
+  heroBarRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  heroBarLabel: { color: Colors.textMuted, fontSize: 9, fontWeight: "900", width: 24 },
+  heroBarTrack: { flex: 1, height: 5, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.12)", overflow: "hidden" },
+  heroBarFill: { height: "100%", borderRadius: 999 },
+  duelBox: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14, padding: 10, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.045)" },
+  duelHero: { flex: 1, minWidth: 0, alignItems: "center" },
+  duelImage: { width: 62, height: 62, borderRadius: 16, borderWidth: 1, borderColor: Colors.border },
+  duelName: { color: "#fff", fontWeight: "900", marginTop: 6, fontSize: 12 },
+  duelScore: { fontSize: 18, fontWeight: "900", marginTop: 2 },
+  vsPill: { width: 58, alignItems: "center" },
+  vsText: { color: "#000", backgroundColor: Colors.yellow, overflow: "hidden", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, fontWeight: "900" },
+  marginText: { color: Colors.textSoft, fontSize: 11, fontWeight: "900", marginTop: 5 },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", padding: 18 },
   resultCard: { borderRadius: 24, padding: 20, backgroundColor: "#0b0b14", borderWidth: 2, alignItems: "center" },
   winCard: { borderColor: Colors.green },

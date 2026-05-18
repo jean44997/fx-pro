@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, KeyboardAvoidingView, Platform, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, KeyboardAvoidingView, Platform, Alert, useWindowDimensions } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { GradientBg, GlassCard, PrimaryButton, NeoCard } from "../src/ui";
 import { Colors, ZERO_DECIMALS, formatMoney } from "../src/theme";
@@ -15,6 +15,7 @@ export default function Convert() {
   const params = useLocalSearchParams<{ from?: string }>();
   const router = useRouter();
   const { user, refresh } = useAuth();
+  const { width } = useWindowDimensions();
   const [from, setFrom] = useState((params.from as string) || "EUR");
   const [to, setTo] = useState("XOF");
   const [amount, setAmount] = useState("100");
@@ -36,6 +37,8 @@ export default function Convert() {
   const converted = num * rate;
   const balFrom = (user?.balances || {})[from] || 0;
   const decTo = ZERO_DECIMALS.includes(to) ? 0 : 2;
+  const compact = width < 430;
+  const amountFont = width < 360 ? 23 : width < 430 ? 26 : 30;
 
   const swap = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -55,10 +58,10 @@ export default function Convert() {
       const r = await api.post("/convert", { from_currency: from, to_currency: to, amount: num });
       await refresh();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      notify("✅ Conversion réussie", `${num} ${from} → ${r.transaction.received} ${to}`);
+      notify("Conversion reussie", `${num} ${from} -> ${r.transaction.received} ${to}`);
       router.replace({ pathname: "/receipt/[id]", params: { id: r.transaction.txn_id } });
     } catch (e: any) {
-      Alert.alert("Erreur", e.message || "Conversion échouée");
+      Alert.alert("Erreur", e.message || "Conversion echouee");
     } finally {
       setLoading(false);
     }
@@ -79,7 +82,7 @@ export default function Convert() {
             <Animated.View entering={FadeIn.duration(400)}>
               <NeoCard color={Colors.cyan}>
                 <Text style={styles.lbl}>Vous envoyez</Text>
-                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 8, gap: 8 }}>
+                <View style={[styles.convertRow, compact && styles.convertRowCompact]}>
                   <CurrencyPickerButton testID="conv-from" code={from} onChange={setFrom} />
                   <TextInput
                     testID="conv-amount"
@@ -88,7 +91,7 @@ export default function Convert() {
                     keyboardType="decimal-pad"
                     placeholder="0.00"
                     placeholderTextColor={Colors.textMuted}
-                    style={styles.amountInput}
+                    style={[styles.amountInput, compact && styles.amountInputCompact, { fontSize: amountFont }]}
                   />
                 </View>
                 <Text style={styles.bal}>Solde: {formatMoney(balFrom, from)}</Text>
@@ -106,18 +109,29 @@ export default function Convert() {
             <Animated.View entering={FadeInDown.duration(400)}>
               <GlassCard>
                 <Text style={styles.lbl}>Vous recevez</Text>
-                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 8, gap: 8 }}>
+                <View style={[styles.convertRow, compact && styles.convertRowCompact]}>
                   <CurrencyPickerButton testID="conv-to" code={to} onChange={setTo} />
-                  <Text testID="conv-received" style={[styles.amountInput, { color: Colors.cyan }]} numberOfLines={1}>
+                  <Text testID="conv-received" style={[styles.amountInput, compact && styles.amountInputCompact, { color: Colors.cyan, fontSize: amountFont }]} numberOfLines={1} adjustsFontSizeToFit>
                     {converted.toLocaleString("fr-FR", { maximumFractionDigits: decTo })}
                   </Text>
                 </View>
-                <Text style={styles.rateLine}>1 {from} = {rate ? rate.toFixed(6) : "—"} {to}</Text>
-                <Text style={styles.rateLine}>Taux mis à jour automatiquement chaque minute · API live</Text>
+                <Text style={styles.rateLine}>1 {from} = {rate ? rate.toFixed(6) : "-"} {to}</Text>
+                <Text style={styles.rateLine}>Taux mis a jour automatiquement chaque minute - API live</Text>
               </GlassCard>
             </Animated.View>
 
             <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
+              <View style={styles.summaryBox}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.summaryLabel}>Debit</Text>
+                  <Text style={styles.summaryValue} numberOfLines={1} adjustsFontSizeToFit>{formatMoney(num || 0, from)}</Text>
+                </View>
+                <Ionicons name="arrow-forward" size={18} color={Colors.textMuted} />
+                <View style={{ flex: 1, minWidth: 0, alignItems: "flex-end" }}>
+                  <Text style={styles.summaryLabel}>Reception</Text>
+                  <Text style={[styles.summaryValue, { color: Colors.cyan }]} numberOfLines={1} adjustsFontSizeToFit>{formatMoney(converted || 0, to)}</Text>
+                </View>
+              </View>
               <PrimaryButton testID="conv-submit" title="Confirmer la conversion" loading={loading} onPress={submit} />
             </View>
           </ScrollView>
@@ -131,8 +145,14 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16 },
   title: { color: "#fff", fontSize: 18, fontWeight: "900" },
   lbl: { color: Colors.textSoft, fontSize: 11, letterSpacing: 2, textTransform: "uppercase" },
-  amountInput: { flex: 1, color: "#fff", fontSize: 30, fontWeight: "900", textAlign: "right", paddingHorizontal: 12 },
+  convertRow: { flexDirection: "row", alignItems: "center", marginTop: 8, gap: 8 },
+  convertRowCompact: { flexDirection: "column", alignItems: "stretch" },
+  amountInput: { flex: 1, minWidth: 0, color: "#fff", fontWeight: "900", textAlign: "right", paddingHorizontal: 12, paddingVertical: 8 },
+  amountInputCompact: { width: "100%", textAlign: "left", borderRadius: 16, backgroundColor: "rgba(255,255,255,0.055)", marginTop: 4 },
   bal: { color: Colors.textSoft, fontSize: 12, marginTop: 8 },
   rateLine: { color: Colors.textSoft, fontSize: 12, marginTop: 6 },
+  summaryBox: { borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.055)", padding: 13, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 8 },
+  summaryLabel: { color: Colors.textMuted, fontSize: 10, fontWeight: "900", textTransform: "uppercase" },
+  summaryValue: { color: "#fff", fontSize: 16, fontWeight: "900", marginTop: 4 },
   swapBtn: { width: 50, height: 50, borderRadius: 25, alignItems: "center", justifyContent: "center", backgroundColor: "#0a0a14", borderWidth: 2, borderColor: Colors.cyan, shadowColor: Colors.cyan, shadowOpacity: 0.7, shadowRadius: 12 },
 });
