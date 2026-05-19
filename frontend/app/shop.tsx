@@ -61,6 +61,7 @@ export default function Shop() {
   const [orders, setOrders] = useState<any[]>([]);
   const [seller, setSeller] = useState<any>(null);
   const [sellerArticles, setSellerArticles] = useState<any[]>([]);
+  const [sellerOrders, setSellerOrders] = useState<any[]>([]);
   const [sellerSaving, setSellerSaving] = useState(false);
   const [sellerForm, setSellerForm] = useState(EMPTY_SELLER_FORM);
   const [sellerProfileForm, setSellerProfileForm] = useState({ store_name: "", bio: "", city: "", support_phone: "", pickup_zone: "" });
@@ -72,7 +73,8 @@ export default function Shop() {
   const [cartOpen, setCartOpen] = useState(false);
   const [selected, setSelected] = useState<ShopCatalogPayload["products"][number] | null>(null);
 
-  const columns = width >= 1080 ? 3 : width >= 720 ? 2 : 1;
+  const compact = width < 760;
+  const columns = width >= 1280 ? 4 : width >= 980 ? 3 : width >= 680 ? 2 : 1;
   const cardWidth = columns === 1 ? "100%" : `${100 / columns - 1.4}%`;
 
   const load = useCallback(async () => {
@@ -106,6 +108,7 @@ export default function Shop() {
   const syncSellerState = (payload: any) => {
     setSeller(payload?.profile || null);
     setSellerArticles(Array.isArray(payload?.articles) ? payload.articles : []);
+    setSellerOrders(Array.isArray(payload?.orders) ? payload.orders : []);
     const profile = payload?.profile || {};
     setSellerProfileForm({
       store_name: profile.store_name || "",
@@ -366,12 +369,12 @@ export default function Shop() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.cyan} />}
           contentContainerStyle={styles.content}
         >
-          <Animated.View entering={FadeInUp.duration(420)} style={styles.hero}>
+          <Animated.View entering={FadeInUp.duration(420)} style={[styles.hero, compact && styles.heroCompact]}>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.heroKicker}>Marketplace securisee</Text>
-              <Text style={styles.heroTitle}>Achats avec ton solde FX Pro</Text>
+              <Text style={styles.heroKicker}>Services boutique disponibles</Text>
+              <Text style={styles.heroTitle}>Achats et vendeurs en ligne actifs</Text>
               <Text style={styles.heroText}>
-                Choisis la devise d affichage, paie avec un portefeuille disponible, puis suis la commande depuis la section Commandes.
+                Choisis la devise d affichage, paie avec un portefeuille disponible, suis la commande et laisse les vendeurs KYC recevoir leurs notifications en direct.
               </Text>
             </View>
             <View style={styles.heroIcon}>
@@ -385,12 +388,12 @@ export default function Shop() {
             <ShopStat icon="receipt" label="Commandes" value={`${orders.length} recu(s)`} />
           </View>
           <InfoBanner
-            icon="information-circle"
-            title="Retrait momentanement indisponible"
-            text={catalog?.pickup_message || "Le retrait agence est temporairement suspendu. Les commandes restent securisees et suivies par FX Pro."}
+            icon="megaphone-outline"
+            title="Vente en ligne disponible"
+            text="Boutique en ligne, profils vendeurs certifies KYC, commandes suivies et notifications vendeur sont actives."
           />
 
-          <View style={styles.sectionTabs}>
+          <View style={[styles.sectionTabs, compact && styles.sectionTabsWrap]}>
             {[
               ["buy", "Acheter", "storefront-outline"],
               ["orders", "Commandes", "receipt-outline"],
@@ -400,7 +403,7 @@ export default function Shop() {
             ].map(([key, label, icon]) => {
               const active = activeSection === key;
               return (
-                <Pressable key={key} onPress={() => setActiveSection(key as ShopSection)} style={[styles.sectionTab, active && styles.sectionTabActive]}>
+                <Pressable key={key} onPress={() => setActiveSection(key as ShopSection)} style={[styles.sectionTab, compact && styles.sectionTabCompact, active && styles.sectionTabActive]}>
                   <Ionicons name={icon as any} size={15} color={active ? "#000" : Colors.textSoft} />
                   <Text style={[styles.sectionTabText, active && styles.sectionTabTextActive]}>{label}</Text>
                 </Pressable>
@@ -580,7 +583,7 @@ export default function Shop() {
                     <Text style={styles.sellerPanelTitle}>Profil boutique</Text>
                     <SellerInput label="Nom boutique" value={sellerProfileForm.store_name} onChangeText={(store_name: string) => setSellerProfileForm((v) => ({ ...v, store_name }))} />
                     <SellerInput label="Bio vendeur" value={sellerProfileForm.bio} onChangeText={(bio: string) => setSellerProfileForm((v) => ({ ...v, bio }))} multiline />
-                    <View style={styles.sellerInline}>
+                    <View style={compact ? styles.sellerStack : styles.sellerInline}>
                       <SellerInput label="Ville" value={sellerProfileForm.city} onChangeText={(city: string) => setSellerProfileForm((v) => ({ ...v, city }))} style={{ flex: 1 }} />
                       <SellerInput label="Telephone" value={sellerProfileForm.support_phone} onChangeText={(support_phone: string) => setSellerProfileForm((v) => ({ ...v, support_phone }))} style={{ flex: 1 }} />
                     </View>
@@ -610,7 +613,7 @@ export default function Shop() {
                         <SellerInput label="Nom article" value={sellerForm.title} onChangeText={(title: string) => setSellerForm((v) => ({ ...v, title }))} />
                         <SellerInput label="Description" value={sellerForm.description} onChangeText={(description: string) => setSellerForm((v) => ({ ...v, description }))} multiline />
                         <SellerInput label="URL image produit" value={sellerForm.image} onChangeText={(image: string) => setSellerForm((v) => ({ ...v, image }))} />
-                        <View style={styles.sellerInline}>
+                        <View style={compact ? styles.sellerStack : styles.sellerInline}>
                           <SellerInput label="Categorie" value={sellerForm.category} onChangeText={(category: string) => setSellerForm((v) => ({ ...v, category }))} style={{ flex: 1 }} />
                           <SellerInput label="Prix USD" value={sellerForm.price} onChangeText={(price: string) => setSellerForm((v) => ({ ...v, price }))} keyboardType="decimal-pad" style={{ flex: 1 }} />
                           <SellerInput label="Stock" value={sellerForm.stock} onChangeText={(stock: string) => setSellerForm((v) => ({ ...v, stock }))} keyboardType="number-pad" style={{ flex: 0.75 }} />
@@ -656,6 +659,36 @@ export default function Shop() {
                     <View style={styles.emptyOrders}>
                       <Ionicons name="storefront-outline" size={24} color={Colors.textMuted} />
                       <Text style={styles.emptyOrdersText}>Aucun article vendeur pour le moment.</Text>
+                    </View>
+                  )}
+
+                  <SectionTitle title="Commandes vendeur" subtitle={`${sellerOrders.length} commande(s) recues via vos articles.`} />
+                  {sellerOrders.length ? (
+                    <View style={styles.sellerList}>
+                      {sellerOrders.map((order) => (
+                        <View key={order.seller_order_id || order.order_id} style={styles.orderCard}>
+                          <View style={styles.orderIcon}>
+                            <Ionicons name="notifications-outline" size={20} color={Colors.cyan} />
+                          </View>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={styles.orderTitle} numberOfLines={1}>{order.reference || order.order_id}</Text>
+                            <Text style={styles.orderText} numberOfLines={2}>{order.item_count || order.items?.length || 0} article(s) - acheteur {order.buyer_name || order.buyer_email || "FX Pro"}</Text>
+                            <View style={styles.orderSteps}>
+                              <OrderStep active label="Notif envoyee" />
+                              <OrderStep active label="A preparer" />
+                            </View>
+                          </View>
+                          <View style={{ alignItems: "flex-end" }}>
+                            <Text style={styles.orderAmount}>{formatMoney(Number(order.items?.reduce((sum: number, item: any) => sum + Number(item.line_total || 0), 0) || 0), order.currency || currency)}</Text>
+                            <Text style={styles.orderStatus}>Nouveau</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <View style={styles.emptyOrders}>
+                      <Ionicons name="mail-open-outline" size={24} color={Colors.textMuted} />
+                      <Text style={styles.emptyOrdersText}>Les nouvelles commandes vendeur apparaitront ici avec notification.</Text>
                     </View>
                   )}
                 </>
@@ -809,6 +842,7 @@ function ProductCard({ product, index, width, onOpen, onAdd }: any) {
           <View style={styles.metaLine}>
             <InfoTiny icon="star" text={String(product.rating)} color={Colors.yellow} />
             <InfoTiny icon="cube" text={out ? "rupture" : `${product.stock} dispo`} color={out ? Colors.textMuted : Colors.green} />
+            {product.source === "seller" ? <InfoTiny icon="shield-checkmark" text="Vendeur KYC" color={Colors.green} /> : null}
             {product.sku ? <InfoTiny icon="barcode-outline" text={product.sku} color={Colors.cyan} /> : null}
           </View>
           <View style={styles.cardFooter}>
@@ -869,6 +903,12 @@ function ProductModal({ product, onClose, onAdd }: any) {
             <View style={styles.tagRow}>
               {product.tags?.slice(0, 4).map((tag: string) => <Text key={tag} style={styles.tag}>{tag}</Text>)}
             </View>
+            {product.source === "seller" ? (
+              <View style={styles.metaLine}>
+                <InfoTiny icon="shield-checkmark" text="Vendeur certifie KYC" color={Colors.green} />
+                <InfoTiny icon="storefront-outline" text={product.seller_store_name || product.brand} color={Colors.cyan} />
+              </View>
+            ) : null}
             <View style={styles.productSpecs}>
               {product.sku ? <SpecLine label="Ref" value={product.sku} /> : null}
               {product.shipping ? <SpecLine label="Livraison" value={product.shipping} /> : null}
@@ -1010,11 +1050,12 @@ function makeClientOrderId() {
 
 const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10 },
-  topTitle: { color: "#fff", fontSize: 18, fontWeight: "900" },
+  topTitle: { color: "#fff", fontSize: 18, fontWeight: "900", flex: 1, textAlign: "center", paddingHorizontal: 12 },
   cartButton: { width: 42, height: 42, borderRadius: 16, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.06)" },
   cartBadge: { position: "absolute", top: -6, right: -5, minWidth: 20, height: 20, borderRadius: 10, textAlign: "center", overflow: "hidden", backgroundColor: Colors.magenta, color: "#fff", fontSize: 11, fontWeight: "900", lineHeight: 20 },
   content: { paddingBottom: 150 },
   hero: { marginHorizontal: 16, marginTop: 8, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: Colors.borderStrong, backgroundColor: "rgba(255,255,255,0.075)", flexDirection: "row", alignItems: "center", gap: 14 },
+  heroCompact: { flexDirection: "column", alignItems: "flex-start" },
   heroKicker: { color: Colors.cyan, fontSize: 11, fontWeight: "900", letterSpacing: 1.6, textTransform: "uppercase" },
   heroTitle: { color: "#fff", fontSize: 27, fontWeight: "900", marginTop: 4, lineHeight: 31 },
   heroText: { color: Colors.textSoft, fontSize: 13, lineHeight: 19, marginTop: 8 },
@@ -1029,7 +1070,9 @@ const styles = StyleSheet.create({
   infoBannerTitle: { color: "#fff", fontSize: 13, fontWeight: "900" },
   infoBannerText: { color: Colors.textSoft, fontSize: 11, lineHeight: 16, marginTop: 3 },
   sectionTabs: { marginHorizontal: 16, marginTop: 12, flexDirection: "row", gap: 7, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, padding: 5, backgroundColor: "rgba(255,255,255,0.055)" },
+  sectionTabsWrap: { flexWrap: "wrap" },
   sectionTab: { flex: 1, minHeight: 38, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 },
+  sectionTabCompact: { minWidth: "31%" },
   sectionTabActive: { backgroundColor: Colors.cyan },
   sectionTabText: { color: Colors.textSoft, fontSize: 11, fontWeight: "900" },
   sectionTabTextActive: { color: "#000" },
@@ -1153,6 +1196,7 @@ const styles = StyleSheet.create({
   sellerPanelHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   sellerPanelTitle: { color: "#fff", fontSize: 16, fontWeight: "900", marginBottom: 10 },
   sellerInline: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "flex-start" },
+  sellerStack: { gap: 8 },
   sellerInputWrap: { marginBottom: 10, minWidth: 0 },
   sellerInputLabel: { color: Colors.textMuted, fontSize: 10, fontWeight: "900", textTransform: "uppercase", letterSpacing: 1.1, marginBottom: 5 },
   sellerInput: { minHeight: 44, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(0,0,0,0.22)", color: "#fff", paddingHorizontal: 12, paddingVertical: Platform.OS === "web" ? 11 : 8, fontSize: 13, fontWeight: "700" },

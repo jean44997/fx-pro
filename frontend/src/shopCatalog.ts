@@ -28,6 +28,7 @@ export type ShopProduct = {
   hidden?: boolean;
   seller_id?: string;
   seller_verified?: boolean;
+  seller_store_name?: string;
 };
 
 export type ShopPromotion = {
@@ -1219,6 +1220,9 @@ export function calculateShopCart({
       brand: product.brand,
       image: product.image,
       category: product.category,
+      source: product.source,
+      seller_id: product.seller_id,
+      seller_store_name: product.seller_store_name || product.brand,
       sku: product.sku,
       ref: product.ref,
       quantity: line.quantity,

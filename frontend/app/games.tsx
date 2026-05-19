@@ -1,5 +1,18 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,6 +31,7 @@ import Animated, {
 import * as Haptics from "expo-haptics";
 import { GradientBg, GlassCard, GhostButton, PrimaryButton } from "../src/ui";
 import { api, useAuth } from "../src/auth";
+import { FREE_GAME_SNAPSHOT } from "../src/freeGamesSnapshot";
 import { Colors, formatMoney } from "../src/theme";
 
 type GameItem = {
@@ -38,6 +52,36 @@ type HeroItem = {
   stats?: Record<string, number>;
 };
 
+type FreeGameItem = {
+  id: number;
+  title: string;
+  thumbnail?: string;
+  short_description?: string;
+  game_url?: string;
+  genre?: string;
+  platform?: string;
+  publisher?: string;
+  developer?: string;
+  release_date?: string;
+  freetogame_profile_url?: string;
+};
+
+type FreeGamesState = {
+  items: FreeGameItem[];
+  genres: string[];
+  platforms: string[];
+  page: number;
+  has_more: boolean;
+  total_results: number;
+  source?: string;
+};
+
+function gameSourceLabel(source?: string) {
+  if (source === "snapshot") return "catalogue integre";
+  if (source === "fallback") return "secours";
+  return source || "live";
+}
+
 const GAME_LOOK: Record<string, { icon: any; color: string; label: string }> = {
   scratch: { icon: "sparkles", color: Colors.cyan, label: "Gratte la carte au bon moment" },
   vault: { icon: "cube", color: Colors.yellow, label: "Ouvre le coffre sans forcer" },
@@ -47,6 +91,8 @@ const GAME_LOOK: Record<string, { icon: any; color: string; label: string }> = {
   speed_run: { icon: "flash", color: Colors.cyan, label: "Vitesse et reflexes en direct" },
 };
 
+const FREE_GAME_FALLBACK: FreeGameItem[] = FREE_GAME_SNAPSHOT.map((item) => ({ ...item }));
+
 export default function GamesScreen() {
   const router = useRouter();
   const { refresh } = useAuth();
@@ -55,6 +101,13 @@ export default function GamesScreen() {
   const [playing, setPlaying] = useState<string | null>(null);
   const [status, setStatus] = useState<any>(null);
   const [result, setResult] = useState<any>(null);
+  const [query, setQuery] = useState("");
+  const [genre, setGenre] = useState("all");
+  const [platform, setPlatform] = useState("all");
+  const [catalog, setCatalog] = useState<FreeGamesState>({ items: [], genres: [], platforms: [], page: 1, has_more: false, total_results: 0, source: "" });
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogLoadingMore, setCatalogLoadingMore] = useState(false);
+  const [openingKey, setOpeningKey] = useState("");
   const pulse = useSharedValue(1);
 
   useEffect(() => {
@@ -63,8 +116,11 @@ export default function GamesScreen() {
 
   const pulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulse.value }] }));
 
-  const columns = width >= 860 ? 3 : width >= 620 ? 2 : 1;
-  const cardWidth = `${100 / columns}%`;
+  const compact = width < 560;
+  const bonusColumns = width >= 980 ? 3 : width >= 620 ? 2 : 1;
+  const catalogColumns = width >= 1280 ? 4 : width >= 920 ? 3 : width >= 600 ? 2 : 1;
+  const bonusCardWidth = `${100 / bonusColumns}%`;
+  const catalogCardWidth = `${100 / catalogColumns}%`;
   const games: GameItem[] = status?.games || [];
   const heroes: HeroItem[] = status?.heroes || [];
 
@@ -80,21 +136,75 @@ export default function GamesScreen() {
     );
   }, [status]);
 
-  const load = async () => {
+  const loadStatus = useCallback(async () => {
     try {
       setLoading(true);
       const data = await api.get("/games/status");
       setStatus(data);
-    } catch (e: any) {
-      Alert.alert("Jeux indisponibles", e.message);
+    } catch {
+      setStatus((prev: any) => prev || { tickets: 0, daily_tickets: 5, stats: {}, games: [], heroes: [] });
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const loadCatalog = useCallback(
+    async (page = 1, append = false) => {
+      try {
+        if (append) setCatalogLoadingMore(true);
+        else setCatalogLoading(true);
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        params.set("limit", compact ? "14" : "24");
+        params.set("genre", genre);
+        params.set("platform", platform);
+        if (query.trim()) params.set("q", query.trim());
+        const payload = await api.get(`/games/catalog?${params.toString()}`);
+        const nextItems = Array.isArray(payload.items) ? payload.items : [];
+        setCatalog((prev) => ({
+          items: append ? dedupeFreeGames([...prev.items, ...nextItems]) : nextItems,
+          genres: Array.isArray(payload.genres) ? payload.genres : [],
+          platforms: Array.isArray(payload.platforms) ? payload.platforms : [],
+          page: Number(payload.page || page),
+          has_more: Boolean(payload.has_more),
+          total_results: Number(payload.total_results || nextItems.length),
+          source: payload.source,
+        }));
+      } catch (e: any) {
+        if (!append) {
+          const fallbackPool = filterFreeGames(FREE_GAME_FALLBACK, query, genre, platform);
+          const fallbackLimit = compact ? 14 : 24;
+          const fallbackItems = fallbackPool.slice(0, fallbackLimit);
+          const fallbackGenres = Array.from(new Set(FREE_GAME_FALLBACK.map((item) => item.genre || "Autre"))).sort();
+          const fallbackPlatforms = Array.from(new Set(FREE_GAME_FALLBACK.map((item) => item.platform || "PC (Windows)"))).sort();
+          setCatalog((prev) => ({
+            ...prev,
+            items: fallbackItems,
+            genres: fallbackGenres,
+            platforms: fallbackPlatforms,
+            has_more: fallbackPool.length > fallbackItems.length,
+            total_results: fallbackPool.length,
+            source: "snapshot",
+          }));
+        }
+      } finally {
+        setCatalogLoading(false);
+        setCatalogLoadingMore(false);
+      }
+    },
+    [compact, genre, platform, query]
+  );
 
   useEffect(() => {
-    load();
-  }, []);
+    loadStatus().catch(() => undefined);
+  }, [loadStatus]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadCatalog(1, false).catch(() => undefined);
+    }, query.trim() ? 260 : 0);
+    return () => clearTimeout(timer);
+  }, [genre, loadCatalog, platform, query]);
 
   const play = async (gameId: string) => {
     if (!status?.tickets) {
@@ -109,13 +219,33 @@ export default function GamesScreen() {
       await refresh();
       if (res.won) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
       else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
-      load().catch(() => undefined);
+      loadStatus().catch(() => undefined);
     } catch (e: any) {
-      Alert.alert("Jeu bloque", e.message);
+      Alert.alert("Jeu bloque", e.message || "Impossible de lancer cette partie pour le moment.");
     } finally {
       setPlaying(null);
     }
   };
+
+  const openFreeGame = async (item: FreeGameItem, preferred: "play" | "profile" = "play") => {
+    const key = `${preferred}:${item.id}`;
+    const target = preferred === "play" ? item.game_url || item.freetogame_profile_url : item.freetogame_profile_url || item.game_url;
+    if (!target) {
+      Alert.alert("Ouverture indisponible", "Aucun lien n'est disponible pour ce jeu.");
+      return;
+    }
+    try {
+      setOpeningKey(key);
+      await Linking.openURL(target);
+    } catch (e: any) {
+      Alert.alert("Ouverture indisponible", e.message || "Impossible d'ouvrir ce jeu.");
+    } finally {
+      setOpeningKey("");
+    }
+  };
+
+  const visibleGenres = useMemo(() => ["all", ...catalog.genres.slice(0, 12)], [catalog.genres]);
+  const visiblePlatforms = useMemo(() => ["all", ...catalog.platforms.slice(0, 6)], [catalog.platforms]);
 
   return (
     <GradientBg>
@@ -128,6 +258,7 @@ export default function GamesScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.kicker}>PROFIL FX PRO</Text>
               <Text testID="games-title" style={styles.title}>Jeux bonus</Text>
+              <Text style={styles.headerText}>Tickets recharges, nouveaux jeux classes par categorie et bouton Jouer sur chaque fiche.</Text>
             </View>
             <Animated.View style={[styles.ticketBubble, pulseStyle]}>
               <Ionicons name="ticket" size={18} color="#000" />
@@ -156,14 +287,14 @@ export default function GamesScreen() {
           {loading ? (
             <View style={styles.loading}>
               <ActivityIndicator color={Colors.cyan} />
-              <Text style={{ color: Colors.textSoft, marginTop: 10 }}>Chargement des jeux...</Text>
+              <Text style={{ color: Colors.textSoft, marginTop: 10 }}>Chargement des jeux bonus...</Text>
             </View>
           ) : (
             <>
               {heroes.length ? <HeroStrip heroes={heroes} /> : null}
               <View style={styles.grid}>
                 {games.map((game, index) => (
-                  <Animated.View key={game.id} entering={FadeInUp.delay(index * 70)} style={{ width: cardWidth as any, padding: 8 }}>
+                  <Animated.View key={game.id} entering={FadeInUp.delay(index * 70)} style={{ width: bonusCardWidth as any, padding: 8 }}>
                     <GameCard game={game} disabled={Boolean(playing) || !status?.tickets} locked={!status?.tickets} loading={playing === game.id} onPlay={() => play(game.id)} />
                   </Animated.View>
                 ))}
@@ -171,9 +302,100 @@ export default function GamesScreen() {
             </>
           )}
 
-          <View style={{ paddingHorizontal: 16, marginTop: 6 }}>
-            <GhostButton testID="games-refresh" title="Actualiser tickets" onPress={load} icon={<Ionicons name="refresh" size={16} color={Colors.cyan} />} />
+          <View style={styles.refreshWrap}>
+            <GhostButton testID="games-refresh" title="Actualiser tickets" onPress={() => loadStatus()} icon={<Ionicons name="refresh" size={16} color={Colors.cyan} />} />
           </View>
+
+          <View style={styles.catalogHeader}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.sectionKicker}>Catalogue live</Text>
+              <Text style={styles.catalogTitle}>Nouveaux jeux par categorie</Text>
+              <Text style={styles.catalogSubtitle}>{catalog.total_results || 0} jeu(x) disponible(s) - source {gameSourceLabel(catalog.source)}.</Text>
+            </View>
+            <View style={styles.catalogBadge}>
+              <Ionicons name="rocket" size={15} color="#000" />
+              <Text style={styles.catalogBadgeText}>Jouer</Text>
+            </View>
+          </View>
+
+          <View style={styles.searchBox}>
+            <Ionicons name="search" size={18} color={Colors.textSoft} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Nom, genre, studio ou plateforme"
+              placeholderTextColor={Colors.textMuted}
+              style={styles.searchInput}
+            />
+            {query ? (
+              <Pressable onPress={() => setQuery("")} hitSlop={10}>
+                <Ionicons name="close-circle" size={18} color={Colors.textSoft} />
+              </Pressable>
+            ) : null}
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTrack}>
+            {visibleGenres.map((item) => {
+              const active = genre === item;
+              return (
+                <Pressable key={item} onPress={() => setGenre(item)} style={[styles.filterChip, active && styles.filterChipActive]}>
+                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{item === "all" ? "Tous" : item}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.platformTrack}>
+            {visiblePlatforms.map((item) => {
+              const active = platform === item;
+              return (
+                <Pressable key={item} onPress={() => setPlatform(item)} style={[styles.platformChip, active && styles.platformChipActive]}>
+                  <Ionicons name={String(item).toLowerCase().includes("web") ? "globe-outline" : "desktop-outline"} size={14} color={active ? "#000" : Colors.textSoft} />
+                  <Text style={[styles.platformChipText, active && styles.platformChipTextActive]}>{item === "all" ? "Toutes" : item}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          {catalogLoading ? (
+            <View style={styles.loading}>
+              <ActivityIndicator color={Colors.cyan} />
+              <Text style={{ color: Colors.textSoft, marginTop: 10 }}>Chargement du catalogue jeux...</Text>
+            </View>
+          ) : catalog.items.length ? (
+            <>
+              <View style={styles.catalogGrid}>
+                {catalog.items.map((item, index) => (
+                  <Animated.View key={item.id} entering={FadeInUp.delay(Math.min(index, 18) * 28)} style={{ width: catalogCardWidth as any, padding: 8 }}>
+                    <FreeGameCard
+                      item={item}
+                      compact={compact}
+                      openingKey={openingKey}
+                      onPlay={() => openFreeGame(item, "play")}
+                      onOpenProfile={() => openFreeGame(item, "profile")}
+                    />
+                  </Animated.View>
+                ))}
+              </View>
+              {catalog.has_more ? (
+                <View style={styles.moreWrap}>
+                  <GhostButton
+                    title={catalogLoadingMore ? "Chargement..." : "Voir plus de jeux"}
+                    onPress={() => {
+                      if (!catalogLoadingMore) loadCatalog((catalog.page || 1) + 1, true).catch(() => undefined);
+                    }}
+                    icon={catalogLoadingMore ? <ActivityIndicator size="small" color={Colors.cyan} /> : <Ionicons name="chevron-down" size={16} color={Colors.cyan} />}
+                  />
+                </View>
+              ) : null}
+            </>
+          ) : (
+            <View style={styles.emptyBox}>
+              <Ionicons name="game-controller-outline" size={28} color={Colors.textMuted} />
+              <Text style={styles.emptyTitle}>Aucun jeu pour ce filtre</Text>
+              <Text style={styles.emptyText}>Change le genre, la plateforme ou la recherche pour charger une autre selection.</Text>
+            </View>
+          )}
         </ScrollView>
 
         <Modal visible={Boolean(result)} transparent animationType="fade" onRequestClose={() => setResult(null)}>
@@ -238,6 +460,53 @@ function GameCard({ game, onPlay, loading, disabled, locked }: { game: GameItem;
         icon={<Ionicons name={locked ? "lock-closed" : "play"} size={16} color="#000" />}
       />
     </Animated.View>
+  );
+}
+
+function FreeGameCard({
+  item,
+  compact,
+  openingKey,
+  onPlay,
+  onOpenProfile,
+}: {
+  item: FreeGameItem;
+  compact: boolean;
+  openingKey: string;
+  onPlay: () => void;
+  onOpenProfile: () => void;
+}) {
+  const playKey = `play:${item.id}`;
+  const profileKey = `profile:${item.id}`;
+  return (
+    <View style={[styles.freeGameCard, compact && styles.freeGameCardCompact]}>
+      <Image source={{ uri: item.thumbnail || "" }} style={styles.freeGameImage} resizeMode="cover" />
+      <View style={styles.freeGameBody}>
+        <View style={styles.freeGameTopRow}>
+          <Text style={styles.freeGameGenre}>{item.genre || "Autre"}</Text>
+          <Text style={styles.freeGamePlatform}>{item.platform || "PC"}</Text>
+        </View>
+        <Text style={styles.freeGameTitle} numberOfLines={2}>{item.title}</Text>
+        <Text style={styles.freeGameDesc} numberOfLines={compact ? 4 : 3}>{item.short_description || "Description indisponible."}</Text>
+        <View style={styles.freeMetaLine}>
+          <InfoTiny icon="business-outline" text={item.publisher || "Studio"} color={Colors.cyan} />
+          {item.release_date ? <InfoTiny icon="calendar-outline" text={item.release_date} color={Colors.yellow} /> : null}
+        </View>
+        <View style={styles.freeActions}>
+          <PrimaryButton
+            title={openingKey === playKey ? "Ouverture..." : "Jouer"}
+            onPress={onPlay}
+            loading={openingKey === playKey}
+            icon={<Ionicons name="play" size={16} color="#000" />}
+            style={styles.freePlayBtn}
+          />
+          <Pressable onPress={onOpenProfile} style={styles.freeProfileBtn}>
+            {openingKey === profileKey ? <ActivityIndicator color={Colors.cyan} /> : <Ionicons name="open-outline" size={16} color={Colors.cyan} />}
+            <Text style={styles.freeProfileText}>Profil</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -320,13 +589,44 @@ function MiniStat({ label, value, color }: { label: string; value: any; color: s
   );
 }
 
+function InfoTiny({ icon, text, color }: { icon: any; text: string; color: string }) {
+  return (
+    <View style={styles.infoTiny}>
+      <Ionicons name={icon} size={12} color={color} />
+      <Text style={styles.infoTinyText}>{text}</Text>
+    </View>
+  );
+}
+
+function dedupeFreeGames(items: FreeGameItem[]) {
+  const seen = new Set<number>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function filterFreeGames(items: FreeGameItem[], query: string, genre: string, platform: string) {
+  const q = query.trim().toLowerCase();
+  const g = genre.trim().toLowerCase();
+  const p = platform.trim().toLowerCase();
+  return items.filter((item) => {
+    if (q && !`${item.title} ${item.genre || ""} ${item.platform || ""} ${item.publisher || ""} ${item.developer || ""}`.toLowerCase().includes(q)) return false;
+    if (g !== "all" && String(item.genre || "").toLowerCase() !== g) return false;
+    if (p !== "all" && !String(item.platform || "").toLowerCase().includes(p)) return false;
+    return true;
+  });
+}
+
 const styles = StyleSheet.create({
   scroll: { paddingBottom: 80 },
-  header: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 6 },
+  header: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 6 },
   backBtn: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.04)" },
   kicker: { color: Colors.cyan, fontSize: 11, fontWeight: "900", letterSpacing: 2 },
   title: { color: "#fff", fontSize: 30, fontWeight: "900", marginTop: 2 },
-  ticketBubble: { minWidth: 62, height: 44, paddingHorizontal: 12, borderRadius: 18, backgroundColor: Colors.yellow, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  headerText: { color: Colors.textSoft, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  ticketBubble: { minWidth: 62, height: 44, paddingHorizontal: 12, borderRadius: 18, backgroundColor: Colors.yellow, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 4 },
   ticketText: { color: "#000", fontWeight: "900", fontSize: 18 },
   notice: { marginTop: 6 },
   noticeRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
@@ -338,6 +638,7 @@ const styles = StyleSheet.create({
   statValue: { fontWeight: "900", marginTop: 6, fontSize: 16 },
   loading: { alignItems: "center", padding: 28 },
   grid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 8, marginTop: 8 },
+  refreshWrap: { paddingHorizontal: 16, marginTop: 6 },
   gameCard: { minHeight: 250, borderRadius: 18, borderWidth: 1.5, backgroundColor: "rgba(10,10,20,0.92)", padding: 14, shadowOpacity: 0.35, shadowRadius: 16 },
   gameTop: { flexDirection: "row", alignItems: "center", gap: 12 },
   gameIcon: { width: 52, height: 52, borderRadius: 16, alignItems: "center", justifyContent: "center" },
@@ -364,6 +665,44 @@ const styles = StyleSheet.create({
   heroBarLabel: { color: Colors.textMuted, fontSize: 9, fontWeight: "900", width: 24 },
   heroBarTrack: { flex: 1, height: 5, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.12)", overflow: "hidden" },
   heroBarFill: { height: "100%", borderRadius: 999 },
+  catalogHeader: { marginTop: 18, paddingHorizontal: 18, flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  catalogTitle: { color: "#fff", fontSize: 20, fontWeight: "900", marginTop: 3 },
+  catalogSubtitle: { color: Colors.textSoft, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  catalogBadge: { borderRadius: 999, backgroundColor: Colors.green, minHeight: 34, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  catalogBadgeText: { color: "#000", fontWeight: "900", fontSize: 12 },
+  searchBox: { marginHorizontal: 16, marginTop: 10, minHeight: 48, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.055)", flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 14 },
+  searchInput: { flex: 1, minWidth: 0, color: "#fff", fontSize: 15, paddingVertical: 12 },
+  filterTrack: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4, gap: 8 },
+  filterChip: { minHeight: 36, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.03)", alignItems: "center", justifyContent: "center" },
+  filterChipActive: { backgroundColor: Colors.magenta, borderColor: Colors.magenta },
+  filterChipText: { color: "#fff", fontSize: 11, fontWeight: "800" },
+  filterChipTextActive: { color: "#fff" },
+  platformTrack: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 6, gap: 8 },
+  platformChip: { minHeight: 36, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.03)", flexDirection: "row", alignItems: "center", gap: 6 },
+  platformChipActive: { backgroundColor: Colors.yellow, borderColor: Colors.yellow },
+  platformChipText: { color: "#fff", fontSize: 11, fontWeight: "800" },
+  platformChipTextActive: { color: "#000" },
+  catalogGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 8, marginTop: 8 },
+  freeGameCard: { minHeight: 392, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(12,12,20,0.94)" },
+  freeGameCardCompact: { minHeight: 426 },
+  freeGameImage: { width: "100%", height: 178, backgroundColor: "rgba(255,255,255,0.05)" },
+  freeGameBody: { padding: 13, flex: 1 },
+  freeGameTopRow: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  freeGameGenre: { color: Colors.cyan, fontSize: 11, fontWeight: "900" },
+  freeGamePlatform: { color: Colors.textMuted, fontSize: 10, fontWeight: "900" },
+  freeGameTitle: { color: "#fff", fontSize: 17, fontWeight: "900", lineHeight: 21, marginTop: 6 },
+  freeGameDesc: { color: Colors.textSoft, fontSize: 12, lineHeight: 18, marginTop: 8, minHeight: 54 },
+  freeMetaLine: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 10 },
+  freeActions: { marginTop: "auto", paddingTop: 12, gap: 8 },
+  freePlayBtn: { minHeight: 44 },
+  freeProfileBtn: { minHeight: 42, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.045)", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  freeProfileText: { color: Colors.cyan, fontWeight: "900" },
+  infoTiny: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5, backgroundColor: "rgba(255,255,255,0.055)" },
+  infoTinyText: { color: "#fff", fontSize: 10, fontWeight: "800" },
+  moreWrap: { paddingHorizontal: 16, marginTop: 8 },
+  emptyBox: { marginHorizontal: 16, marginTop: 8, padding: 20, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.045)", alignItems: "center" },
+  emptyTitle: { color: "#fff", fontSize: 18, fontWeight: "900", marginTop: 8 },
+  emptyText: { color: Colors.textSoft, textAlign: "center", marginTop: 6, lineHeight: 19 },
   duelBox: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14, padding: 10, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.045)" },
   duelHero: { flex: 1, minWidth: 0, alignItems: "center" },
   duelImage: { width: 62, height: 62, borderRadius: 16, borderWidth: 1, borderColor: Colors.border },

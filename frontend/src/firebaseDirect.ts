@@ -29,6 +29,7 @@ import {
 } from "firebase/firestore";
 import { deleteObject, getDownloadURL, getStorage, ref as storageRef, uploadString } from "firebase/storage";
 import { firebaseConfig } from "./firebaseConfig";
+import { FREE_GAME_SNAPSHOT } from "./freeGamesSnapshot";
 import type { User } from "./auth";
 import {
   BONUS_COUNTRIES,
@@ -70,13 +71,14 @@ const BONUS_EVENTS = "fxpro_bonus_events";
 const GAME_EVENTS = "fxpro_game_events";
 const RISK_LOGS = "fxpro_risk_logs";
 const SHOP_ORDERS = "fxpro_shop_orders";
+const SHOP_SELLER_ORDERS = "fxpro_shop_seller_orders";
 const SHOP_PRODUCTS = "fxpro_shop_products";
 const SHOP_SELLERS = "fxpro_shop_sellers";
 const SHOP_SELLER_ARTICLES = "fxpro_shop_seller_articles";
 const MOVIE_LIBRARY = "fxpro_movie_library";
 const APILAYER_SHOP_KEY = process.env.EXPO_PUBLIC_APILAYER_KEY || "";
 const TMDB_READ_TOKEN = process.env.EXPO_PUBLIC_TMDB_READ_TOKEN || "";
-const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY || "";
+const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY || "4300217e16dba490da871af16163cedb";
 const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_USD", "EUR_XOF"];
 const MAX_INLINE_PROFILE_PICTURE_CHARS = 700000;
 const WITHDRAW_PAUSED_NOTICE_FLAG = "withdraw_paused_notice_2026_05_18_at";
@@ -87,8 +89,13 @@ const SERVICES_LIMITED_NOTICE_FLAG = "services_limited_notice_2026_05_18_at";
 const SERVICES_LIMITED_NOTICE_TITLE = "Services momentanement indisponibles";
 const SERVICES_LIMITED_NOTICE_BODY =
   "Certains services externes peuvent etre indisponibles pendant la mise a jour. Le solde, les recus, la boutique suivie, les jeux avec tickets et les notifications restent proteges.";
+const SERVICES_AVAILABLE_FLAG = "services_available_notice_2026_05_19_at";
+const SERVICES_AVAILABLE_TITLE = "Services FX Pro disponibles";
+const SERVICES_AVAILABLE_BODY =
+  "La vente en ligne, le catalogue films et series, les jeux a tickets et les notifications vendeur sont disponibles. Ouvre la boutique, les films ou les jeux pour profiter des nouveaux services.";
 const GAME_DAILY_TICKETS = 5;
 const GAME_TICKET_NOTICE_PREFIX = "game_tickets_recharged_notice_";
+const GAME_GLOBAL_RECHARGE_FLAG = "game_global_recharge_2026_05_19_at";
 const GAME_CONFIG: Record<string, { name: string; win_chance: number; min_prize: number; max_prize: number; mode?: string }> = {
   scratch: { name: "Carte Neon", win_chance: 0.34, min_prize: 80, max_prize: 750 },
   vault: { name: "Coffre Flash", win_chance: 0.26, min_prize: 150, max_prize: 1400 },
@@ -96,6 +103,25 @@ const GAME_CONFIG: Record<string, { name: string; win_chance: number; min_prize:
   hero_duel: { name: "Duel Heros", win_chance: 0.36, min_prize: 120, max_prize: 1100, mode: "hero" },
   power_match: { name: "Power Match", win_chance: 0.3, min_prize: 220, max_prize: 1800, mode: "hero" },
   speed_run: { name: "Speed Run", win_chance: 0.44, min_prize: 60, max_prize: 620, mode: "hero" },
+};
+const MOVIE_PAGE_SIZE_DEFAULT = 24;
+const MOVIE_GENRE_GROUPS: Record<string, { label: string; movie: number[]; tv: number[] }> = {
+  all: { label: "Tout", movie: [], tv: [] },
+  action: { label: "Action", movie: [28], tv: [10759] },
+  adventure: { label: "Aventure", movie: [12], tv: [10759] },
+  comedy: { label: "Comedie", movie: [35], tv: [35] },
+  drama: { label: "Drame", movie: [18], tv: [18] },
+  scifi: { label: "Science-fiction", movie: [878], tv: [10765] },
+  animation: { label: "Animation", movie: [16], tv: [16] },
+  crime: { label: "Crime", movie: [80], tv: [80] },
+  documentary: { label: "Documentaire", movie: [99], tv: [99] },
+  family: { label: "Famille", movie: [10751], tv: [10751] },
+  horror: { label: "Horreur", movie: [27], tv: [9648] },
+};
+const MOVIE_SORT_OPTIONS: Record<string, string> = {
+  popular: "popularity.desc",
+  rating: "vote_average.desc",
+  recent: "primary_release_date.desc",
 };
 
 const SUPERHERO_ROSTER = [
@@ -119,11 +145,13 @@ const SUPERHERO_ROSTER = [
 ];
 
 const MOVIE_FALLBACK_ITEMS = [
-  { id: 550, media_type: "movie", title: "Fight Club", overview: "Un employe insomniaque decouvre un cercle clandestin qui change sa vision du controle et de la consommation.", poster_url: "https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/hZkgoQYus5vegHoetLkCJzb17zJ.jpg", vote_average: 8.4, release_date: "1999-10-15", source: "fallback" },
-  { id: 1399, media_type: "tv", title: "Game of Thrones", overview: "Des familles nobles luttent pour le pouvoir pendant qu'une menace ancienne grandit au-dela du mur.", poster_url: "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/suopoADq0k8YZr4dQXcU6pToj6s.jpg", vote_average: 8.5, release_date: "2011-04-17", source: "fallback" },
-  { id: 157336, media_type: "movie", title: "Interstellar", overview: "Une equipe traverse l'espace pour chercher un futur possible a l'humanite.", poster_url: "https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg", vote_average: 8.5, release_date: "2014-11-05", source: "fallback" },
-  { id: 66732, media_type: "tv", title: "Stranger Things", overview: "Des enfants, une disparition et une force etrange bouleversent une petite ville.", poster_url: "https://image.tmdb.org/t/p/w500/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg", vote_average: 8.6, release_date: "2016-07-15", source: "fallback" },
+  { id: 550, media_type: "movie", title: "Fight Club", overview: "Un employe insomniaque decouvre un cercle clandestin qui change sa vision du controle et de la consommation.", poster_url: "https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/hZkgoQYus5vegHoetLkCJzb17zJ.jpg", vote_average: 8.4, release_date: "1999-10-15", genre_ids: [18], source: "fallback" },
+  { id: 1399, media_type: "tv", title: "Game of Thrones", overview: "Des familles nobles luttent pour le pouvoir pendant qu'une menace ancienne grandit au-dela du mur.", poster_url: "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/suopoADq0k8YZr4dQXcU6pToj6s.jpg", vote_average: 8.5, release_date: "2011-04-17", genre_ids: [10759, 18], source: "fallback" },
+  { id: 157336, media_type: "movie", title: "Interstellar", overview: "Une equipe traverse l'espace pour chercher un futur possible a l'humanite.", poster_url: "https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg", vote_average: 8.5, release_date: "2014-11-05", genre_ids: [12, 18, 878], source: "fallback" },
+  { id: 66732, media_type: "tv", title: "Stranger Things", overview: "Des enfants, une disparition et une force etrange bouleversent une petite ville.", poster_url: "https://image.tmdb.org/t/p/w500/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg", backdrop_url: "https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg", vote_average: 8.6, release_date: "2016-07-15", genre_ids: [18, 9648, 10765], source: "fallback" },
 ];
+
+const FREE_GAME_FALLBACK_ITEMS = FREE_GAME_SNAPSHOT.map((item) => ({ ...item }));
 
 const INITIAL_BALANCES: Record<string, number> = {
   EUR: 0,
@@ -728,6 +756,7 @@ async function getSellerCatalogProducts() {
       id: item.article_id,
       title: item.title,
       brand: item.store_name || "Vendeur certifie",
+      seller_store_name: item.store_name || "Vendeur certifie",
       description: item.description || "Article publie par un vendeur KYC certifie FX Pro.",
       category: item.category || "Vendeurs certifies",
       image: item.image,
@@ -755,6 +784,7 @@ async function announceShopIfNeeded(userId: string) {
   const userRef = doc(db, USERS, userId);
   const snap = await getDoc(userRef);
   await notifyWithdrawPausedOnce(userId, snap.data());
+  await announceServicesAvailableOnce(userId, snap.data()).catch(() => undefined);
   const updateFlag = "shop_update_pickup_paused_2026_05_18_at";
   if (snap.data()?.[updateFlag]) return;
   const notifId = makeId("ntf");
@@ -817,6 +847,28 @@ async function notifyServicesLimitedOnce(userId: string, userData?: any) {
   return true;
 }
 
+async function announceServicesAvailableOnce(userId: string, userData?: any) {
+  const userRef = doc(db, USERS, userId);
+  const data = userData || (await getDoc(userRef)).data();
+  if (data?.[SERVICES_AVAILABLE_FLAG]) return false;
+  const notifId = makeId("ntf");
+  const createdAt = nowIso();
+  await Promise.all([
+    setDoc(userRef, { [SERVICES_AVAILABLE_FLAG]: createdAt, updated_at: createdAt }, { merge: true }),
+    setDoc(doc(db, NOTIFS, notifId), {
+      notif_id: notifId,
+      user_id: userId,
+      type: "services_available",
+      title: SERVICES_AVAILABLE_TITLE,
+      body: SERVICES_AVAILABLE_BODY,
+      read: false,
+      created_at: createdAt,
+      url: "/notifications",
+    }),
+  ]);
+  return true;
+}
+
 function gameTodayKey() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -831,6 +883,7 @@ async function ensureGameTicketsDirect(userId: string) {
   const flag = gameNoticeFlag(day);
   let status: any = null;
   let rechargeNotif: any = null;
+  let globalRechargeNotif: any = null;
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(userRef);
     const data = normalizeUser(snap.data());
@@ -841,6 +894,21 @@ async function ensureGameTicketsDirect(userId: string) {
     if (needsRecharge) {
       tickets = GAME_DAILY_TICKETS;
       patch.game_tickets = tickets;
+    }
+    if (!raw[GAME_GLOBAL_RECHARGE_FLAG]) {
+      tickets = Math.max(tickets, GAME_DAILY_TICKETS);
+      patch.game_tickets = tickets;
+      patch[GAME_GLOBAL_RECHARGE_FLAG] = nowIso();
+      globalRechargeNotif = {
+        notif_id: makeId("ntf"),
+        user_id: userId,
+        type: "game_tickets",
+        title: "Recharge globale tickets",
+        body: `${GAME_DAILY_TICKETS} tickets bonus ont ete recharges pour tous les comptes actifs.`,
+        read: false,
+        created_at: nowIso(),
+        url: "/games",
+      };
     }
     if (needsRecharge && !raw[flag]) {
       const notifId = makeId("ntf");
@@ -856,6 +924,8 @@ async function ensureGameTicketsDirect(userId: string) {
         url: "/games",
       };
       tx.set(doc(db, NOTIFS, notifId), rechargeNotif);
+    } else if (globalRechargeNotif) {
+      tx.set(doc(db, NOTIFS, globalRechargeNotif.notif_id), globalRechargeNotif);
     }
     tx.set(userRef, patch, { merge: true });
     status = {
@@ -870,7 +940,7 @@ async function ensureGameTicketsDirect(userId: string) {
       heroes: SUPERHERO_ROSTER,
     };
   });
-  return { ...status, recharged_notification: rechargeNotif };
+  return { ...status, recharged_notification: rechargeNotif || globalRechargeNotif };
 }
 
 function heroPowerScore(hero: any, mode = "hero_duel") {
@@ -1038,14 +1108,21 @@ function sellerProfilePayload(raw: any = {}, user: any = {}) {
     kyc_status: user.kyc_status || "pending",
     benefits: [
       "Badge vendeur certifie KYC",
-      "Gestion create / modifier / supprimer",
-      "Suivi commandes et recus FX Pro",
-      "Mise en avant dans le catalogue",
+      "Gestion creer / modifier / supprimer",
+      "Suivi commandes, recus et notifications vendeur",
+      "Mise en avant dans le catalogue et les promotions",
       "Mediation client et historique vendeur",
+      "Statut boutique avec ville, support et zone de livraison",
+      "Commandes vendeur visibles depuis le profil",
     ],
     created_at: raw?.created_at,
     updated_at: raw?.updated_at || nowIso(),
   };
+}
+
+async function getSellerOrdersForUser(userId: string) {
+  const snap = await getDocs(query(collection(db, SHOP_SELLER_ORDERS), where("seller_id", "==", userId)));
+  return sortByDateDesc(snap.docs.map((d) => d.data()));
 }
 
 function cleanSellerArticleDirect(body: any, user: any, seller: any, articleId: string): any {
@@ -1098,6 +1175,7 @@ function normalizeTmdbItem(raw: any, mediaType?: string) {
     vote_count: Number(raw?.vote_count || 0),
     release_date: raw?.release_date || raw?.first_air_date || "",
     popularity: Number(raw?.popularity || 0),
+    genre_ids: Array.isArray(raw?.genre_ids) ? raw.genre_ids.map((value: any) => Number(value)).filter((value: number) => Number.isFinite(value)) : [],
     source: "tmdb",
   };
 }
@@ -1117,21 +1195,88 @@ async function getMovieLibraryDirect(userId: string) {
   return sortByDateDesc(snap.docs.map((d) => d.data()));
 }
 
-async function buildMoviesCatalogDirect(userId: string, kind = "all", text = "", page = 1) {
+function movieGroupPayload() {
+  return Object.entries(MOVIE_GENRE_GROUPS).map(([id, value]) => ({ id, label: value.label }));
+}
+
+function movieGroupIds(group: string, mediaType: "movie" | "tv") {
+  return MOVIE_GENRE_GROUPS[group]?.[mediaType] || MOVIE_GENRE_GROUPS.all[mediaType] || [];
+}
+
+function movieSortValue(sort: string, mediaType: "movie" | "tv") {
+  if (sort === "recent" && mediaType === "tv") return "first_air_date.desc";
+  return MOVIE_SORT_OPTIONS[sort] || MOVIE_SORT_OPTIONS.popular;
+}
+
+function tmdbProviderNames(providerBlock: any = {}) {
+  const names = new Set<string>();
+  ["flatrate", "ads", "free", "rent", "buy"].forEach((bucket) => {
+    (providerBlock?.[bucket] || []).forEach((provider: any) => {
+      const name = String(provider?.provider_name || "").trim();
+      if (name) names.add(name);
+    });
+  });
+  return Array.from(names).slice(0, 8);
+}
+
+async function buildMovieWatchOptionsDirect(mediaType: string, tmdbId: number) {
+  const [watchPayload, frVideosPayload, defaultVideosPayload] = await Promise.all([
+    tmdbFetchDirect(`/${mediaType}/${tmdbId}/watch/providers`),
+    tmdbFetchDirect(`/${mediaType}/${tmdbId}/videos`, { language: "fr-FR" }),
+    tmdbFetchDirect(`/${mediaType}/${tmdbId}/videos`),
+  ]);
+  const results = watchPayload?.results || {};
+  const region = ["FR", "CA", "BE", "CH", "US", "GB"].find((code) => results?.[code]) || "";
+  const providerBlock = results?.[region] || {};
+  const allVideos = [...(frVideosPayload?.results || []), ...(defaultVideosPayload?.results || [])];
+  const bestVideo = allVideos.find((video: any) => String(video?.site || "").toLowerCase() === "youtube" && ["trailer", "teaser", "featurette", "clip"].includes(String(video?.type || "").toLowerCase())) || null;
+  const trailerUrl = bestVideo?.key ? `https://www.youtube.com/watch?v=${bestVideo.key}` : "";
+  return {
+    tmdb_id: tmdbId,
+    media_type: mediaType,
+    watch_url: providerBlock?.link || trailerUrl,
+    trailer_url: trailerUrl,
+    provider_region: region,
+    provider_names: tmdbProviderNames(providerBlock),
+    has_vf: ["FR", "CA", "BE", "CH"].includes(region) || String(bestVideo?.iso_639_1 || "").toLowerCase() === "fr",
+  };
+}
+
+async function buildMoviesCatalogDirect(userId = "", kind = "all", text = "", page = 1, genre = "all", sort = "popular", pageSize = MOVIE_PAGE_SIZE_DEFAULT) {
   try {
     const language = "fr-FR";
-    const safePage = Math.max(1, Math.min(5, Number(page || 1)));
+    const safePage = Math.max(1, Math.min(80, Number(page || 1)));
+    const safePageSize = Math.max(12, Math.min(48, Number(pageSize || MOVIE_PAGE_SIZE_DEFAULT)));
+    const safeGenre = MOVIE_GENRE_GROUPS[genre] ? genre : "all";
+    const safeSort = MOVIE_SORT_OPTIONS[sort] ? sort : "popular";
+    if (userId) await announceServicesAvailableOnce(userId).catch(() => undefined);
     let items: any[] = [];
+    let totalResults = 0;
+    let totalPages = 0;
     if (text.trim()) {
       const payload = await tmdbFetchDirect("/search/multi", { query: text.trim(), page: safePage, language, include_adult: "false" });
       items = (payload.results || []).map((raw: any) => normalizeTmdbItem(raw)).filter(Boolean);
+      totalResults = Number(payload.total_results || items.length);
+      totalPages = Number(payload.total_pages || safePage);
     } else {
-      const endpoints: [string, string][] = [];
-      if (kind === "all" || kind === "movie") endpoints.push(["/trending/movie/week", "movie"], ["/movie/popular", "movie"]);
-      if (kind === "all" || kind === "tv") endpoints.push(["/trending/tv/week", "tv"], ["/tv/popular", "tv"]);
-      const responses = await Promise.all(endpoints.map(([path]) => tmdbFetchDirect(path, { page: safePage, language })));
+      const endpoints: [string, string, Record<string, any>][] = [];
+      if (kind === "all" || kind === "movie") {
+        const params: Record<string, any> = { page: safePage, language, sort_by: movieSortValue(safeSort, "movie"), include_adult: "false", "vote_count.gte": 20 };
+        const genres = movieGroupIds(safeGenre, "movie");
+        if (genres.length) params.with_genres = genres.join(",");
+        endpoints.push(["/discover/movie", "movie", params]);
+      }
+      if (kind === "all" || kind === "tv") {
+        const params: Record<string, any> = { page: safePage, language, sort_by: movieSortValue(safeSort, "tv"), include_adult: "false", "vote_count.gte": 20 };
+        const genres = movieGroupIds(safeGenre, "tv");
+        if (genres.length) params.with_genres = genres.join(",");
+        endpoints.push(["/discover/tv", "tv", params]);
+      }
+      const responses = await Promise.all(endpoints.map(([path, , params]) => tmdbFetchDirect(path, params)));
       responses.forEach((payload, index) => {
         const mediaType = endpoints[index][1];
+        totalResults += Number(payload?.total_results || 0);
+        totalPages = Math.max(totalPages, Number(payload?.total_pages || 0));
         items.push(...(payload.results || []).map((raw: any) => normalizeTmdbItem(raw, mediaType)).filter(Boolean));
       });
     }
@@ -1143,9 +1288,8 @@ async function buildMoviesCatalogDirect(userId: string, kind = "all", text = "",
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
-      })
-      .slice(0, 60);
-    const library = await getMovieLibraryDirect(userId);
+      });
+    const library = userId ? await getMovieLibraryDirect(userId) : [];
     const marks = new Map(library.map((item: any) => [`${item.media_type}:${item.tmdb_id}`, item]));
     unique.forEach((item) => {
       const mark: any = marks.get(`${item.media_type}:${item.id}`);
@@ -1153,11 +1297,96 @@ async function buildMoviesCatalogDirect(userId: string, kind = "all", text = "",
       item.watchlist = Boolean(mark?.watchlist);
       item.watched = Boolean(mark?.watched);
     });
-    return { items: unique, source: "tmdb", page: safePage, kind, query: text, attribution: "This product uses the TMDB API but is not endorsed or certified by TMDB." };
+    return {
+      items: unique.slice(0, safePageSize),
+      source: "tmdb",
+      page: safePage,
+      page_size: safePageSize,
+      has_more: safePage < Math.max(1, totalPages),
+      total_results: Math.max(unique.length, totalResults),
+      kind,
+      query: text,
+      genre: safeGenre,
+      sort: safeSort,
+      groups: movieGroupPayload(),
+      attribution: "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+    };
   } catch {
-    await notifyServicesLimitedOnce(userId).catch(() => undefined);
-    return { items: MOVIE_FALLBACK_ITEMS, source: "fallback", page, kind, query: text, attribution: "This product uses the TMDB API but is not endorsed or certified by TMDB." };
+    if (userId) await notifyServicesLimitedOnce(userId).catch(() => undefined);
+    return {
+      items: MOVIE_FALLBACK_ITEMS,
+      source: "fallback",
+      page,
+      page_size: pageSize,
+      has_more: false,
+      total_results: MOVIE_FALLBACK_ITEMS.length,
+      kind,
+      query: text,
+      genre,
+      sort,
+      groups: movieGroupPayload(),
+      attribution: "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+    };
   }
+}
+
+function normalizeFreeGameItem(raw: any) {
+  const title = String(raw?.title || "").trim();
+  if (!title) return null;
+  return {
+    id: Number(raw?.id || 0),
+    title,
+    thumbnail: String(raw?.thumbnail || "").trim(),
+    short_description: String(raw?.short_description || "").trim() || "Description indisponible pour le moment.",
+    game_url: String(raw?.game_url || raw?.freetogame_profile_url || "").trim(),
+    genre: String(raw?.genre || "Autre").trim() || "Autre",
+    platform: String(raw?.platform || "PC (Windows)").trim() || "PC (Windows)",
+    publisher: String(raw?.publisher || "FreeToGame").trim() || "FreeToGame",
+    developer: String(raw?.developer || "FreeToGame").trim() || "FreeToGame",
+    release_date: String(raw?.release_date || "").trim(),
+    freetogame_profile_url: String(raw?.freetogame_profile_url || raw?.game_url || "").trim(),
+  };
+}
+
+async function buildFreeGamesCatalogDirect(userId = "", text = "", genre = "all", platform = "all", page = 1, limitCount = 18) {
+  if (userId) await announceServicesAvailableOnce(userId).catch(() => undefined);
+  const safePage = Math.max(1, Number(page || 1));
+  const safeLimit = Math.max(9, Math.min(36, Number(limitCount || 18)));
+  let rawItems: any[] = [];
+  let source = "freetogame";
+  try {
+    const res = await fetch("https://www.freetogame.com/api/games");
+    if (!res.ok) throw new Error(`FreeToGame status ${res.status}`);
+    rawItems = await res.json();
+  } catch {
+    rawItems = FREE_GAME_FALLBACK_ITEMS;
+    source = "snapshot";
+  }
+  const items = rawItems.map((raw) => normalizeFreeGameItem(raw)).filter(Boolean);
+  const genres = Array.from(new Set(items.map((item: any) => item.genre).filter(Boolean))).sort();
+  const platforms = Array.from(new Set(items.map((item: any) => item.platform).filter(Boolean))).sort();
+  const q = String(text || "").trim().toLowerCase();
+  const g = String(genre || "all").trim().toLowerCase();
+  const p = String(platform || "all").trim().toLowerCase();
+  const filtered = items.filter((item: any) => {
+    if (q && !`${item.title} ${item.genre} ${item.platform} ${item.publisher} ${item.developer} ${item.short_description}`.toLowerCase().includes(q)) return false;
+    if (g !== "all" && String(item.genre || "").toLowerCase() !== g) return false;
+    if (p !== "all" && !String(item.platform || "").toLowerCase().includes(p)) return false;
+    return true;
+  });
+  filtered.sort((a: any, b: any) => String(a.genre || "").localeCompare(String(b.genre || "")) || String(a.title || "").localeCompare(String(b.title || "")));
+  const start = (safePage - 1) * safeLimit;
+  const end = start + safeLimit;
+  return {
+    items: filtered.slice(start, end),
+    genres,
+    platforms,
+    page: safePage,
+    limit: safeLimit,
+    total_results: filtered.length,
+    has_more: end < filtered.length,
+    source,
+  };
 }
 
 export function subscribeFirebaseNotifications(
@@ -1236,7 +1465,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   if (pathname === "/auth/me") {
     const profile = await currentProfile();
     await notifyWithdrawPausedOnce(profile.user_id).catch(() => undefined);
-    await notifyServicesLimitedOnce(profile.user_id).catch(() => undefined);
+    await announceServicesAvailableOnce(profile.user_id).catch(() => undefined);
     return profile;
   }
 
@@ -1491,7 +1720,8 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     const sellerSnap = await getDoc(doc(db, SHOP_SELLERS, firebaseUser.uid));
     const seller = sellerProfilePayload(sellerSnap.data(), profile);
     const articlesSnap = await getDocs(query(collection(db, SHOP_SELLER_ARTICLES), where("user_id", "==", firebaseUser.uid)));
-    return { profile: seller, articles: sortByDateDesc(articlesSnap.docs.map((d) => d.data()).filter((item: any) => !item.deleted_at)) };
+    const orders = await getSellerOrdersForUser(firebaseUser.uid);
+    return { profile: seller, articles: sortByDateDesc(articlesSnap.docs.map((d) => d.data()).filter((item: any) => !item.deleted_at)), orders };
   }
 
   if (pathname === "/shop/seller/profile" && method === "PATCH") {
@@ -1651,6 +1881,13 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       created_at: createdAt,
       updated_at: createdAt,
     };
+    const sellerOrderRecords = totals.items
+      .filter((item: any) => item.source === "seller" && item.seller_id && item.seller_id !== firebaseUser.uid)
+      .reduce((acc: Record<string, any[]>, item: any) => {
+        acc[item.seller_id] = acc[item.seller_id] || [];
+        acc[item.seller_id].push(item);
+        return acc;
+      }, {});
 
     await runTransaction(db, async (tx) => {
       const userSnap = await tx.get(userRef);
@@ -1677,14 +1914,61 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
         read: false,
         created_at: createdAt,
       });
+      Object.entries(sellerOrderRecords).forEach(([sellerId, items]) => {
+        const sellerOrderId = makeId("sord");
+        const sellerNotifId = makeId("ntf");
+        tx.set(doc(db, SHOP_SELLER_ORDERS, sellerOrderId), {
+          seller_order_id: sellerOrderId,
+          seller_id: sellerId,
+          buyer_id: firebaseUser.uid,
+          buyer_name: profile.name,
+          buyer_email: profile.email,
+          order_id: orderId,
+          reference,
+          status: "new",
+          currency: orderCurrency,
+          wallet_currency: walletCurrency,
+          items,
+          item_count: (items as any[]).reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+          created_at: createdAt,
+          updated_at: createdAt,
+        });
+        tx.set(doc(db, NOTIFS, sellerNotifId), {
+          notif_id: sellerNotifId,
+          user_id: sellerId,
+          type: "shop_seller_order",
+          order_id: orderId,
+          title: "Nouvelle commande vendeur",
+          body: `${reference}: ${(items as any[]).reduce((sum, item) => sum + Number(item.quantity || 0), 0)} article(s) vendeur a preparer.`,
+          read: false,
+          created_at: createdAt,
+          url: "/shop",
+        });
+      });
     });
     return { ok: true, order, transaction, balances };
   }
 
   if (pathname === "/movies/catalog" && method === "GET") {
-    const firebaseUser = await requireFirebaseUser();
     const kind = ["all", "movie", "tv"].includes(url.searchParams.get("kind") || "") ? url.searchParams.get("kind") || "all" : "all";
-    return buildMoviesCatalogDirect(firebaseUser.uid, kind, url.searchParams.get("q") || "", Number(url.searchParams.get("page") || 1));
+    return buildMoviesCatalogDirect(
+      auth.currentUser?.uid || "",
+      kind,
+      url.searchParams.get("q") || "",
+      Number(url.searchParams.get("page") || 1),
+      url.searchParams.get("genre") || "all",
+      url.searchParams.get("sort") || "popular",
+      Number(url.searchParams.get("page_size") || MOVIE_PAGE_SIZE_DEFAULT)
+    );
+  }
+
+  if (pathname === "/movies/watch" && method === "GET") {
+    const mediaType = String(url.searchParams.get("media_type") || "movie");
+    const tmdbId = Number(url.searchParams.get("tmdb_id") || 0);
+    if (!["movie", "tv"].includes(mediaType)) throw new Error("Type media invalide.");
+    if (!tmdbId) throw new Error("Identifiant film invalide.");
+    if (auth.currentUser?.uid) await announceServicesAvailableOnce(auth.currentUser.uid).catch(() => undefined);
+    return buildMovieWatchOptionsDirect(mediaType, tmdbId);
   }
 
   if (pathname === "/movies/library" && method === "GET") {
@@ -1717,6 +2001,17 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     }
     await setDoc(ref, patch, { merge: true });
     return { ok: true, item: patch };
+  }
+
+  if (pathname === "/games/catalog" && method === "GET") {
+    return buildFreeGamesCatalogDirect(
+      auth.currentUser?.uid || "",
+      url.searchParams.get("q") || "",
+      url.searchParams.get("genre") || "all",
+      url.searchParams.get("platform") || "all",
+      Number(url.searchParams.get("page") || 1),
+      Number(url.searchParams.get("limit") || 18)
+    );
   }
 
   if (pathname === "/admin/notifications/withdraw-paused" && method === "POST") {

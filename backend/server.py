@@ -47,7 +47,7 @@ FALLBACK_RATES = {
 }
 APILAYER_SHOP_KEY = os.environ.get("APILAYER_SHOP_KEY") or os.environ.get("EXPO_PUBLIC_APILAYER_KEY", "")
 TMDB_READ_TOKEN = os.environ.get("TMDB_READ_TOKEN", "").strip()
-TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "").strip()
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "4300217e16dba490da871af16163cedb").strip()
 TMDB_API_BASE = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p"
 SHOP_PICKUP_AVAILABLE = False
@@ -71,8 +71,15 @@ SERVICES_LIMITED_NOTICE_BODY = (
     "Certains services externes peuvent etre indisponibles pendant la mise a jour. "
     "Le solde, les recus, la boutique suivie, les jeux avec tickets et les notifications restent proteges."
 )
+SERVICES_AVAILABLE_FLAG = "services_available_notice_2026_05_19_at"
+SERVICES_AVAILABLE_TITLE = "Services FX Pro disponibles"
+SERVICES_AVAILABLE_BODY = (
+    "La vente en ligne, le catalogue films et series, les jeux a tickets et les notifications vendeur sont disponibles. "
+    "Ouvre la boutique, les films ou les jeux pour profiter des nouveaux services."
+)
 GAME_DAILY_TICKETS = 5
 GAME_TICKET_NOTICE_PREFIX = "game_tickets_recharged_notice_"
+GAME_GLOBAL_RECHARGE_FLAG = "game_global_recharge_2026_05_19_at"
 GAME_CONFIG = {
     "scratch": {"name": "Carte Neon", "win_chance": 0.34, "min_prize": 80, "max_prize": 750},
     "vault": {"name": "Coffre Flash", "win_chance": 0.26, "min_prize": 150, "max_prize": 1400},
@@ -82,6 +89,25 @@ GAME_CONFIG = {
     "speed_run": {"name": "Speed Run", "win_chance": 0.44, "min_prize": 60, "max_prize": 620, "mode": "hero"},
 }
 MAX_SHOP_PRODUCTS = 1400
+MOVIE_PAGE_SIZE_DEFAULT = 24
+MOVIE_GENRE_GROUPS = {
+    "all": {"label": "Tout", "movie": [], "tv": []},
+    "action": {"label": "Action", "movie": [28], "tv": [10759]},
+    "adventure": {"label": "Aventure", "movie": [12], "tv": [10759]},
+    "comedy": {"label": "Comedie", "movie": [35], "tv": [35]},
+    "drama": {"label": "Drame", "movie": [18], "tv": [18]},
+    "scifi": {"label": "Science-fiction", "movie": [878], "tv": [10765]},
+    "animation": {"label": "Animation", "movie": [16], "tv": [16]},
+    "crime": {"label": "Crime", "movie": [80], "tv": [80]},
+    "documentary": {"label": "Documentaire", "movie": [99], "tv": [99]},
+    "family": {"label": "Famille", "movie": [10751], "tv": [10751]},
+    "horror": {"label": "Horreur", "movie": [27], "tv": [9648]},
+}
+MOVIE_SORT_OPTIONS = {
+    "popular": "popularity.desc",
+    "rating": "vote_average.desc",
+    "recent": "primary_release_date.desc",
+}
 SHOP_FALLBACK_PRODUCTS = [
     {"id": "fxp_earbuds_pro", "title": "Ecouteurs Bluetooth Pro", "brand": "FX Select", "description": "Audio clair, boitier compact, autonomie longue duree et retrait disponible en agence partenaire.", "category": "Tech", "image": "https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 79.0, "rating": 4.8, "stock": 18, "tags": ["Audio", "Mobile", "Premium"], "source": "fallback"},
     {"id": "fxp_watch_core", "title": "Montre connectee Core", "brand": "FX Select", "description": "Suivi activite, notifications, autonomie solide et design discret pour usage quotidien.", "category": "Tech", "image": "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80", "base_currency": "USD", "base_price": 129.0, "rating": 4.7, "stock": 12, "tags": ["Wearable", "Sport", "Mobile"], "source": "fallback"},
@@ -125,10 +151,25 @@ SUPERHERO_ROSTER = [
 ]
 
 MOVIE_FALLBACK_ITEMS = [
-    {"id": 550, "media_type": "movie", "title": "Fight Club", "overview": "Un employe insomniaque decouvre un cercle clandestin qui change sa vision du controle et de la consommation.", "poster_url": "https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/hZkgoQYus5vegHoetLkCJzb17zJ.jpg", "vote_average": 8.4, "release_date": "1999-10-15", "source": "fallback"},
-    {"id": 1399, "media_type": "tv", "title": "Game of Thrones", "overview": "Des familles nobles luttent pour le pouvoir pendant qu'une menace ancienne grandit au-dela du mur.", "poster_url": "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/suopoADq0k8YZr4dQXcU6pToj6s.jpg", "vote_average": 8.5, "release_date": "2011-04-17", "source": "fallback"},
-    {"id": 157336, "media_type": "movie", "title": "Interstellar", "overview": "Une equipe traverse l'espace pour chercher un futur possible a l'humanite.", "poster_url": "https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg", "vote_average": 8.5, "release_date": "2014-11-05", "source": "fallback"},
-    {"id": 66732, "media_type": "tv", "title": "Stranger Things", "overview": "Des enfants, une disparition et une force etrange bouleversent une petite ville.", "poster_url": "https://image.tmdb.org/t/p/w500/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg", "vote_average": 8.6, "release_date": "2016-07-15", "source": "fallback"},
+    {"id": 550, "media_type": "movie", "title": "Fight Club", "overview": "Un employe insomniaque decouvre un cercle clandestin qui change sa vision du controle et de la consommation.", "poster_url": "https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/hZkgoQYus5vegHoetLkCJzb17zJ.jpg", "vote_average": 8.4, "release_date": "1999-10-15", "genre_ids": [18], "source": "fallback"},
+    {"id": 1399, "media_type": "tv", "title": "Game of Thrones", "overview": "Des familles nobles luttent pour le pouvoir pendant qu'une menace ancienne grandit au-dela du mur.", "poster_url": "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/suopoADq0k8YZr4dQXcU6pToj6s.jpg", "vote_average": 8.5, "release_date": "2011-04-17", "genre_ids": [10759, 18], "source": "fallback"},
+    {"id": 157336, "media_type": "movie", "title": "Interstellar", "overview": "Une equipe traverse l'espace pour chercher un futur possible a l'humanite.", "poster_url": "https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg", "vote_average": 8.5, "release_date": "2014-11-05", "genre_ids": [12, 18, 878], "source": "fallback"},
+    {"id": 66732, "media_type": "tv", "title": "Stranger Things", "overview": "Des enfants, une disparition et une force etrange bouleversent une petite ville.", "poster_url": "https://image.tmdb.org/t/p/w500/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg", "backdrop_url": "https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg", "vote_average": 8.6, "release_date": "2016-07-15", "genre_ids": [18, 9648, 10765], "source": "fallback"},
+]
+
+FREE_GAME_FALLBACK_ITEMS = [
+    {"id": 540, "title": "Overwatch", "thumbnail": "https://www.freetogame.com/g/540/thumbnail.jpg", "short_description": "A hero-focused first-person team shooter from Blizzard Entertainment.", "game_url": "https://www.freetogame.com/open/overwatch", "genre": "Shooter", "platform": "PC (Windows)", "publisher": "Activision Blizzard", "developer": "Blizzard Entertainment", "release_date": "2022-10-04", "freetogame_profile_url": "https://www.freetogame.com/overwatch"},
+    {"id": 516, "title": "PUBG: BATTLEGROUNDS", "thumbnail": "https://www.freetogame.com/g/516/thumbnail.jpg", "short_description": "Get into the action in one of the longest running battle royale games PUBG Battlegrounds.", "game_url": "https://www.freetogame.com/open/pubg", "genre": "Shooter", "platform": "PC (Windows)", "publisher": "KRAFTON, Inc.", "developer": "KRAFTON, Inc.", "release_date": "2022-01-12", "freetogame_profile_url": "https://www.freetogame.com/pubg"},
+    {"id": 523, "title": "Fall Guys", "thumbnail": "https://www.freetogame.com/g/523/thumbnail.jpg", "short_description": "Play the massively multiplayer party royale game featuring beans for free on many platforms.", "game_url": "https://www.freetogame.com/open/fall-guys", "genre": "Battle Royale", "platform": "PC (Windows)", "publisher": "Mediatonic", "developer": "Mediatonic", "release_date": "2020-08-04", "freetogame_profile_url": "https://www.freetogame.com/fall-guys"},
+    {"id": 475, "title": "Genshin Impact", "thumbnail": "https://www.freetogame.com/g/475/thumbnail.jpg", "short_description": "An open-world action RPG adventure with exploration and elemental combat.", "game_url": "https://www.freetogame.com/open/genshin-impact", "genre": "Action RPG", "platform": "PC (Windows)", "publisher": "miHoYo", "developer": "miHoYo", "release_date": "2020-09-28", "freetogame_profile_url": "https://www.freetogame.com/genshin-impact"},
+    {"id": 466, "title": "Valorant", "thumbnail": "https://www.freetogame.com/g/466/thumbnail.jpg", "short_description": "Test your mettle in Riot Games character-based tactical FPS shooter.", "game_url": "https://www.freetogame.com/open/valorant", "genre": "Shooter", "platform": "PC (Windows)", "publisher": "Riot Games", "developer": "Riot Games", "release_date": "2020-06-02", "freetogame_profile_url": "https://www.freetogame.com/valorant"},
+    {"id": 452, "title": "Call of Duty: Warzone", "thumbnail": "https://www.freetogame.com/g/452/thumbnail.jpg", "short_description": "A standalone free-to-play battle royale and multiplayer action experience.", "game_url": "https://www.freetogame.com/open/call-of-duty-warzone", "genre": "Shooter", "platform": "PC (Windows)", "publisher": "Activision", "developer": "Infinity Ward", "release_date": "2020-03-10", "freetogame_profile_url": "https://www.freetogame.com/call-of-duty-warzone"},
+    {"id": 57, "title": "Fortnite", "thumbnail": "https://www.freetogame.com/g/57/thumbnail.jpg", "short_description": "A free-to-play battle royale from Epic Games.", "game_url": "https://www.freetogame.com/open/fortnite-battle-royale", "genre": "Shooter", "platform": "PC (Windows)", "publisher": "Epic Games", "developer": "Epic Games", "release_date": "2017-09-26", "freetogame_profile_url": "https://www.freetogame.com/fortnite-battle-royale"},
+    {"id": 345, "title": "Forge of Empires", "thumbnail": "https://www.freetogame.com/g/345/thumbnail.jpg", "short_description": "A browser-based online strategy game where you build your city through the ages.", "game_url": "https://www.freetogame.com/open/forge-of-empires", "genre": "Strategy", "platform": "Web Browser", "publisher": "InnoGames", "developer": "InnoGames", "release_date": "2012-04-17", "freetogame_profile_url": "https://www.freetogame.com/forge-of-empires"},
+    {"id": 13, "title": "Guild Wars 2", "thumbnail": "https://www.freetogame.com/g/13/thumbnail.jpg", "short_description": "A free-to-play MMORPG with a huge world and cooperative adventures.", "game_url": "https://www.freetogame.com/open/guild-wars-2", "genre": "MMORPG", "platform": "PC (Windows)", "publisher": "NCsoft", "developer": "ArenaNet", "release_date": "2012-08-28", "freetogame_profile_url": "https://www.freetogame.com/guild-wars-2"},
+    {"id": 3, "title": "Warframe", "thumbnail": "https://www.freetogame.com/g/3/thumbnail.jpg", "short_description": "A cooperative sci-fi action shooter with a huge evolving universe.", "game_url": "https://www.freetogame.com/open/warframe", "genre": "Shooter", "platform": "PC (Windows)", "publisher": "Digital Extremes", "developer": "Digital Extremes", "release_date": "2013-03-25", "freetogame_profile_url": "https://www.freetogame.com/warframe"},
+    {"id": 229, "title": "Dota 2", "thumbnail": "https://www.freetogame.com/g/229/thumbnail.jpg", "short_description": "Valve's premiere competitive free-to-play MOBA.", "game_url": "https://www.freetogame.com/open/dota-2", "genre": "MOBA", "platform": "PC (Windows)", "publisher": "Valve", "developer": "Valve", "release_date": "2013-07-09", "freetogame_profile_url": "https://www.freetogame.com/dota-2"},
+    {"id": 286, "title": "League of Legends", "thumbnail": "https://www.freetogame.com/g/286/thumbnail.jpg", "short_description": "One of the most played competitive MOBAs on PC.", "game_url": "https://www.freetogame.com/open/league-of-legends", "genre": "MOBA", "platform": "PC (Windows)", "publisher": "Riot Games", "developer": "Riot Games", "release_date": "2009-10-27", "freetogame_profile_url": "https://www.freetogame.com/league-of-legends"},
 ]
 
 BONUS_MIN_WINDOW_DAYS = 7
@@ -523,6 +564,15 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
+async def get_current_user_optional(authorization: Optional[str] = Header(None)) -> Optional[dict]:
+    if not authorization:
+        return None
+    try:
+        return await get_current_user(authorization)
+    except HTTPException:
+        return None
+
+
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
@@ -612,6 +662,29 @@ async def notify_services_limited_once(user_id: str) -> bool:
     return True
 
 
+async def announce_services_available_once(user_id: str) -> bool:
+    created_at = now_utc()
+    updated = await db.users.update_one(
+        {"user_id": user_id, SERVICES_AVAILABLE_FLAG: {"$exists": False}},
+        {"$set": {SERVICES_AVAILABLE_FLAG: created_at, "updated_at": created_at}},
+    )
+    if updated.modified_count <= 0:
+        return False
+    notif = {
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "type": "services_available",
+        "title": SERVICES_AVAILABLE_TITLE,
+        "body": SERVICES_AVAILABLE_BODY,
+        "read": False,
+        "created_at": created_at,
+        "url": "/notifications",
+    }
+    await db.notifications.insert_one(notif)
+    await send_push_to_user(user_id, notif["title"], notif["body"], None, "services_available", notif["notif_id"])
+    return True
+
+
 def game_today_key() -> str:
     return now_utc().date().isoformat()
 
@@ -629,10 +702,16 @@ async def ensure_game_tickets(user_id: str) -> dict:
     tickets = int(user.get("game_tickets") or 0)
     patch = {"game_ticket_day": day, "updated_at": now_utc()}
     recharged = False
+    global_recharged = False
     if user.get("game_ticket_day") != day:
         tickets = GAME_DAILY_TICKETS
         patch["game_tickets"] = tickets
         recharged = True
+    if not user.get(GAME_GLOBAL_RECHARGE_FLAG):
+        tickets = max(tickets, GAME_DAILY_TICKETS)
+        patch["game_tickets"] = tickets
+        patch[GAME_GLOBAL_RECHARGE_FLAG] = now_utc()
+        global_recharged = True
     if recharged and not user.get(flag):
         patch[flag] = now_utc()
         notif_id = f"ntf_{uuid.uuid4().hex[:10]}"
@@ -647,6 +726,19 @@ async def ensure_game_tickets(user_id: str) -> dict:
             "url": "/games",
         })
         await send_push_to_user(user_id, "Tickets jeux recharges", f"{GAME_DAILY_TICKETS} tickets bonus sont disponibles.", None, "game_tickets", notif_id)
+    elif global_recharged:
+        notif_id = f"ntf_{uuid.uuid4().hex[:10]}"
+        await db.notifications.insert_one({
+            "notif_id": notif_id,
+            "user_id": user_id,
+            "type": "game_tickets",
+            "title": "Recharge globale tickets",
+            "body": f"{GAME_DAILY_TICKETS} tickets bonus ont ete recharges pour tous les comptes actifs.",
+            "read": False,
+            "created_at": now_utc(),
+            "url": "/games",
+        })
+        await send_push_to_user(user_id, "Recharge globale tickets", f"{GAME_DAILY_TICKETS} tickets bonus ont ete ajoutes.", None, "game_tickets", notif_id)
     await db.users.update_one({"user_id": user_id}, {"$set": patch})
     fresh = await find_user_full(user_id) or {}
     return {
@@ -1028,7 +1120,7 @@ async def google_session(data: GoogleSessionIn):
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     await notify_withdraw_paused_once(user["user_id"])
-    await notify_services_limited_once(user["user_id"])
+    await announce_services_available_once(user["user_id"])
     return user
 
 
@@ -1722,6 +1814,7 @@ async def get_seller_catalog_products() -> List[dict]:
             "id": item["article_id"],
             "title": item["title"],
             "brand": item.get("store_name") or "Vendeur certifie",
+            "seller_store_name": item.get("store_name") or "Vendeur certifie",
             "description": item.get("description") or "Article publie par un vendeur KYC certifie FX Pro.",
             "category": item.get("category") or "Vendeurs certifies",
             "image": item.get("image") or SHOP_FALLBACK_PRODUCTS[0]["image"],
@@ -1831,6 +1924,7 @@ async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack"
     )
     if user_id:
         await announce_shop_available(user_id)
+        await announce_services_available_once(user_id)
     generated = build_generated_market_products()
     products = apply_shop_overrides(dedupe_shop_products(seller_products + remote + dummy + free + fake + escuela + SHOP_FALLBACK_PRODUCTS + generated), overrides)[:MAX_SHOP_PRODUCTS]
     product_ids = {p["id"] for p in products}
@@ -1893,6 +1987,9 @@ def calculate_shop_cart(products: List[dict], lines: List[ShopCartLineIn], order
             "brand": product["brand"],
             "image": product["image"],
             "category": product["category"],
+            "source": product.get("source"),
+            "seller_id": product.get("seller_id"),
+            "seller_store_name": product.get("brand"),
             "sku": product.get("sku"),
             "ref": product.get("ref"),
             "quantity": qty,
@@ -1937,13 +2034,19 @@ def seller_public_profile(profile: Optional[dict], user: dict) -> dict:
         "kyc_status": user.get("kyc_status") or "pending",
         "benefits": [
             "Badge vendeur certifie KYC",
-            "Gestion create / modifier / supprimer",
-            "Suivi commandes et recus FX Pro",
-            "Mise en avant dans le catalogue",
+            "Gestion creer / modifier / supprimer",
+            "Suivi commandes, recus et notifications vendeur",
+            "Mise en avant dans le catalogue et les promotions",
             "Mediation client et historique vendeur",
+            "Statut boutique avec ville, support et zone de livraison",
+            "Commandes vendeur visibles depuis le profil",
         ],
         "updated_at": base.get("updated_at") or now_utc(),
     }
+
+
+async def get_seller_orders_feed(user_id: str, limit: int = 40) -> List[dict]:
+    return await db.shop_seller_orders.find({"seller_id": user_id}, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
 
 
 async def require_verified_seller(user: dict) -> dict:
@@ -1992,6 +2095,56 @@ def clean_seller_article(data: SellerArticleIn, user: dict, profile: dict, artic
     }
 
 
+async def fanout_seller_order_notifications(order: dict, buyer: dict) -> List[dict]:
+    seller_groups: Dict[str, List[dict]] = {}
+    for item in order.get("items") or []:
+        seller_id = str(item.get("seller_id") or "").strip()
+        if not seller_id or seller_id == buyer["user_id"] or item.get("source") != "seller":
+            continue
+        seller_groups.setdefault(seller_id, []).append(item)
+    if not seller_groups:
+        return []
+    created_at = now_utc()
+    records = []
+    notifications = []
+    for seller_id, items in seller_groups.items():
+        record = {
+            "seller_order_id": f"sord_{uuid.uuid4().hex[:12]}",
+            "seller_id": seller_id,
+            "buyer_id": buyer["user_id"],
+            "buyer_name": buyer.get("name"),
+            "buyer_email": buyer.get("email"),
+            "order_id": order.get("order_id"),
+            "reference": order.get("reference"),
+            "status": "new",
+            "currency": order.get("currency"),
+            "wallet_currency": order.get("wallet_currency"),
+            "items": items,
+            "item_count": sum(int(item.get("quantity") or 0) for item in items),
+            "created_at": created_at,
+            "updated_at": created_at,
+        }
+        records.append(record)
+        notifications.append({
+            "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+            "user_id": seller_id,
+            "type": "shop_seller_order",
+            "order_id": order.get("order_id"),
+            "title": "Nouvelle commande vendeur",
+            "body": f"{order.get('reference')}: {record['item_count']} article(s) vendeur a preparer.",
+            "read": False,
+            "created_at": created_at,
+            "url": "/shop",
+        })
+    await db.shop_seller_orders.insert_many(records)
+    await db.notifications.insert_many(notifications)
+    await asyncio.gather(*[
+        send_push_to_user(item["user_id"], item["title"], item["body"], order.get("transaction", {}).get("txn_id"), "shop_seller_order", item["notif_id"])
+        for item in notifications
+    ])
+    return records
+
+
 def tmdb_headers() -> Dict[str, str]:
     headers = {"Accept": "application/json"}
     if TMDB_READ_TOKEN:
@@ -2029,6 +2182,7 @@ def normalize_tmdb_item(raw: dict, media_type: Optional[str] = None) -> Optional
         "vote_count": int(raw.get("vote_count") or 0),
         "release_date": release_date,
         "popularity": float(raw.get("popularity") or 0),
+        "genre_ids": [int(genre) for genre in (raw.get("genre_ids") or []) if str(genre).isdigit()],
         "source": "tmdb",
     }
 
@@ -2036,11 +2190,26 @@ def normalize_tmdb_item(raw: dict, media_type: Optional[str] = None) -> Optional
 async def tmdb_get(path: str, params: Optional[dict] = None) -> dict:
     if not TMDB_READ_TOKEN and not TMDB_API_KEY:
         raise RuntimeError("TMDB credentials missing")
-    async with httpx.AsyncClient(timeout=8) as client:
+    async with httpx.AsyncClient(timeout=10) as client:
         response = await client.get(f"{TMDB_API_BASE}{path}", headers=tmdb_headers(), params=tmdb_auth_params(params))
     if response.status_code >= 400:
         raise RuntimeError(f"TMDB status {response.status_code}")
     return response.json()
+
+
+def movie_group_ids(group_key: str, media_type: str) -> List[int]:
+    group = MOVIE_GENRE_GROUPS.get(group_key or "all") or MOVIE_GENRE_GROUPS["all"]
+    return [int(value) for value in group.get(media_type, []) if int(value) > 0]
+
+
+def movie_sort_value(sort_key: str, media_type: str) -> str:
+    if sort_key == "recent" and media_type == "tv":
+        return "first_air_date.desc"
+    return MOVIE_SORT_OPTIONS.get(sort_key, MOVIE_SORT_OPTIONS["popular"])
+
+
+def movie_group_payload() -> List[dict]:
+    return [{"id": key, "label": value["label"]} for key, value in MOVIE_GENRE_GROUPS.items()]
 
 
 async def notify_movie_service_issue(user_id: str) -> None:
@@ -2066,22 +2235,108 @@ async def notify_movie_service_issue(user_id: str) -> None:
     await send_push_to_user(user_id, notif["title"], notif["body"], None, "movies_service", notif["notif_id"])
 
 
-async def build_movies_catalog(user_id: str, kind: str = "all", query: str = "", page: int = 1) -> dict:
-    page = max(1, min(5, int(page or 1)))
+def tmdb_provider_names(payload: dict) -> List[str]:
+    providers = []
+    for bucket in ["flatrate", "ads", "free", "rent", "buy"]:
+        providers.extend(payload.get(bucket) or [])
+    unique = []
+    seen = set()
+    for provider in providers:
+        name = str(provider.get("provider_name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        unique.append(name)
+    return unique[:8]
+
+
+async def build_movie_watch_options(media_type: str, tmdb_id: int) -> dict:
+    watch_payload, fr_videos_payload, default_videos_payload = await asyncio.gather(
+        tmdb_get(f"/{media_type}/{tmdb_id}/watch/providers"),
+        tmdb_get(f"/{media_type}/{tmdb_id}/videos", {"language": "fr-FR"}),
+        tmdb_get(f"/{media_type}/{tmdb_id}/videos"),
+    )
+    results = watch_payload.get("results") or {}
+    chosen_region = next((region for region in ["FR", "CA", "BE", "CH", "US", "GB"] if results.get(region)), "")
+    provider_block = results.get(chosen_region) or {}
+    provider_names = tmdb_provider_names(provider_block)
+    videos = (fr_videos_payload.get("results") or []) + (default_videos_payload.get("results") or [])
+    best_video = None
+    for video in videos:
+        if str(video.get("site") or "").lower() != "youtube":
+            continue
+        if str(video.get("type") or "").lower() not in ["trailer", "teaser", "featurette", "clip"]:
+            continue
+        best_video = video
+        if str(video.get("iso_639_1") or "").lower() == "fr":
+            break
+    trailer_url = f"https://www.youtube.com/watch?v={best_video['key']}" if best_video and best_video.get("key") else ""
+    return {
+        "tmdb_id": tmdb_id,
+        "media_type": media_type,
+        "watch_url": provider_block.get("link") or trailer_url,
+        "trailer_url": trailer_url,
+        "provider_region": chosen_region or "",
+        "provider_names": provider_names,
+        "has_vf": chosen_region in ["FR", "CA", "BE", "CH"] or str((best_video or {}).get("iso_639_1") or "").lower() == "fr",
+    }
+
+
+async def build_movies_catalog(
+    user_id: Optional[str] = None,
+    kind: str = "all",
+    query: str = "",
+    page: int = 1,
+    genre: str = "all",
+    sort: str = "popular",
+    page_size: int = MOVIE_PAGE_SIZE_DEFAULT,
+) -> dict:
+    page = max(1, min(80, int(page or 1)))
+    page_size = max(12, min(48, int(page_size or MOVIE_PAGE_SIZE_DEFAULT)))
     language = "fr-FR"
+    clean_sort = sort if sort in MOVIE_SORT_OPTIONS else "popular"
+    clean_genre = genre if genre in MOVIE_GENRE_GROUPS else "all"
     try:
+        if user_id:
+            await announce_services_available_once(user_id)
         if query.strip():
             payload = await tmdb_get("/search/multi", {"query": query.strip(), "page": page, "language": language, "include_adult": "false"})
             items = [item for item in (normalize_tmdb_item(raw) for raw in payload.get("results", [])) if item]
+            total_results = int(payload.get("total_results") or len(items))
+            total_pages = int(payload.get("total_pages") or page)
         else:
             endpoints = []
             if kind in ["all", "movie"]:
-                endpoints.extend([("/trending/movie/week", "movie"), ("/movie/popular", "movie")])
+                movie_params = {
+                    "page": page,
+                    "language": language,
+                    "sort_by": movie_sort_value(clean_sort, "movie"),
+                    "include_adult": "false",
+                    "vote_count.gte": 20,
+                }
+                movie_genres = movie_group_ids(clean_genre, "movie")
+                if movie_genres:
+                    movie_params["with_genres"] = ",".join(str(value) for value in movie_genres)
+                endpoints.append(("/discover/movie", "movie", movie_params))
             if kind in ["all", "tv"]:
-                endpoints.extend([("/trending/tv/week", "tv"), ("/tv/popular", "tv")])
-            responses = await asyncio.gather(*[tmdb_get(path, {"page": page, "language": language}) for path, _ in endpoints])
+                tv_params = {
+                    "page": page,
+                    "language": language,
+                    "sort_by": movie_sort_value(clean_sort, "tv"),
+                    "include_adult": "false",
+                    "vote_count.gte": 20,
+                }
+                tv_genres = movie_group_ids(clean_genre, "tv")
+                if tv_genres:
+                    tv_params["with_genres"] = ",".join(str(value) for value in tv_genres)
+                endpoints.append(("/discover/tv", "tv", tv_params))
+            responses = await asyncio.gather(*[tmdb_get(path, params) for path, _, params in endpoints])
             items = []
-            for payload, (_, media_type) in zip(responses, endpoints):
+            total_results = 0
+            total_pages = 0
+            for payload, (_, media_type, _) in zip(responses, endpoints):
+                total_results += int(payload.get("total_results") or 0)
+                total_pages = max(total_pages, int(payload.get("total_pages") or 0))
                 items.extend([item for item in (normalize_tmdb_item(raw, media_type) for raw in payload.get("results", [])) if item])
         seen = set()
         unique = []
@@ -2091,18 +2346,124 @@ async def build_movies_catalog(user_id: str, kind: str = "all", query: str = "",
                 continue
             seen.add(key)
             unique.append(item)
-        library = await get_movie_library(user_id)
+        library = await get_movie_library(user_id) if user_id else []
         marks = {f"{item['media_type']}:{item['tmdb_id']}": item for item in library}
         for item in unique:
             mark = marks.get(f"{item['media_type']}:{item['id']}")
             item["favorite"] = bool(mark and mark.get("favorite"))
             item["watchlist"] = bool(mark and mark.get("watchlist"))
             item["watched"] = bool(mark and mark.get("watched"))
-        return {"items": unique[:60], "source": "tmdb", "page": page, "kind": kind, "query": query, "attribution": "This product uses the TMDB API but is not endorsed or certified by TMDB."}
+        return {
+            "items": unique[:page_size],
+            "source": "tmdb",
+            "page": page,
+            "page_size": page_size,
+            "has_more": page < max(1, total_pages),
+            "total_results": max(len(unique), total_results),
+            "kind": kind,
+            "query": query,
+            "genre": clean_genre,
+            "sort": clean_sort,
+            "groups": movie_group_payload(),
+            "attribution": "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+        }
     except Exception as exc:
         logger.warning("TMDB catalog failed: %s", exc)
-        await notify_movie_service_issue(user_id)
-        return {"items": MOVIE_FALLBACK_ITEMS, "source": "fallback", "page": page, "kind": kind, "query": query, "attribution": "This product uses the TMDB API but is not endorsed or certified by TMDB."}
+        if user_id:
+            await notify_movie_service_issue(user_id)
+        return {
+            "items": MOVIE_FALLBACK_ITEMS,
+            "source": "fallback",
+            "page": page,
+            "page_size": page_size,
+            "has_more": False,
+            "total_results": len(MOVIE_FALLBACK_ITEMS),
+            "kind": kind,
+            "query": query,
+            "genre": clean_genre,
+            "sort": clean_sort,
+            "groups": movie_group_payload(),
+            "attribution": "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+        }
+
+
+def normalize_free_game_item(raw: dict) -> Optional[dict]:
+    title = str(raw.get("title") or "").strip()
+    if not title:
+        return None
+    thumbnail = str(raw.get("thumbnail") or "").strip()
+    return {
+        "id": int(raw.get("id") or 0),
+        "title": title,
+        "thumbnail": thumbnail if thumbnail.startswith("http") else "",
+        "short_description": str(raw.get("short_description") or "").strip() or "Description indisponible pour le moment.",
+        "game_url": str(raw.get("game_url") or raw.get("freetogame_profile_url") or "").strip(),
+        "genre": str(raw.get("genre") or "Autre").strip() or "Autre",
+        "platform": str(raw.get("platform") or "PC (Windows)").strip() or "PC (Windows)",
+        "publisher": str(raw.get("publisher") or "FreeToGame").strip() or "FreeToGame",
+        "developer": str(raw.get("developer") or "FreeToGame").strip() or "FreeToGame",
+        "release_date": str(raw.get("release_date") or "").strip(),
+        "freetogame_profile_url": str(raw.get("freetogame_profile_url") or raw.get("game_url") or "").strip(),
+    }
+
+
+async def build_free_games_catalog(
+    user_id: Optional[str] = None,
+    query: str = "",
+    genre: str = "all",
+    platform: str = "all",
+    page: int = 1,
+    limit: int = 18,
+) -> dict:
+    clean_query = query.strip().lower()
+    clean_genre = genre.strip().lower() or "all"
+    clean_platform = platform.strip().lower() or "all"
+    page = max(1, int(page or 1))
+    limit = max(9, min(36, int(limit or 18)))
+    if user_id:
+        await announce_services_available_once(user_id)
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            response = await client.get("https://www.freetogame.com/api/games")
+        response.raise_for_status()
+        raw_items = response.json()
+        source = "freetogame"
+    except Exception as exc:
+        logger.warning("FreeToGame catalog failed: %s", exc)
+        raw_items = FREE_GAME_FALLBACK_ITEMS
+        source = "fallback"
+    items = [item for item in (normalize_free_game_item(raw) for raw in raw_items) if item]
+    genres = sorted({item["genre"] for item in items if item.get("genre")})
+    platforms = sorted({item["platform"] for item in items if item.get("platform")})
+    filtered = []
+    for item in items:
+        if clean_query and clean_query not in " ".join([
+            item["title"],
+            item.get("genre", ""),
+            item.get("platform", ""),
+            item.get("publisher", ""),
+            item.get("developer", ""),
+            item.get("short_description", ""),
+        ]).lower():
+            continue
+        if clean_genre != "all" and item.get("genre", "").lower() != clean_genre:
+            continue
+        if clean_platform != "all" and clean_platform not in item.get("platform", "").lower():
+            continue
+        filtered.append(item)
+    filtered.sort(key=lambda item: (item.get("genre") or "", item.get("title") or ""))
+    start = (page - 1) * limit
+    end = start + limit
+    return {
+        "items": filtered[start:end],
+        "genres": genres,
+        "platforms": platforms,
+        "page": page,
+        "limit": limit,
+        "total_results": len(filtered),
+        "has_more": end < len(filtered),
+        "source": source,
+    }
 
 
 async def get_movie_library(user_id: str) -> List[dict]:
@@ -2612,7 +2973,8 @@ async def shop_seller_profile(user: dict = Depends(get_current_user)):
         {"user_id": user["user_id"], "deleted_at": {"$exists": False}},
         {"_id": 0},
     ).sort("updated_at", -1).limit(100).to_list(100)
-    return {"profile": seller_public_profile(profile, user), "articles": articles}
+    orders = await get_seller_orders_feed(user["user_id"])
+    return {"profile": seller_public_profile(profile, user), "articles": articles, "orders": orders}
 
 
 @api.patch("/shop/seller/profile")
@@ -2669,9 +3031,18 @@ async def delete_seller_article(article_id: str, user: dict = Depends(get_curren
 
 
 @api.get("/movies/catalog")
-async def movies_catalog(kind: str = "all", q: str = "", page: int = 1, user: dict = Depends(get_current_user)):
+async def movies_catalog(kind: str = "all", q: str = "", page: int = 1, genre: str = "all", sort: str = "popular", page_size: int = MOVIE_PAGE_SIZE_DEFAULT, user: Optional[dict] = Depends(get_current_user_optional)):
     clean_kind = kind if kind in ["all", "movie", "tv"] else "all"
-    return await build_movies_catalog(user["user_id"], clean_kind, q, page)
+    return await build_movies_catalog((user or {}).get("user_id"), clean_kind, q, page, genre, sort, page_size)
+
+
+@api.get("/movies/watch")
+async def movies_watch(media_type: str, tmdb_id: int, user: Optional[dict] = Depends(get_current_user_optional)):
+    if media_type not in ["movie", "tv"]:
+        raise HTTPException(status_code=400, detail="Type media invalide")
+    if user:
+        await announce_services_available_once(user["user_id"])
+    return await build_movie_watch_options(media_type, int(tmdb_id))
 
 
 @api.get("/movies/library")
@@ -2700,6 +3071,18 @@ async def toggle_movie_library(data: MovieLibraryToggleIn, user: dict = Depends(
         return {"ok": True, "removed": True}
     await db.movie_library.update_one(key, {"$set": patch}, upsert=True)
     return {"ok": True, "item": patch}
+
+
+@api.get("/games/catalog")
+async def games_catalog(
+    q: str = "",
+    genre: str = "all",
+    platform: str = "all",
+    page: int = 1,
+    limit: int = 18,
+    user: Optional[dict] = Depends(get_current_user_optional),
+):
+    return await build_free_games_catalog((user or {}).get("user_id"), q, genre, platform, page, limit)
 
 
 @api.get("/admin/shop/products")
@@ -2842,10 +3225,11 @@ async def shop_checkout(data: ShopCheckoutIn, user: dict = Depends(get_current_u
     await db.shop_orders.insert_one(order)
     await db.transactions.insert_one(txn)
     await db.notifications.insert_one(notif)
+    seller_orders = await fanout_seller_order_notifications(order, user)
     await send_push_to_user(user["user_id"], notif["title"], notif["body"], txn_id, "shop_purchase", notif["notif_id"])
     order.pop("_id", None)
     txn.pop("_id", None)
-    return {"ok": True, "order": order, "transaction": txn, "balances": updated_user.get("balances", {})}
+    return {"ok": True, "order": order, "transaction": txn, "seller_orders": seller_orders, "balances": updated_user.get("balances", {})}
 
 
 # ============ Transactions / Receipts ============
@@ -3380,6 +3764,7 @@ async def startup_seed():
     await db.shop_seller_articles.create_index("article_id", unique=True)
     await db.shop_seller_articles.create_index([("user_id", 1), ("updated_at", -1)])
     await db.shop_seller_articles.create_index([("status", 1), ("updated_at", -1)])
+    await db.shop_seller_orders.create_index([("seller_id", 1), ("created_at", -1)])
     await db.movie_library.create_index([("user_id", 1), ("tmdb_id", 1), ("media_type", 1)], unique=True)
     await db.movie_library.create_index([("user_id", 1), ("updated_at", -1)])
     await db.bonus_program.create_index("user_id", unique=True)
