@@ -20,6 +20,7 @@ import hashlib
 import math
 import re
 import secrets
+import json
 from pymongo import ReturnDocument
 
 ROOT_DIR = Path(__file__).parent
@@ -52,11 +53,24 @@ TMDB_READ_TOKEN = os.environ.get("TMDB_READ_TOKEN", "").strip()
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "4300217e16dba490da871af16163cedb").strip()
 TMDB_API_BASE = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p"
-STREAM_DEMO_MP4_480 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
-STREAM_DEMO_MP4_720 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-STREAM_DEMO_MP4_1080 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
-STREAM_DEMO_HLS = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
-STREAM_DEMO_DASH = "https://dash.akamaized.net/envivio/EnvivioDash3/manifest.mpd"
+FX_STREAM_LIBRARY = json.loads(os.environ.get("FX_STREAM_LIBRARY_JSON", "{}") or "{}")
+BITREFILL_API_BASE = os.environ.get("BITREFILL_API_BASE", "https://api.bitrefill.com/v2").rstrip("/")
+BITREFILL_API_KEY = os.environ.get("BITREFILL_API_KEY", "").strip()
+BITREFILL_LIVE_PURCHASES = os.environ.get("BITREFILL_LIVE_PURCHASES", "false").lower() in {"1", "true", "yes"}
+BITREFILL_CACHE_TTL_SECONDS = int(os.environ.get("BITREFILL_CACHE_TTL_SECONDS", "1800"))
+BITREFILL_PRODUCT_CATEGORIES = [
+    "games", "ecommerce", "retail", "travel", "entertainment", "streaming", "music",
+    "food", "food-delivery", "restaurants", "apparel", "electronics", "multi-brand",
+    "payment-cards", "refill", "data", "esim", "bitcoin", "gifts", "experiences",
+]
+BITREFILL_PRODUCT_CACHE: Dict[str, Any] = {
+    "items": [],
+    "raw_items": [],
+    "expires_at": datetime.min.replace(tzinfo=timezone.utc),
+    "source": "fallback",
+    "meta": {},
+}
+BITREFILL_CATALOG_CACHE: Dict[str, Dict[str, Any]] = {}
 SHOP_PICKUP_AVAILABLE = False
 SHOP_PICKUP_MESSAGE = (
     "Le retrait en agence est momentanement indisponible pendant la mise a jour logistique. "
@@ -81,8 +95,8 @@ SERVICES_LIMITED_NOTICE_BODY = (
 SERVICES_AVAILABLE_FLAG = "services_available_notice_2026_05_20_streaming_games_shop_at"
 SERVICES_AVAILABLE_TITLE = "Services FX Pro disponibles"
 SERVICES_AVAILABLE_BODY = (
-    "La vente en ligne, les films, series, animes, jeux a tickets et notifications vendeur sont disponibles. "
-    "Profite des promos jeux, de la boutique moins chere et du streaming sans publicite."
+    "La vente en ligne, les cartes cadeaux, les films, series, animes, jeux a tickets et notifications vendeur sont disponibles. "
+    "Profite des promos jeux, gift cards, de la boutique moins chere et du streaming sans publicite."
 )
 MAINTENANCE_NOTICE_FLAG = "maintenance_update_notice_2026_05_20_at"
 MAINTENANCE_NOTICE_TITLE = "Maintenance FX Pro en cours"
@@ -1094,6 +1108,20 @@ class SteamPurchaseIn(BaseModel):
     card_holder: Optional[str] = None
 
 
+class GiftCardPurchaseIn(BaseModel):
+    product_id: str
+    package_id: Optional[str] = None
+    value: Optional[float] = None
+    quantity: int = 1
+    wallet_currency: str = "XOF"
+    billing_email: Optional[EmailStr] = None
+    recipient_email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
+    card_last4: Optional[str] = None
+    card_brand: Optional[str] = None
+    card_holder: Optional[str] = None
+
+
 class SellerProfileIn(BaseModel):
     store_name: Optional[str] = None
     bio: Optional[str] = None
@@ -1236,6 +1264,10 @@ async def me(user: dict = Depends(get_current_user)):
     await notify_withdraw_paused_once(user["user_id"])
     await announce_maintenance_once(user["user_id"])
     await announce_services_available_once(user["user_id"])
+    expected_role = role_for_email(user.get("email", ""), user.get("role", "user"))
+    if user.get("role") != expected_role:
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"role": expected_role, "updated_at": now_utc()}})
+        user["role"] = expected_role
     return user
 
 
@@ -2497,6 +2529,8 @@ def tmdb_provider_names(payload: dict) -> List[str]:
 def streaming_profile_for_title(media_type: str, tmdb_id: int, details: dict, trailer_url: str = "") -> dict:
     title = clean_steam_text(details.get("title") or "FX Pro Stream")
     poster = details.get("backdrop_url") or details.get("poster_url") or ""
+    licensed_key = f"{media_type}:{tmdb_id}"
+    licensed = FX_STREAM_LIBRARY.get(licensed_key) or FX_STREAM_LIBRARY.get(str(tmdb_id)) or {}
     subtitle_fr = (
         "WEBVTT\n\n"
         "00:00:00.000 --> 00:00:04.000\n"
@@ -2513,14 +2547,9 @@ def streaming_profile_for_title(media_type: str, tmdb_id: int, details: dict, tr
     )
     subtitle_fr_url = "data:text/vtt;charset=utf-8," + subtitle_fr.replace("\n", "%0A").replace(" ", "%20")
     subtitle_en_url = "data:text/vtt;charset=utf-8," + subtitle_en.replace("\n", "%0A").replace(" ", "%20")
-    mp4_sources = [
-        {"quality": "480p", "label": "VF 480p mobile", "audio_id": "vf", "url": STREAM_DEMO_MP4_480, "mime": "video/mp4", "size_label": "~8 MB"},
-        {"quality": "720p", "label": "VF 720p HD", "audio_id": "vf", "url": STREAM_DEMO_MP4_720, "mime": "video/mp4", "size_label": "~30 MB"},
-        {"quality": "1080p", "label": "VF 1080p Full HD", "audio_id": "vf", "url": STREAM_DEMO_MP4_1080, "mime": "video/mp4", "size_label": "~45 MB"},
-        {"quality": "480p", "label": "VO 480p mobile", "audio_id": "vo", "url": STREAM_DEMO_MP4_480, "mime": "video/mp4", "size_label": "~8 MB"},
-        {"quality": "720p", "label": "VO 720p HD", "audio_id": "vo", "url": STREAM_DEMO_MP4_1080, "mime": "video/mp4", "size_label": "~45 MB"},
-        {"quality": "1080p", "label": "VO 1080p Full HD", "audio_id": "vo", "url": STREAM_DEMO_MP4_720, "mime": "video/mp4", "size_label": "~30 MB"},
-    ]
+    mp4_sources = [source for source in licensed.get("mp4_sources", []) if isinstance(source, dict) and source.get("url")]
+    download_sources = [source for source in licensed.get("download_sources", mp4_sources) if isinstance(source, dict) and source.get("url")]
+    has_licensed_source = bool(mp4_sources or licensed.get("hls_url") or licensed.get("dash_url") or licensed.get("primary_url"))
     return {
         "players": [
             {"id": "videojs", "name": "Video.js HLS", "description": "Vrai lecteur Video.js avec HLS et fallback MP4."},
@@ -2530,16 +2559,22 @@ def streaming_profile_for_title(media_type: str, tmdb_id: int, details: dict, tr
             {"id": "iframe", "name": "Iframe securise", "description": "Lecteur isole sans publicite via source configuree."},
         ],
         "streams": {
-            "primary_url": STREAM_DEMO_MP4_720,
-            "hls_url": STREAM_DEMO_HLS,
-            "dash_url": STREAM_DEMO_DASH,
-            "iframe_url": trailer_url,
+            "primary_url": licensed.get("primary_url") or (mp4_sources[0]["url"] if mp4_sources else ""),
+            "hls_url": licensed.get("hls_url") or "",
+            "dash_url": licensed.get("dash_url") or "",
+            "iframe_url": licensed.get("iframe_url") or "",
             "mp4_sources": mp4_sources,
-            "download_sources": mp4_sources,
+            "download_sources": download_sources,
             "poster": poster,
             "ad_free": True,
-            "download_available": True,
-            "source_note": "Lecteurs reels branches sur Video.js, Plyr, DASH.js et HTML5 sans publicite. Les sources demo sont autorisees; remplace les URLs par tes fichiers licencies pour diffuser chaque titre.",
+            "licensed": has_licensed_source,
+            "download_available": bool(download_sources),
+            "source_note": (
+                f"Source video licenciee configuree pour {title}."
+                if has_licensed_source
+                else f"Aucune source video licenciee n'est configuree pour {title}. Les lecteurs sont prets, mais FX Pro ne lance pas de fausse video a la place du vrai film ou de la vraie serie."
+            ),
+            "setup_hint": "Ajoute FX_STREAM_LIBRARY_JSON cote backend avec les URLs HLS/DASH/MP4 autorisees par tmdb_id pour activer la lecture complete.",
         },
         "audio_tracks": [
             {"id": "vf", "label": "Francais (VF)", "language": "fr", "default": True},
@@ -3150,6 +3185,377 @@ async def purchase_steam_game(data: SteamPurchaseIn, user: dict) -> dict:
     purchase.pop("_id", None)
     txn.pop("_id", None)
     return {"ok": True, "purchase": purchase, "transaction": txn, "balances": updated_user.get("balances", {}), "steam_url": game.get("steam_url")}
+
+
+BITREFILL_FALLBACK_PRODUCTS = [
+    {"id": "amazon_france-fr", "name": "Amazon France", "type": "gift_card", "category": "ecommerce", "country": "FR", "currency": "EUR", "packages": [{"package_id": "amazon_france-fr<&>25", "value": 25}, {"package_id": "amazon_france-fr<&>50", "value": 50}, {"package_id": "amazon_france-fr<&>100", "value": 100}], "in_stock": True},
+    {"id": "playstation-store-fr", "name": "PlayStation Store", "type": "gift_card", "category": "games", "country": "FR", "currency": "EUR", "packages": [{"package_id": "playstation-store-fr<&>20", "value": 20}, {"package_id": "playstation-store-fr<&>50", "value": 50}], "in_stock": True},
+    {"id": "xbox-live-fr", "name": "Xbox Gift Card", "type": "gift_card", "category": "games", "country": "FR", "currency": "EUR", "packages": [{"package_id": "xbox-live-fr<&>15", "value": 15}, {"package_id": "xbox-live-fr<&>25", "value": 25}, {"package_id": "xbox-live-fr<&>50", "value": 50}], "in_stock": True},
+    {"id": "steam-eur", "name": "Steam EUR", "type": "gift_card", "category": "games", "country": "XI", "currency": "EUR", "range": {"min": 5, "max": 100, "step": 5}, "in_stock": True},
+    {"id": "netflix-fr", "name": "Netflix", "type": "gift_card", "category": "streaming", "country": "FR", "currency": "EUR", "packages": [{"package_id": "netflix-fr<&>25", "value": 25}, {"package_id": "netflix-fr<&>50", "value": 50}], "in_stock": True},
+    {"id": "spotify-fr", "name": "Spotify Premium", "type": "gift_card", "category": "music", "country": "FR", "currency": "EUR", "packages": [{"package_id": "spotify-fr<&>10", "value": 10}, {"package_id": "spotify-fr<&>30", "value": 30}], "in_stock": True},
+    {"id": "airbnb-fr", "name": "Airbnb", "type": "gift_card", "category": "travel", "country": "FR", "currency": "EUR", "packages": [{"package_id": "airbnb-fr<&>50", "value": 50}, {"package_id": "airbnb-fr<&>100", "value": 100}], "in_stock": True},
+    {"id": "uber-fr", "name": "Uber", "type": "gift_card", "category": "transport", "country": "FR", "currency": "EUR", "packages": [{"package_id": "uber-fr<&>15", "value": 15}, {"package_id": "uber-fr<&>25", "value": 25}], "in_stock": True},
+    {"id": "google-play-fr", "name": "Google Play", "type": "gift_card", "category": "entertainment", "country": "FR", "currency": "EUR", "packages": [{"package_id": "google-play-fr<&>15", "value": 15}, {"package_id": "google-play-fr<&>50", "value": 50}], "in_stock": True},
+    {"id": "binance-gift-card", "name": "Crypto Gift Card", "type": "gift_card", "category": "bitcoin", "country": "XI", "currency": "USD", "range": {"min": 10, "max": 250, "step": 10}, "in_stock": True},
+]
+
+
+def bitrefill_headers() -> Dict[str, str]:
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if BITREFILL_API_KEY:
+        headers["Authorization"] = f"Bearer {BITREFILL_API_KEY}"
+    return headers
+
+
+async def bitrefill_request(method: str, path: str, **kwargs) -> dict:
+    if not BITREFILL_API_KEY:
+        raise HTTPException(status_code=503, detail="BITREFILL_API_KEY manquant cote serveur")
+    url = f"{BITREFILL_API_BASE}/{path.lstrip('/')}"
+    async with httpx.AsyncClient(timeout=18) as client:
+        response = await client.request(method.upper(), url, headers=bitrefill_headers(), **kwargs)
+    if response.status_code >= 400:
+        try:
+            detail = response.json()
+        except Exception:
+            detail = {"message": response.text[:500]}
+        raise HTTPException(status_code=response.status_code, detail=detail)
+    try:
+        return response.json()
+    except Exception:
+        return {"data": response.text}
+
+
+def bitrefill_image_url(product_id: str, large: bool = False) -> str:
+    opts = "w500h300" if large else "w300h180i1"
+    return f"https://cdn.bitrefill.com/primg/{opts}/{product_id}.webp"
+
+
+def bitrefill_category_label(category: str) -> str:
+    mapping = {
+        "games": "Jeux video",
+        "ecommerce": "Marches en ligne",
+        "retail": "Retail",
+        "travel": "Voyage",
+        "entertainment": "Divertissement",
+        "streaming": "Streaming",
+        "music": "Musique",
+        "food": "Food",
+        "food-delivery": "Livraison",
+        "restaurants": "Restaurants",
+        "apparel": "Mode",
+        "electronics": "Electronique",
+        "multi-brand": "Multimarque",
+        "payment-cards": "Cartes paiement",
+        "refill": "Mobile",
+        "data": "Data mobile",
+        "esim": "eSIM",
+        "bitcoin": "Crypto",
+        "gifts": "Cadeaux",
+        "experiences": "Experiences",
+        "transport": "Transport",
+    }
+    clean = (category or "giftcard").strip()
+    return mapping.get(clean, clean.replace("-", " ").title())
+
+
+def bitrefill_package_value(pkg: dict) -> float:
+    value = pkg.get("value")
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or pkg.get("amount") or pkg.get("name") or "")
+    match = re.search(r"(\d+(?:[.,]\d+)?)", text)
+    return float(match.group(1).replace(",", ".")) if match else 0.0
+
+
+def normalize_bitrefill_product(raw: dict) -> dict:
+    product_id = clean_steam_text(raw.get("id") or raw.get("product_id") or raw.get("slug") or "")[:120]
+    name = clean_steam_text(raw.get("name") or raw.get("title") or product_id or "Gift card")[:120]
+    raw_categories = raw.get("categories") if isinstance(raw.get("categories"), list) else []
+    category = clean_steam_text(raw.get("category") or raw.get("type") or (raw_categories[0] if raw_categories else "giftcard"))[:60]
+    country = clean_steam_text(raw.get("country") or raw.get("country_code") or "XI")[:6].upper()
+    currency = clean_steam_text(raw.get("currency") or raw.get("face_value_currency") or raw.get("denomination_currency") or "EUR").upper()[:6] or "EUR"
+    packages = raw.get("packages") if isinstance(raw.get("packages"), list) else []
+    clean_packages = []
+    for pkg in packages[:20]:
+        if not isinstance(pkg, dict):
+            continue
+        value = bitrefill_package_value(pkg)
+        package_id = clean_steam_text(pkg.get("package_id") or pkg.get("id") or (f"{product_id}<&>{value:g}" if value else ""))[:180]
+        if package_id:
+            clean_packages.append({
+                "package_id": package_id,
+                "value": round_shop_money(value, currency),
+                "label": clean_steam_text(pkg.get("name") or pkg.get("label") or (f"{value:g} {currency}" if value else package_id))[:80],
+            })
+    range_doc = raw.get("range") if isinstance(raw.get("range"), dict) else {}
+    min_value = float(range_doc.get("min") or range_doc.get("minimum") or (clean_packages[0]["value"] if clean_packages else 10))
+    max_value = float(range_doc.get("max") or range_doc.get("maximum") or (clean_packages[-1]["value"] if clean_packages else max(min_value, 100)))
+    step = float(range_doc.get("step") or 1)
+    face_value = clean_packages[0]["value"] if clean_packages else min_value
+    discount = 4 + int(stable_shop_number(f"bitrefill_discount:{product_id}") * 14)
+    fx_price = round_shop_money(float(face_value) * (1 - discount / 100), currency)
+    in_stock = raw.get("in_stock")
+    if in_stock is None:
+        in_stock = raw.get("available", raw.get("status", "active") not in ["disabled", "inactive", "out_of_stock"])
+    return {
+        "id": product_id,
+        "name": name,
+        "brand": clean_steam_text(raw.get("brand") or name.split()[0] if name else "Bitrefill")[:80],
+        "type": clean_steam_text(raw.get("type") or "gift_card")[:40],
+        "category": category,
+        "category_label": bitrefill_category_label(category),
+        "country": country,
+        "currency": currency,
+        "image": raw.get("image") or raw.get("logo") or bitrefill_image_url(product_id),
+        "image_hd": raw.get("image_hd") or raw.get("image") or bitrefill_image_url(product_id, True),
+        "description": clean_steam_text(raw.get("description") or f"Carte cadeau {name} livree numeriquement avec suivi FX Pro et recu instantane.")[:360],
+        "packages": clean_packages,
+        "range": {"min": round_shop_money(min_value, currency), "max": round_shop_money(max_value, currency), "step": step},
+        "face_value": round_shop_money(face_value, currency),
+        "fx_price": fx_price,
+        "fx_discount_percent": discount,
+        "in_stock": bool(in_stock),
+        "source": "bitrefill",
+    }
+
+
+async def fetch_bitrefill_products(country: str = "", category: str = "", include_test_products: bool = False) -> dict:
+    country = clean_steam_text(country or "").upper()[:16]
+    category = clean_steam_text(category or "")[:60]
+    cache_key = f"{country}|{category}|{include_test_products}"
+    cached = BITREFILL_CATALOG_CACHE.get(cache_key)
+    now = now_utc()
+    if cached and cached.get("expires_at") and cached["expires_at"] > now:
+        return cached
+
+    if not BITREFILL_API_KEY:
+        raw_items = BITREFILL_FALLBACK_PRODUCTS
+        source = "fallback_no_key"
+        meta = {"notice": "BITREFILL_API_KEY absent: catalogue de demonstration local."}
+    else:
+        raw_items = []
+        source = "bitrefill"
+        start = 0
+        max_products = int(os.environ.get("BITREFILL_MAX_PRODUCTS", "500"))
+        meta = {}
+        while len(raw_items) < max_products:
+            params: Dict[str, Any] = {"start": start, "limit": 50, "include_test_products": str(include_test_products).lower()}
+            if country:
+                params["country"] = country
+            if category and category != "all":
+                params["category"] = category
+            payload = await bitrefill_request("GET", "/products", params=params)
+            data = payload.get("data", payload if isinstance(payload, list) else [])
+            if not isinstance(data, list):
+                data = []
+            raw_items.extend([item for item in data if isinstance(item, dict)])
+            meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+            if len(data) < 50 or not meta.get("_next"):
+                break
+            start += len(data)
+    normalized = [normalize_bitrefill_product(item) for item in raw_items]
+    normalized = [item for item in normalized if item.get("id")]
+    entry = {
+        "items": normalized,
+        "raw_items": raw_items,
+        "source": source,
+        "meta": meta,
+        "expires_at": now + timedelta(seconds=BITREFILL_CACHE_TTL_SECONDS),
+    }
+    BITREFILL_CATALOG_CACHE[cache_key] = entry
+    return entry
+
+
+async def build_gift_card_catalog(user_id: Optional[str], country: str = "", category: str = "all", q: str = "", page: int = 1, limit: int = 40) -> dict:
+    if user_id:
+        await announce_services_available_once(user_id)
+    page = max(1, int(page or 1))
+    limit = max(12, min(60, int(limit or 40)))
+    payload = await fetch_bitrefill_products(country, "" if category == "all" else category)
+    items = payload["items"]
+    query = clean_steam_text(q or "").lower()
+    if country:
+        cc = country.upper()
+        items = [item for item in items if item.get("country") in [cc, "XI"]]
+    if category and category != "all":
+        items = [item for item in items if str(item.get("category", "")).lower() == category.lower()]
+    if query:
+        items = [
+            item for item in items
+            if query in " ".join([item.get("name", ""), item.get("brand", ""), item.get("category", ""), item.get("description", "")]).lower()
+        ]
+    categories = sorted({item.get("category") for item in payload["items"] if item.get("category")})
+    countries = sorted({item.get("country") for item in payload["items"] if item.get("country")})
+    currencies = sorted({item.get("currency") for item in payload["items"] if item.get("currency")})
+    start = (page - 1) * limit
+    visible = items[start:start + limit]
+    return {
+        "items": visible,
+        "categories": categories or BITREFILL_PRODUCT_CATEGORIES,
+        "category_labels": {cat: bitrefill_category_label(cat) for cat in categories or BITREFILL_PRODUCT_CATEGORIES},
+        "countries": countries,
+        "currencies": currencies,
+        "page": page,
+        "limit": limit,
+        "total_results": len(items),
+        "has_more": start + limit < len(items),
+        "source": payload.get("source"),
+        "cache_ttl_seconds": BITREFILL_CACHE_TTL_SECONDS,
+        "live_purchase_enabled": BITREFILL_LIVE_PURCHASES,
+    }
+
+
+def choose_bitrefill_purchase_value(product: dict, data: GiftCardPurchaseIn) -> dict:
+    package_id = clean_steam_text(data.package_id or "")
+    packages = product.get("packages") or []
+    chosen = next((pkg for pkg in packages if package_id and pkg.get("package_id") == package_id), None)
+    if chosen:
+        return {"package_id": chosen["package_id"], "value": float(chosen["value"]), "label": chosen.get("label") or f"{chosen['value']} {product.get('currency')}"}
+    if data.value is not None:
+        value = float(data.value)
+    elif packages:
+        value = float(packages[0]["value"])
+        package_id = packages[0]["package_id"]
+    else:
+        value = float((product.get("range") or {}).get("min") or product.get("face_value") or 10)
+    range_doc = product.get("range") or {}
+    min_value = float(range_doc.get("min") or 0)
+    max_value = float(range_doc.get("max") or value)
+    if value < min_value or value > max_value:
+        raise HTTPException(status_code=400, detail=f"Montant invalide: choisis entre {min_value:g} et {max_value:g} {product.get('currency')}.")
+    return {"package_id": package_id or None, "value": value, "label": f"{value:g} {product.get('currency')}"}
+
+
+async def purchase_gift_card(data: GiftCardPurchaseIn, user: dict) -> dict:
+    product_id = clean_steam_text(data.product_id)[:120]
+    if not product_id:
+        raise HTTPException(status_code=400, detail="Carte cadeau invalide")
+    quantity = max(1, min(5, int(data.quantity or 1)))
+    catalog = await fetch_bitrefill_products()
+    product = next((item for item in catalog["items"] if item.get("id") == product_id), None)
+    if not product and BITREFILL_API_KEY:
+        try:
+            detail_payload = await bitrefill_request("GET", f"/products/{product_id}")
+            detail_raw = detail_payload.get("data", detail_payload)
+            if isinstance(detail_raw, dict):
+                product = normalize_bitrefill_product(detail_raw)
+        except Exception:
+            product = None
+    if not product:
+        product = normalize_bitrefill_product(next((raw for raw in BITREFILL_FALLBACK_PRODUCTS if raw.get("id") == product_id), {}))
+    if not product or not product.get("id"):
+        raise HTTPException(status_code=404, detail="Carte cadeau introuvable")
+    if not product.get("in_stock"):
+        raise HTTPException(status_code=400, detail="Carte cadeau indisponible pour le moment")
+    selection = choose_bitrefill_purchase_value(product, data)
+    wallet_currency = normalize_shop_currency(data.wallet_currency)
+    price_currency = clean_steam_text(product.get("currency") or "EUR").upper()[:6] or "EUR"
+    discount = int(product.get("fx_discount_percent") or 0)
+    face_total = float(selection["value"]) * quantity
+    fx_total = face_total * (1 - discount / 100)
+    rates_doc = await get_active_rates("EUR")
+    conversion_currency = price_currency if price_currency in SUPPORTED_CURRENCIES else "EUR"
+    debit_amount = convert_shop_money(fx_total, conversion_currency, wallet_currency, rates_doc.get("rates") or FALLBACK_RATES)
+    balance_key = f"balances.{wallet_currency}"
+    updated_user = await db.users.find_one_and_update(
+        {"user_id": user["user_id"], balance_key: {"$gte": debit_amount}},
+        {"$inc": {balance_key: -debit_amount}, "$set": {"updated_at": now_utc()}},
+        projection={"_id": 0},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated_user:
+        full = await find_user_full(user["user_id"])
+        available = float((full.get("balances") or {}).get(wallet_currency, 0))
+        raise HTTPException(status_code=400, detail=f"Solde insuffisant: disponible {available} {wallet_currency}, carte cadeau {debit_amount} {wallet_currency}.")
+
+    created_at = now_utc()
+    purchase_id = f"gft_{uuid.uuid4().hex[:12]}"
+    txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+    reference = f"GIFT-{uuid.uuid4().hex[:8].upper()}"
+    external_payload = None
+    external_status = "reserved"
+    try:
+        if BITREFILL_LIVE_PURCHASES and BITREFILL_API_KEY and catalog.get("source") == "bitrefill":
+            item: Dict[str, Any] = {"product_id": product_id, "quantity": quantity}
+            if selection.get("package_id"):
+                item["package_id"] = selection["package_id"]
+            else:
+                item["value"] = selection["value"]
+            if data.phone_number:
+                item["phone_number"] = clean_steam_text(data.phone_number)[:40]
+            external_payload = await bitrefill_request("POST", "/invoices", json={
+                "products": [item],
+                "payment_method": "balance",
+                "auto_pay": True,
+                "email": str(data.recipient_email or data.billing_email or user.get("email") or ""),
+            })
+            external_status = "submitted"
+    except Exception as exc:
+        await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {balance_key: debit_amount}})
+        raise HTTPException(status_code=502, detail=f"Bitrefill indisponible, solde rembourse automatiquement: {exc}")
+
+    purchase = {
+        "purchase_id": purchase_id,
+        "user_id": user["user_id"],
+        "product_id": product_id,
+        "product": product,
+        "reference": reference,
+        "status": external_status,
+        "quantity": quantity,
+        "value": selection["value"],
+        "package_id": selection.get("package_id"),
+        "price_currency": price_currency,
+        "face_total": round_shop_money(face_total, price_currency),
+        "fx_discount_percent": discount,
+        "fx_total": round_shop_money(fx_total, price_currency),
+        "debit_amount": debit_amount,
+        "wallet_currency": wallet_currency,
+        "billing_email": str(data.billing_email or user.get("email") or ""),
+        "recipient_email": str(data.recipient_email or data.billing_email or user.get("email") or ""),
+        "card": {
+            "last4": re.sub(r"\D+", "", data.card_last4 or "")[-4:],
+            "brand": clean_steam_text(data.card_brand or "Carte bancaire")[:32],
+            "holder": clean_steam_text(data.card_holder or user.get("name") or "")[:80],
+        } if data.card_last4 else None,
+        "external": external_payload,
+        "live_purchase": BITREFILL_LIVE_PURCHASES and bool(external_payload),
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+    txn = {
+        "txn_id": txn_id,
+        "type": "gift_card_purchase",
+        "user_id": user["user_id"],
+        "participants": [user["user_id"]],
+        "amount": debit_amount,
+        "currency": wallet_currency,
+        "reference": reference,
+        "status": "completed",
+        "gift_card_purchase_id": purchase_id,
+        "product_id": product_id,
+        "product_name": product.get("name"),
+        "created_at": created_at,
+    }
+    notif = {
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"],
+        "type": "gift_card_purchase",
+        "txn_id": txn_id,
+        "title": "Carte cadeau creditee",
+        "body": f"{product.get('name')} ({selection['label']}) est reservee. Reference {reference}. Debit solde {debit_amount} {wallet_currency}.",
+        "image": product.get("image"),
+        "read": False,
+        "created_at": created_at,
+        "url": "/gift-cards",
+    }
+    await db.bitrefill_purchases.insert_one(purchase)
+    await db.transactions.insert_one(txn)
+    await db.notifications.insert_one(notif)
+    await send_push_to_user(user["user_id"], notif["title"], notif["body"], txn_id, "gift_card_purchase", notif["notif_id"])
+    purchase.pop("_id", None)
+    txn.pop("_id", None)
+    return {"ok": True, "purchase": purchase, "transaction": txn, "balances": updated_user.get("balances", {})}
 
 
 async def get_movie_library(user_id: str) -> List[dict]:
@@ -3803,6 +4209,29 @@ async def games_steam_catalog(
 @api.post("/games/steam/purchase")
 async def games_steam_purchase(data: SteamPurchaseIn, user: dict = Depends(get_current_user)):
     return await purchase_steam_game(data, user)
+
+
+@api.get("/gift-cards/catalog")
+async def gift_cards_catalog(
+    country: str = "",
+    category: str = "all",
+    q: str = "",
+    page: int = 1,
+    limit: int = 40,
+    user: Optional[dict] = Depends(get_current_user_optional),
+):
+    return await build_gift_card_catalog((user or {}).get("user_id"), country, category, q, page, limit)
+
+
+@api.post("/gift-cards/purchase")
+async def gift_cards_purchase(data: GiftCardPurchaseIn, user: dict = Depends(get_current_user)):
+    return await purchase_gift_card(data, user)
+
+
+@api.get("/gift-cards/orders")
+async def gift_cards_orders(user: dict = Depends(get_current_user)):
+    items = await db.bitrefill_purchases.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).limit(80).to_list(80)
+    return {"items": items, "live_purchase_enabled": BITREFILL_LIVE_PURCHASES}
 
 
 @api.get("/admin/shop/products")
@@ -4563,6 +4992,8 @@ async def startup_seed():
     await db.shop_seller_orders.create_index([("seller_id", 1), ("created_at", -1)])
     await db.movie_library.create_index([("user_id", 1), ("tmdb_id", 1), ("media_type", 1)], unique=True)
     await db.movie_library.create_index([("user_id", 1), ("updated_at", -1)])
+    await db.bitrefill_purchases.create_index([("user_id", 1), ("created_at", -1)])
+    await db.bitrefill_purchases.create_index("purchase_id", unique=True)
     await db.bonus_program.create_index("user_id", unique=True)
     await db.bonus_events.create_index("created_at")
     await db.risk_logs.create_index("created_at")
@@ -4571,6 +5002,7 @@ async def startup_seed():
 
     # Seed the only admin account requested for production access.
     admin = await db.users.find_one({"email": ADMIN_EMAIL})
+    admin_password = os.environ.get("FX_ADMIN_PASSWORD", "").strip()
     if not admin:
         balances = {c: 0.0 for c in SUPPORTED_CURRENCIES}
         balances["EUR"] = 10000.0
@@ -4581,7 +5013,7 @@ async def startup_seed():
             "email": ADMIN_EMAIL,
             "name": "Admin FX Pro",
             "phone": "",
-            "password_hash": hash_password("Admin@2026"),
+            "password_hash": hash_password(admin_password or secrets.token_urlsafe(24)),
             "role": "admin",
             "balances": balances,
             "is_blocked": False,
@@ -4596,7 +5028,20 @@ async def startup_seed():
             "qr_code": "FXPRO:user_fxproadmin001:ADMINQR1",
             "created_at": now_utc(),
         })
-        logger.info("Seeded admin user fxpro@gmail.com / Admin@2026")
+        if admin_password:
+            logger.info("Seeded admin user fxpro@gmail.com with FX_ADMIN_PASSWORD")
+        else:
+            logger.warning("Seeded admin user fxpro@gmail.com with a generated password; set FX_ADMIN_PASSWORD before first production start")
+    else:
+        admin_patch = {
+            "role": "admin",
+            "is_blocked": False,
+            "kyc_status": "verified",
+            "updated_at": now_utc(),
+        }
+        if admin_password and not verify_password(admin_password, admin.get("password_hash", "")):
+            admin_patch["password_hash"] = hash_password(admin_password)
+        await db.users.update_one({"email": ADMIN_EMAIL}, {"$set": admin_patch})
 
     # Seed a demo user
     demo = await db.users.find_one({"email": "demo@fxpro.com"})

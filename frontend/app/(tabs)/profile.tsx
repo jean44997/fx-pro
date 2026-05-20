@@ -19,7 +19,7 @@ export default function Profile() {
   const [phone, setPhone] = useState(user?.phone || "");
   const [saving, setSaving] = useState(false);
   const [photoSaving, setPhotoSaving] = useState(false);
-  const isFxAdmin = user?.role === "admin" && String(user?.email || "").toLowerCase() === "fxpro@gmail.com";
+  const isFxAdmin = String(user?.email || "").toLowerCase() === "fxpro@gmail.com";
 
   const pickPhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -129,6 +129,7 @@ export default function Profile() {
     { icon: "add-circle", label: "Depot d'argent", route: "/deposit", testID: "menu-deposit", color: Colors.green },
     { icon: "cash", label: "Retrait d'argent", route: "/withdraw", testID: "menu-withdraw", color: Colors.yellow },
     { icon: "bag-handle", label: "Boutique en ligne", route: "/shop", testID: "menu-shop", color: Colors.orange },
+    { icon: "card", label: "Cartes cadeaux", route: "/gift-cards", testID: "menu-gift-cards", color: Colors.green },
     { icon: "film", label: "Films & series", route: "/movies", testID: "menu-movies", color: Colors.orange },
     { icon: "game-controller", label: "Jeux bonus", route: "/games", testID: "menu-games", color: Colors.green },
     { icon: "gift", label: "Bonus premier depot", route: "/bonus", testID: "menu-bonus", color: Colors.yellow },

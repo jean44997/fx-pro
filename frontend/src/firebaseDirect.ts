@@ -80,14 +80,46 @@ const SHOP_SELLERS = "fxpro_shop_sellers";
 const SHOP_SELLER_ARTICLES = "fxpro_shop_seller_articles";
 const MOVIE_LIBRARY = "fxpro_movie_library";
 const STEAM_PURCHASES = "fxpro_steam_purchases";
+const GIFT_CARD_PURCHASES = "fxpro_gift_card_purchases";
 const APILAYER_SHOP_KEY = process.env.EXPO_PUBLIC_APILAYER_KEY || "";
 const TMDB_READ_TOKEN = process.env.EXPO_PUBLIC_TMDB_READ_TOKEN || "";
 const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY || "4300217e16dba490da871af16163cedb";
-const STREAM_DEMO_MP4_480 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
-const STREAM_DEMO_MP4_720 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
-const STREAM_DEMO_MP4_1080 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4";
-const STREAM_DEMO_HLS = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
-const STREAM_DEMO_DASH = "https://dash.akamaized.net/envivio/EnvivioDash3/manifest.mpd";
+const FX_STREAM_LIBRARY: Record<string, any> = {};
+const BITREFILL_PRODUCT_CATEGORIES = [
+  "games",
+  "ecommerce",
+  "retail",
+  "travel",
+  "entertainment",
+  "streaming",
+  "music",
+  "food",
+  "food-delivery",
+  "restaurants",
+  "apparel",
+  "electronics",
+  "multi-brand",
+  "payment-cards",
+  "refill",
+  "data",
+  "esim",
+  "bitcoin",
+  "gifts",
+  "experiences",
+  "transport",
+];
+const BITREFILL_FALLBACK_PRODUCTS = [
+  { id: "amazon_france-fr", name: "Amazon France", type: "gift_card", category: "ecommerce", country: "FR", currency: "EUR", packages: [{ package_id: "amazon_france-fr<&>25", value: 25 }, { package_id: "amazon_france-fr<&>50", value: 50 }, { package_id: "amazon_france-fr<&>100", value: 100 }], in_stock: true },
+  { id: "playstation-store-fr", name: "PlayStation Store", type: "gift_card", category: "games", country: "FR", currency: "EUR", packages: [{ package_id: "playstation-store-fr<&>20", value: 20 }, { package_id: "playstation-store-fr<&>50", value: 50 }], in_stock: true },
+  { id: "xbox-live-fr", name: "Xbox Gift Card", type: "gift_card", category: "games", country: "FR", currency: "EUR", packages: [{ package_id: "xbox-live-fr<&>15", value: 15 }, { package_id: "xbox-live-fr<&>25", value: 25 }, { package_id: "xbox-live-fr<&>50", value: 50 }], in_stock: true },
+  { id: "steam-eur", name: "Steam EUR", type: "gift_card", category: "games", country: "XI", currency: "EUR", range: { min: 5, max: 100, step: 5 }, in_stock: true },
+  { id: "netflix-fr", name: "Netflix", type: "gift_card", category: "streaming", country: "FR", currency: "EUR", packages: [{ package_id: "netflix-fr<&>25", value: 25 }, { package_id: "netflix-fr<&>50", value: 50 }], in_stock: true },
+  { id: "spotify-fr", name: "Spotify Premium", type: "gift_card", category: "music", country: "FR", currency: "EUR", packages: [{ package_id: "spotify-fr<&>10", value: 10 }, { package_id: "spotify-fr<&>30", value: 30 }], in_stock: true },
+  { id: "airbnb-fr", name: "Airbnb", type: "gift_card", category: "travel", country: "FR", currency: "EUR", packages: [{ package_id: "airbnb-fr<&>50", value: 50 }, { package_id: "airbnb-fr<&>100", value: 100 }], in_stock: true },
+  { id: "uber-fr", name: "Uber", type: "gift_card", category: "transport", country: "FR", currency: "EUR", packages: [{ package_id: "uber-fr<&>15", value: 15 }, { package_id: "uber-fr<&>25", value: 25 }], in_stock: true },
+  { id: "google-play-fr", name: "Google Play", type: "gift_card", category: "entertainment", country: "FR", currency: "EUR", packages: [{ package_id: "google-play-fr<&>15", value: 15 }, { package_id: "google-play-fr<&>50", value: 50 }], in_stock: true },
+  { id: "binance-gift-card", name: "Crypto Gift Card", type: "gift_card", category: "bitcoin", country: "XI", currency: "USD", range: { min: 10, max: 250, step: 10 }, in_stock: true },
+];
 const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_USD", "EUR_XOF"];
 const MAX_INLINE_PROFILE_PICTURE_CHARS = 700000;
 const WITHDRAW_PAUSED_NOTICE_FLAG = "withdraw_paused_notice_2026_05_18_at";
@@ -101,7 +133,7 @@ const SERVICES_LIMITED_NOTICE_BODY =
 const SERVICES_AVAILABLE_FLAG = "services_available_notice_2026_05_20_streaming_games_shop_at";
 const SERVICES_AVAILABLE_TITLE = "Services FX Pro disponibles";
 const SERVICES_AVAILABLE_BODY =
-  "La vente en ligne, les films, series, animes, jeux a tickets et notifications vendeur sont disponibles. Profite des promos jeux, de la boutique moins chere et du streaming sans publicite.";
+  "La vente en ligne, les cartes cadeaux, les films, series, animes, jeux a tickets et notifications vendeur sont disponibles. Profite des promos jeux, gift cards, de la boutique moins chere et du streaming sans publicite.";
 const MAINTENANCE_NOTICE_FLAG = "maintenance_update_notice_2026_05_20_at";
 const MAINTENANCE_NOTICE_TITLE = "Maintenance FX Pro en cours";
 const MAINTENANCE_NOTICE_BODY =
@@ -1341,18 +1373,14 @@ function tmdbProviderNames(providerBlock: any = {}) {
 function streamingProfileForTitle(mediaType: string, tmdbId: number, details: any = {}, trailerUrl = "") {
   const title = cleanSteamText(details?.title || "FX Pro Stream");
   const poster = details?.backdrop_url || details?.poster_url || "";
+  const licensed = FX_STREAM_LIBRARY[`${mediaType}:${tmdbId}`] || FX_STREAM_LIBRARY[String(tmdbId)] || {};
   const subtitleFr = `WEBVTT\n\n00:00:00.000 --> 00:00:04.000\n${title} - lecture FX Pro sans publicite.\n\n00:00:04.000 --> 00:00:08.000\nSelectionne VF, VO ou les sous-titres depuis les options du lecteur.\n`;
   const subtitleEn = `WEBVTT\n\n00:00:00.000 --> 00:00:04.000\n${title} - ad-free FX Pro playback.\n\n00:00:04.000 --> 00:00:08.000\nChoose audio language and captions from the player controls.\n`;
   const subtitleFrUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(subtitleFr)}`;
   const subtitleEnUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(subtitleEn)}`;
-  const mp4Sources = [
-    { quality: "480p", label: "VF 480p mobile", audio_id: "vf", url: STREAM_DEMO_MP4_480, mime: "video/mp4", size_label: "~8 MB" },
-    { quality: "720p", label: "VF 720p HD", audio_id: "vf", url: STREAM_DEMO_MP4_720, mime: "video/mp4", size_label: "~30 MB" },
-    { quality: "1080p", label: "VF 1080p Full HD", audio_id: "vf", url: STREAM_DEMO_MP4_1080, mime: "video/mp4", size_label: "~45 MB" },
-    { quality: "480p", label: "VO 480p mobile", audio_id: "vo", url: STREAM_DEMO_MP4_480, mime: "video/mp4", size_label: "~8 MB" },
-    { quality: "720p", label: "VO 720p HD", audio_id: "vo", url: STREAM_DEMO_MP4_1080, mime: "video/mp4", size_label: "~45 MB" },
-    { quality: "1080p", label: "VO 1080p Full HD", audio_id: "vo", url: STREAM_DEMO_MP4_720, mime: "video/mp4", size_label: "~30 MB" },
-  ];
+  const mp4Sources = Array.isArray(licensed.mp4_sources) ? licensed.mp4_sources.filter((source: any) => source?.url) : [];
+  const downloadSources = Array.isArray(licensed.download_sources) ? licensed.download_sources.filter((source: any) => source?.url) : mp4Sources;
+  const hasLicensedSource = Boolean(mp4Sources.length || licensed.hls_url || licensed.dash_url || licensed.primary_url);
   return {
     players: [
       { id: "videojs", name: "Video.js HLS", description: "Vrai lecteur Video.js avec HLS et fallback MP4." },
@@ -1362,16 +1390,20 @@ function streamingProfileForTitle(mediaType: string, tmdbId: number, details: an
       { id: "iframe", name: "Iframe securise", description: "Lecteur isole sans publicite via source configuree." },
     ],
     streams: {
-      primary_url: STREAM_DEMO_MP4_720,
-      hls_url: STREAM_DEMO_HLS,
-      dash_url: STREAM_DEMO_DASH,
-      iframe_url: trailerUrl,
+      primary_url: licensed.primary_url || mp4Sources[0]?.url || "",
+      hls_url: licensed.hls_url || "",
+      dash_url: licensed.dash_url || "",
+      iframe_url: licensed.iframe_url || "",
       mp4_sources: mp4Sources,
-      download_sources: mp4Sources,
+      download_sources: downloadSources,
       poster,
       ad_free: true,
-      download_available: true,
-      source_note: "Lecteurs reels branches sur Video.js, Plyr, DASH.js et HTML5 sans publicite. Les sources demo sont autorisees; remplace les URLs par tes fichiers licencies pour diffuser chaque titre.",
+      licensed: hasLicensedSource,
+      download_available: Boolean(downloadSources.length),
+      source_note: hasLicensedSource
+        ? `Source video licenciee configuree pour ${title}.`
+        : `Aucune source video licenciee n'est configuree pour ${title}. Les lecteurs sont prets, mais FX Pro ne lance pas de fausse video a la place du vrai film ou de la vraie serie.`,
+      setup_hint: "Utilise le backend avec FX_STREAM_LIBRARY_JSON pour brancher les URLs HLS/DASH/MP4 autorisees par tmdb_id.",
     },
     audio_tracks: [
       { id: "vf", label: "Francais (VF)", language: "fr", default: true },
@@ -1872,6 +1904,218 @@ async function purchaseSteamGameDirect(body: any) {
     });
   });
   return { ok: true, purchase, transaction, balances, steam_url: game.steam_url };
+}
+
+function bitrefillImageUrl(productId: string, large = false) {
+  const opts = large ? "w500h300" : "w300h180i1";
+  return `https://cdn.bitrefill.com/primg/${opts}/${productId}.webp`;
+}
+
+function bitrefillCategoryLabel(category: string) {
+  const mapping: Record<string, string> = {
+    games: "Jeux video",
+    ecommerce: "Marches en ligne",
+    retail: "Retail",
+    travel: "Voyage",
+    entertainment: "Divertissement",
+    streaming: "Streaming",
+    music: "Musique",
+    food: "Food",
+    "food-delivery": "Livraison",
+    restaurants: "Restaurants",
+    apparel: "Mode",
+    electronics: "Electronique",
+    "multi-brand": "Multimarque",
+    "payment-cards": "Cartes paiement",
+    refill: "Mobile",
+    data: "Data mobile",
+    esim: "eSIM",
+    bitcoin: "Crypto",
+    gifts: "Cadeaux",
+    experiences: "Experiences",
+    transport: "Transport",
+  };
+  return mapping[category] || String(category || "giftcard").replace(/-/g, " ");
+}
+
+function normalizeBitrefillProduct(raw: any) {
+  const id = cleanSteamText(raw?.id || raw?.product_id || raw?.slug || "").slice(0, 120);
+  const name = cleanSteamText(raw?.name || raw?.title || id || "Gift card").slice(0, 120);
+  const category = cleanSteamText(raw?.category || raw?.type || "giftcard").slice(0, 60);
+  const country = cleanSteamText(raw?.country || raw?.country_code || "XI").slice(0, 6).toUpperCase();
+  const currency = cleanSteamText(raw?.currency || raw?.face_value_currency || "EUR").toUpperCase().slice(0, 6) || "EUR";
+  const packages = Array.isArray(raw?.packages)
+    ? raw.packages.slice(0, 20).map((pkg: any) => {
+        const numeric = Number(pkg?.value || String(pkg?.name || "").match(/(\d+(?:[.,]\d+)?)/)?.[1]?.replace(",", ".") || 0);
+        return {
+          package_id: cleanSteamText(pkg?.package_id || pkg?.id || `${id}<&>${numeric}`).slice(0, 180),
+          value: roundShopMoney(numeric, currency),
+          label: cleanSteamText(pkg?.name || pkg?.label || `${numeric} ${currency}`).slice(0, 80),
+        };
+      }).filter((pkg: any) => pkg.package_id && pkg.value > 0)
+    : [];
+  const range = raw?.range || {};
+  const min = Number(range?.min || range?.minimum || packages[0]?.value || 10);
+  const max = Number(range?.max || range?.maximum || packages[packages.length - 1]?.value || Math.max(min, 100));
+  const faceValue = packages[0]?.value || min;
+  const discount = 4 + Math.floor(stableDirectNumber(`bitrefill_discount:${id}`) * 14);
+  return {
+    id,
+    name,
+    brand: cleanSteamText(raw?.brand || name.split(" ")[0] || "Bitrefill").slice(0, 80),
+    type: cleanSteamText(raw?.type || "gift_card").slice(0, 40),
+    category,
+    category_label: bitrefillCategoryLabel(category),
+    country,
+    currency,
+    image: raw?.image || raw?.logo || bitrefillImageUrl(id),
+    image_hd: raw?.image_hd || raw?.image || bitrefillImageUrl(id, true),
+    description: cleanSteamText(raw?.description || `Carte cadeau ${name} livree numeriquement avec suivi FX Pro et recu instantane.`).slice(0, 360),
+    packages,
+    range: { min: roundShopMoney(min, currency), max: roundShopMoney(max, currency), step: Number(range?.step || 1) },
+    face_value: roundShopMoney(faceValue, currency),
+    fx_price: roundShopMoney(Number(faceValue || 0) * (1 - discount / 100), currency),
+    fx_discount_percent: discount,
+    in_stock: raw?.in_stock !== false,
+    source: "fallback_no_backend",
+  };
+}
+
+async function buildGiftCardCatalogDirect(userId = "", country = "", category = "all", text = "", page = 1, limitCount = 40) {
+  if (userId) await announceServicesAvailableOnce(userId).catch(() => undefined);
+  const safePage = Math.max(1, Number(page || 1));
+  const safeLimit = Math.max(12, Math.min(60, Number(limitCount || 40)));
+  const q = String(text || "").trim().toLowerCase();
+  let items = BITREFILL_FALLBACK_PRODUCTS.map(normalizeBitrefillProduct);
+  if (country) {
+    const cc = country.toUpperCase();
+    items = items.filter((item) => item.country === cc || item.country === "XI");
+  }
+  if (category && category !== "all") {
+    items = items.filter((item) => item.category.toLowerCase() === category.toLowerCase());
+  }
+  if (q) {
+    items = items.filter((item) => `${item.name} ${item.brand} ${item.category} ${item.description}`.toLowerCase().includes(q));
+  }
+  const all = BITREFILL_FALLBACK_PRODUCTS.map(normalizeBitrefillProduct);
+  const categories = Array.from(new Set(all.map((item) => item.category))).sort();
+  const countries = Array.from(new Set(all.map((item) => item.country))).sort();
+  const currencies = Array.from(new Set(all.map((item) => item.currency))).sort();
+  const start = (safePage - 1) * safeLimit;
+  return {
+    items: items.slice(start, start + safeLimit),
+    categories: categories.length ? categories : BITREFILL_PRODUCT_CATEGORIES,
+    category_labels: Object.fromEntries((categories.length ? categories : BITREFILL_PRODUCT_CATEGORIES).map((cat) => [cat, bitrefillCategoryLabel(cat)])),
+    countries,
+    currencies,
+    page: safePage,
+    limit: safeLimit,
+    total_results: items.length,
+    has_more: start + safeLimit < items.length,
+    source: "fallback_no_backend",
+    live_purchase_enabled: false,
+  };
+}
+
+function chooseGiftCardValue(product: any, body: any) {
+  const packageId = cleanSteamText(body?.package_id || "");
+  const chosen = (product.packages || []).find((pkg: any) => packageId && pkg.package_id === packageId);
+  if (chosen) return { package_id: chosen.package_id, value: Number(chosen.value), label: chosen.label || `${chosen.value} ${product.currency}` };
+  const value = Number(body?.value || product.packages?.[0]?.value || product.range?.min || 10);
+  if (value < Number(product.range?.min || 0) || value > Number(product.range?.max || value)) {
+    throw new Error(`Montant invalide: choisis entre ${product.range?.min} et ${product.range?.max} ${product.currency}.`);
+  }
+  return { package_id: product.packages?.[0]?.package_id || null, value, label: `${value} ${product.currency}` };
+}
+
+async function purchaseGiftCardDirect(body: any) {
+  const firebaseUser = await requireFirebaseUser();
+  const productId = cleanSteamText(body?.product_id || "");
+  const product = BITREFILL_FALLBACK_PRODUCTS.map(normalizeBitrefillProduct).find((item) => item.id === productId);
+  if (!product) throw new Error("Carte cadeau introuvable.");
+  const quantity = Math.max(1, Math.min(5, Number(body?.quantity || 1)));
+  const selection = chooseGiftCardValue(product, body);
+  const walletCurrency = normalizeShopCurrency(body?.wallet_currency || "XOF");
+  const ratesPayload = await getRates();
+  const faceTotal = Number(selection.value || 0) * quantity;
+  const fxTotal = faceTotal * (1 - Number(product.fx_discount_percent || 0) / 100);
+  const conversionCurrency = Object.prototype.hasOwnProperty.call(ratesPayload.rates || {}, product.currency) || product.currency === "EUR" ? product.currency : "EUR";
+  const debitAmount = convertShopMoney(fxTotal, conversionCurrency, walletCurrency, ratesPayload.rates || {});
+  const userRef = doc(db, USERS, firebaseUser.uid);
+  const purchaseId = makeId("gft");
+  const txnId = makeId("txn");
+  const notifId = makeId("ntf");
+  const reference = `GIFT-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
+  const createdAt = nowIso();
+  const cardLast4 = String(body?.card_last4 || "").replace(/\D+/g, "").slice(-4);
+  let balances: Record<string, number> = {};
+  const purchase = {
+    purchase_id: purchaseId,
+    user_id: firebaseUser.uid,
+    product_id: productId,
+    product,
+    reference,
+    status: "reserved",
+    quantity,
+    value: selection.value,
+    package_id: selection.package_id,
+    price_currency: product.currency,
+    face_total: roundShopMoney(faceTotal, product.currency),
+    fx_discount_percent: product.fx_discount_percent,
+    fx_total: roundShopMoney(fxTotal, product.currency),
+    debit_amount: debitAmount,
+    wallet_currency: walletCurrency,
+    billing_email: String(body?.billing_email || auth.currentUser?.email || ""),
+    recipient_email: String(body?.recipient_email || body?.billing_email || auth.currentUser?.email || ""),
+    card: cardLast4
+      ? {
+          last4: cardLast4,
+          brand: cleanSteamText(body?.card_brand || "Carte bancaire").slice(0, 32),
+          holder: cleanSteamText(body?.card_holder || auth.currentUser?.displayName || "").slice(0, 80),
+        }
+      : null,
+    live_purchase: false,
+    created_at: createdAt,
+    updated_at: createdAt,
+  };
+  const transaction = {
+    txn_id: txnId,
+    type: "gift_card_purchase",
+    user_id: firebaseUser.uid,
+    participants: [firebaseUser.uid],
+    amount: debitAmount,
+    currency: walletCurrency,
+    reference,
+    status: "completed",
+    gift_card_purchase_id: purchaseId,
+    product_id: productId,
+    product_name: product.name,
+    created_at: createdAt,
+  };
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(userRef);
+    const data = normalizeUser(snap.data());
+    balances = { ...data.balances };
+    const available = Number(balances[walletCurrency] || 0);
+    if (available < debitAmount) throw new Error(`Solde insuffisant: disponible ${available} ${walletCurrency}, carte cadeau ${debitAmount} ${walletCurrency}.`);
+    balances[walletCurrency] = roundShopMoney(available - debitAmount, walletCurrency);
+    tx.set(userRef, { balances, updated_at: createdAt }, { merge: true });
+    tx.set(doc(db, GIFT_CARD_PURCHASES, purchaseId), purchase);
+    tx.set(doc(db, TXNS, txnId), transaction);
+    tx.set(doc(db, NOTIFS, notifId), {
+      notif_id: notifId,
+      user_id: firebaseUser.uid,
+      type: "gift_card_purchase",
+      txn_id: txnId,
+      title: "Carte cadeau creditee",
+      body: `${product.name} (${selection.label}) est reservee. Reference ${reference}. Debit solde ${debitAmount} ${walletCurrency}.`,
+      image: product.image,
+      read: false,
+      created_at: createdAt,
+      url: "/gift-cards",
+    });
+  });
+  return { ok: true, purchase, transaction, balances };
 }
 
 export function subscribeFirebaseNotifications(
@@ -2532,6 +2776,27 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
 
   if (pathname === "/games/steam/purchase" && method === "POST") {
     return purchaseSteamGameDirect(body);
+  }
+
+  if (pathname === "/gift-cards/catalog" && method === "GET") {
+    return buildGiftCardCatalogDirect(
+      auth.currentUser?.uid || "",
+      url.searchParams.get("country") || "",
+      url.searchParams.get("category") || "all",
+      url.searchParams.get("q") || "",
+      Number(url.searchParams.get("page") || 1),
+      Number(url.searchParams.get("limit") || 40)
+    );
+  }
+
+  if (pathname === "/gift-cards/purchase" && method === "POST") {
+    return purchaseGiftCardDirect(body);
+  }
+
+  if (pathname === "/gift-cards/orders" && method === "GET") {
+    const firebaseUser = await requireFirebaseUser();
+    const snap = await getDocs(query(collection(db, GIFT_CARD_PURCHASES), where("user_id", "==", firebaseUser.uid)));
+    return { items: sortByDateDesc(snap.docs.map((d) => d.data())).slice(0, 80), live_purchase_enabled: false };
   }
 
   if (pathname === "/admin/notifications/withdraw-paused" && method === "POST") {

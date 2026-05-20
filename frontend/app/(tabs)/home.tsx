@@ -159,6 +159,7 @@ export default function Home() {
                 <QuickAction testID="quick-transfer" icon="paper-plane" color={Colors.magenta} label="Envoyer" onPress={() => router.push("/(tabs)/transfer")} />
                 <QuickAction testID="quick-receive" icon="qr-code" color={Colors.green} label="Recevoir" onPress={() => router.push("/receive-qr")} />
                 <QuickAction testID="quick-bonus" icon="gift" color={Colors.yellow} label="Bonus" onPress={() => router.push("/bonus")} />
+                <QuickAction testID="quick-gift-cards" icon="card" color={Colors.green} label="Gift cards" onPress={() => router.push("/gift-cards" as any)} />
                 <QuickAction testID="quick-movies" icon="film" color={Colors.orange} label="Films" onPress={() => router.push("/movies")} />
               </View>
             </NeoCard>

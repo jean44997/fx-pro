@@ -1,0 +1,118 @@
+{
+  "info": {
+    "name": "FX Pro Bitrefill API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://api.bitrefill.com/v2" },
+    { "key": "bitrefill_api_key", "value": "{{BITREFILL_API_KEY}}" },
+    { "key": "product_id", "value": "amazon_france-fr" },
+    { "key": "invoice_id", "value": "" },
+    { "key": "order_id", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{bitrefill_api_key}}", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "Ping",
+      "request": { "method": "GET", "url": "{{base_url}}/ping" }
+    },
+    {
+      "name": "Account Balance",
+      "request": { "method": "GET", "url": "{{base_url}}/accounts/balance" }
+    },
+    {
+      "name": "Products - All",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/products?limit=50&start=0"
+      }
+    },
+    {
+      "name": "Products - France Games",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/products?country=FR&category=games&limit=50"
+      }
+    },
+    {
+      "name": "Products - Search",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/products/search?q=amazon&limit=20"
+      }
+    },
+    {
+      "name": "Product Detail",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/products/{{product_id}}"
+      }
+    },
+    {
+      "name": "Create Invoice",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/invoices",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"products\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"package_id\": \"{{product_id}}<&>50\",\n      \"quantity\": 1\n    }\n  ],\n  \"payment_method\": \"balance\",\n  \"auto_pay\": false,\n  \"email\": \"client@example.com\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Pay Invoice",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/invoices/{{invoice_id}}/pay",
+        "body": { "mode": "raw", "raw": "{}" }
+      }
+    },
+    {
+      "name": "Invoice Detail",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/invoices/{{invoice_id}}"
+      }
+    },
+    {
+      "name": "Orders",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/orders?limit=50"
+      }
+    },
+    {
+      "name": "Order Detail",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/orders/{{order_id}}"
+      }
+    },
+    {
+      "name": "eSIM Products",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/products/esims?limit=50"
+      }
+    },
+    {
+      "name": "Create Deposit Invoice",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/accounts/deposit",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"currency\": \"EUR\",\n  \"payment_method\": \"bitcoin\",\n  \"amount\": 100\n}"
+        }
+      }
+    }
+  ]
+}

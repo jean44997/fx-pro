@@ -74,6 +74,7 @@ type WatchPayload = {
     iframe_url?: string;
     poster?: string;
     ad_free?: boolean;
+    licensed?: boolean;
     download_available?: boolean;
     source_note?: string;
     mp4_sources?: StreamSource[];
@@ -149,6 +150,7 @@ export default function WatchScreen() {
   const playerPoster = streams.poster || details?.backdrop_url || details?.poster_url || "";
   const backdrop = details?.backdrop_url || details?.poster_url || "";
   const providerNames = payload?.provider_names || [];
+  const hasPlayableSource = Boolean(streams.licensed && (selectedSource?.url || streams.primary_url || streams.hls_url || streams.dash_url));
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) || profiles[0];
 
   const profileKey = useMemo(() => `fxpro_watch_profiles_${user?.user_id || "guest"}`, [user?.user_id]);
@@ -255,7 +257,7 @@ export default function WatchScreen() {
   };
 
   const renderWebVideo = () => {
-    if (!selectedSource?.url && !streams.primary_url) return null;
+    if (!hasPlayableSource) return null;
     return React.createElement("iframe" as any, {
       key: `${playerId}-${quality}-${audioMode}-${subtitleMode}-${selectedSeason}-${selectedEpisode}`,
       title: `${details?.title || "Lecteur FX Pro"} - ${playerId}`,
@@ -277,6 +279,7 @@ export default function WatchScreen() {
 
   const renderIframe = () => {
     if (Platform.OS !== "web") return null;
+    if (!hasPlayableSource) return null;
     const videoUrl = selectedSource?.url || streams.primary_url || "";
     const srcDoc = buildPlayerDoc({
       playerId: "iframe",
@@ -303,6 +306,18 @@ export default function WatchScreen() {
         <View style={styles.centerFill}>
           <ActivityIndicator color={Colors.cyan} />
           <Text style={styles.softText}>Chargement du lecteur...</Text>
+        </View>
+      );
+    }
+    if (!hasPlayableSource) {
+      const lockedPoster = backdrop || playerPoster;
+      return (
+        <View style={styles.centerFill}>
+          {lockedPoster ? <Image source={{ uri: lockedPoster }} style={styles.posterPlayerImage} resizeMode="cover" /> : null}
+          <View style={styles.posterShade} />
+          <Ionicons name="lock-closed-outline" size={38} color={Colors.yellow} />
+          <Text style={styles.softText}>Source complete a configurer</Text>
+          <Text style={styles.licenseText}>Aucune fausse video n'est lancee pour ce titre.</Text>
         </View>
       );
     }
@@ -504,11 +519,11 @@ export default function WatchScreen() {
               {providerNames.length ? (
                 <Text style={styles.providers}>Sources officielles detectees: {providerNames.join(", ")}</Text>
               ) : (
-                <Text style={styles.providers}>Lecteur interne sans pub actif. Connecte tes fichiers licencies pour remplacer la video demo.</Text>
+                <Text style={styles.providers}>Aucun fournisseur officiel detecte dans ta region pour ce titre.</Text>
               )}
               <View style={styles.actionRow}>
-                <PrimaryButton title="Regarder" onPress={() => setPlayerError("")} icon={<Ionicons name="play" size={16} color="#000" />} style={styles.actionBtn} />
-                <GhostButton title="Telecharger" onPress={() => setDownloadOpen(true)} icon={<Ionicons name="download-outline" size={16} color={Colors.cyan} />} style={styles.actionBtn} />
+                <PrimaryButton title="Regarder" disabled={!hasPlayableSource} onPress={() => setPlayerError("")} icon={<Ionicons name="play" size={16} color="#000" />} style={styles.actionBtn} />
+                <GhostButton title="Telecharger" onPress={() => (downloadSources.length ? setDownloadOpen(true) : setPlayerError("Telechargement indisponible: aucune source licenciee configuree pour ce titre."))} icon={<Ionicons name="download-outline" size={16} color={Colors.cyan} />} style={styles.actionBtn} />
                 <GhostButton title="Changer de lecteur" onPress={cyclePlayer} icon={<Ionicons name="repeat-outline" size={16} color={Colors.cyan} />} style={styles.actionBtn} />
                 {payload?.trailer_url ? (
                   <GhostButton title="Bande-annonce" onPress={() => openExternal(payload.trailer_url)} icon={<Ionicons name="open-outline" size={16} color={Colors.cyan} />} style={styles.actionBtn} />
@@ -622,6 +637,7 @@ const styles = StyleSheet.create({
   posterPlayerImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   posterShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.38)" },
   playCircle: { width: 70, height: 70, borderRadius: 24, backgroundColor: Colors.cyan, alignItems: "center", justifyContent: "center" },
+  licenseText: { color: Colors.yellow, marginTop: 6, fontSize: 12, fontWeight: "800", textAlign: "center", paddingHorizontal: 18 },
   playerWarning: { borderTopWidth: 1, borderTopColor: "rgba(255,214,10,0.28)", backgroundColor: "rgba(255,214,10,0.08)", padding: 10, flexDirection: "row", alignItems: "center", gap: 8 },
   playerWarningText: { color: Colors.yellow, flex: 1, fontSize: 12, fontWeight: "800" },
   controlPanel: { paddingVertical: 10, gap: 8 },

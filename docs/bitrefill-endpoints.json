@@ -1,0 +1,256 @@
+{
+  "base_url": "https://api.bitrefill.com/v2",
+  "auth": {
+    "personal": "Bearer ${BITREFILL_API_KEY}",
+    "business": "Basic base64(${BITREFILL_API_ID}:${BITREFILL_API_SECRET})"
+  },
+  "rate_limits": {
+    "GET /ping": "1 request / 3 seconds",
+    "GET /products": "60 requests / 1 minute; product quota 1000 / hour",
+    "GET /products/search": "60 requests / 1 minute; product quota 1000 / hour",
+    "GET /products/{id}": "60 requests / 1 minute",
+    "GET /accounts/balance": "60 requests / 10 minutes",
+    "GET /invoices": "20 requests / 1 minute",
+    "GET /invoices/{id}": "60 requests / 10 minutes",
+    "POST /invoices": "60 requests / 10 minutes",
+    "POST /invoices/{id}/pay": "60 requests / 10 minutes",
+    "GET /orders": "20 requests / 1 minute",
+    "GET /orders/{id}": "60 requests / 10 minutes",
+    "GET /products/esims": "60 requests / 1 minute",
+    "GET /products/esims/{id}": "60 requests / 1 minute",
+    "POST /esims": "60 requests / 10 minutes",
+    "GET /esims": "20 requests / 1 minute",
+    "GET /esims/{id}": "60 requests / 10 minutes",
+    "POST /accounts/deposit": "60 requests / 10 minutes"
+  },
+  "categories": [
+    "other",
+    "games",
+    "ecommerce",
+    "retail",
+    "travel",
+    "food",
+    "refill",
+    "pin",
+    "apparel",
+    "entertainment",
+    "restaurants",
+    "bill",
+    "health-beauty",
+    "gifts",
+    "experiences",
+    "home",
+    "data",
+    "electronics",
+    "bundles",
+    "groceries",
+    "streaming",
+    "esim",
+    "automobiles",
+    "food-delivery",
+    "music",
+    "pets",
+    "flights",
+    "utility-bills",
+    "pizza",
+    "pharmacy",
+    "voip",
+    "multi-brand",
+    "payment-cards",
+    "cruises",
+    "bitcoin",
+    "voucher"
+  ],
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/ping",
+      "auth_required": true,
+      "description": "Health/auth check for the current API credentials.",
+      "query": {}
+    },
+    {
+      "method": "GET",
+      "path": "/products",
+      "auth_required": true,
+      "description": "List gift cards, mobile refills, eSIMs and other products.",
+      "query": {
+        "start": "integer offset, default 0",
+        "limit": "integer max 50",
+        "include_test_products": "boolean",
+        "country": "ISO 3166-1 alpha-2, comma separated; XI for international",
+        "category": "comma-separated category filters",
+        "type": "for example gift_card"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/products/search",
+      "auth_required": true,
+      "description": "Search products by keyword.",
+      "query": {
+        "q": "required, 1-100 chars",
+        "start": "integer offset",
+        "limit": "integer max 50",
+        "include_test_products": "boolean"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/products/{id}",
+      "auth_required": true,
+      "description": "Retrieve one product with denominations/packages/range.",
+      "path_params": {
+        "id": "Bitrefill product id"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/products/esims",
+      "auth_required": true,
+      "description": "List eSIM products.",
+      "query": {
+        "start": "integer offset",
+        "limit": "integer max 50",
+        "country": "country filter"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/products/esims/{id}",
+      "auth_required": true,
+      "description": "Retrieve one eSIM product.",
+      "path_params": {
+        "id": "eSIM product id"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/accounts/balance",
+      "auth_required": true,
+      "description": "Retrieve Bitrefill account balance."
+    },
+    {
+      "method": "POST",
+      "path": "/accounts/deposit",
+      "auth_required": true,
+      "description": "Create a crypto invoice to fund account balance.",
+      "body": {
+        "currency": "EUR | USD | BTC",
+        "payment_method": "bitcoin | lightning | ethereum | usdt_* | usdc_* ...",
+        "amount": "optional number"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/invoices",
+      "auth_required": true,
+      "description": "List invoices for the authenticated account.",
+      "query": {
+        "start": "integer offset",
+        "limit": "integer max 50",
+        "after": "start date",
+        "before": "end date"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/invoices",
+      "auth_required": true,
+      "description": "Create invoice for one or multiple products.",
+      "body": {
+        "products": [
+          {
+            "product_id": "required",
+            "package_id": "required for fixed denominations",
+            "value": "required for ranged denominations",
+            "quantity": "optional default 1",
+            "phone_number": "required for some top-ups"
+          }
+        ],
+        "payment_method": "balance | bitcoin | lightning | ethereum ...",
+        "refund_address": "required for crypto payments",
+        "webhook_url": "optional",
+        "auto_pay": "boolean",
+        "email": "optional end user email"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/invoices/{id}",
+      "auth_required": true,
+      "description": "Retrieve one invoice.",
+      "path_params": {
+        "id": "invoice id"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/invoices/{id}/pay",
+      "auth_required": true,
+      "description": "Pay an invoice from Bitrefill balance.",
+      "path_params": {
+        "id": "invoice id"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/orders",
+      "auth_required": true,
+      "description": "List user orders.",
+      "query": {
+        "start": "integer offset",
+        "limit": "integer max 50",
+        "after": "start date",
+        "before": "end date"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/orders/{id}",
+      "auth_required": true,
+      "description": "Retrieve one order and redemption info when available.",
+      "path_params": {
+        "id": "order id"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/esims",
+      "auth_required": true,
+      "description": "Create eSIM invoice/order.",
+      "body": {
+        "product_id": "required",
+        "package_id": "required",
+        "payment_method": "balance or crypto method",
+        "auto_pay": "boolean"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/esims",
+      "auth_required": true,
+      "description": "List purchased eSIMs."
+    },
+    {
+      "method": "GET",
+      "path": "/esims/{id}",
+      "auth_required": true,
+      "description": "Retrieve one purchased eSIM."
+    }
+  ],
+  "common_errors": [
+    "unsupported_payment_method",
+    "missing_param",
+    "parse_error",
+    "not_found",
+    "out_of_stock",
+    "invalid_param",
+    "invalid_value",
+    "invalid_package_id",
+    "too_many_items",
+    "create_invoice_failed",
+    "balance_too_low",
+    "429 too_many_requests"
+  ]
+}
