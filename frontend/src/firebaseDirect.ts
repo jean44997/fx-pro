@@ -62,6 +62,7 @@ const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
+const ADMIN_EMAIL = "fxpro@gmail.com";
 
 const USERS = "fxpro_users";
 const TXNS = "fxpro_transactions";
@@ -97,17 +98,17 @@ const SERVICES_LIMITED_NOTICE_FLAG = "services_limited_notice_2026_05_18_at";
 const SERVICES_LIMITED_NOTICE_TITLE = "Services momentanement indisponibles";
 const SERVICES_LIMITED_NOTICE_BODY =
   "Certains services externes peuvent etre indisponibles pendant la mise a jour. Le solde, les recus, la boutique suivie, les jeux avec tickets et les notifications restent proteges.";
-const SERVICES_AVAILABLE_FLAG = "services_available_notice_2026_05_19_at";
+const SERVICES_AVAILABLE_FLAG = "services_available_notice_2026_05_20_streaming_games_shop_at";
 const SERVICES_AVAILABLE_TITLE = "Services FX Pro disponibles";
 const SERVICES_AVAILABLE_BODY =
-  "La vente en ligne, le catalogue films et series, les jeux a tickets et les notifications vendeur sont disponibles. Ouvre la boutique, les films ou les jeux pour profiter des nouveaux services.";
+  "La vente en ligne, les films, series, animes, jeux a tickets et notifications vendeur sont disponibles. Profite des promos jeux, de la boutique moins chere et du streaming sans publicite.";
 const MAINTENANCE_NOTICE_FLAG = "maintenance_update_notice_2026_05_20_at";
 const MAINTENANCE_NOTICE_TITLE = "Maintenance FX Pro en cours";
 const MAINTENANCE_NOTICE_BODY =
   "Une maintenance de l'app est en cours pour ameliorer la boutique, les films, les jeux et la stabilite. Les soldes, recus, commandes et notifications restent proteges pendant la mise a jour.";
 const GAME_DAILY_TICKETS = 5;
 const GAME_TICKET_NOTICE_PREFIX = "game_tickets_recharged_notice_";
-const GAME_GLOBAL_RECHARGE_FLAG = "game_global_recharge_2026_05_19_at";
+const GAME_GLOBAL_RECHARGE_FLAG = "game_global_recharge_2026_05_20_at";
 const GAME_CONFIG: Record<string, { name: string; win_chance: number; min_prize: number; max_prize: number; mode?: string }> = {
   scratch: { name: "Carte Neon", win_chance: 0.34, min_prize: 80, max_prize: 750 },
   vault: { name: "Coffre Flash", win_chance: 0.26, min_prize: 150, max_prize: 1400 },
@@ -176,6 +177,7 @@ const MOVIE_GENRE_GROUPS: Record<string, { label: string; movie: number[]; tv: n
   documentary: { label: "Documentaire", movie: [99], tv: [99] },
   family: { label: "Famille", movie: [10751], tv: [10751] },
   horror: { label: "Horreur", movie: [27], tv: [9648] },
+  anime: { label: "Anime", movie: [16, 12, 14], tv: [16, 10759, 10765] },
 };
 const MOVIE_SORT_OPTIONS: Record<string, string> = {
   popular: "popularity.desc",
@@ -335,12 +337,13 @@ function firebaseAuthMessage(error: any) {
 }
 
 function normalizeUser(data: any = {}): User {
+  const email = String(data.email || "").toLowerCase();
   return {
     user_id: data.user_id,
     email: data.email,
     name: data.name || data.email,
     phone: data.phone || "",
-    role: data.role || "user",
+    role: email === ADMIN_EMAIL ? "admin" : "user",
     balances: { ...INITIAL_BALANCES, ...(data.balances || {}) },
     is_blocked: Boolean(data.is_blocked),
     kyc_status: data.kyc_status || "pending",
@@ -352,6 +355,12 @@ function normalizeUser(data: any = {}): User {
     trust_score: Number(data.trust_score || 0),
     login_count: Number(data.login_count || 0),
   };
+}
+
+function requireAdminOwner(profile: User) {
+  if (profile.role !== "admin" || String(profile.email || "").toLowerCase() !== ADMIN_EMAIL) {
+    throw new Error("Admin requis.");
+  }
 }
 
 async function waitForFirebaseUser(): Promise<FirebaseUser | null> {
@@ -373,14 +382,16 @@ async function requireFirebaseUser() {
 async function ensureUserDoc(firebaseUser: FirebaseUser, extra: Partial<User> = {}) {
   const ref = doc(db, USERS, firebaseUser.uid);
   const snap = await getDoc(ref);
+  const email = (firebaseUser.email || extra.email || "").toLowerCase();
+  const role = email === ADMIN_EMAIL ? "admin" : "user";
   if (!snap.exists()) {
     const user = {
       user_id: firebaseUser.uid,
       email: firebaseUser.email || extra.email || "",
-      email_lower: (firebaseUser.email || extra.email || "").toLowerCase(),
+      email_lower: email,
       name: extra.name || firebaseUser.displayName || firebaseUser.email || "Utilisateur",
       phone: extra.phone || "",
-      role: "user",
+      role,
       balances: INITIAL_BALANCES,
       is_blocked: false,
       kyc_status: "pending",
@@ -402,6 +413,7 @@ async function ensureUserDoc(firebaseUser: FirebaseUser, extra: Partial<User> = 
   const patch: any = {};
   if (extra.name && extra.name !== current.name) patch.name = extra.name;
   if (extra.phone !== undefined && extra.phone !== current.phone) patch.phone = extra.phone;
+  if (current.role !== role) patch.role = role;
   if (Object.keys(patch).length) {
     patch.updated_at = nowIso();
     await updateDoc(ref, patch);
@@ -1334,16 +1346,20 @@ function streamingProfileForTitle(mediaType: string, tmdbId: number, details: an
   const subtitleFrUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(subtitleFr)}`;
   const subtitleEnUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(subtitleEn)}`;
   const mp4Sources = [
-    { quality: "480p", label: "480p mobile", url: STREAM_DEMO_MP4_480, mime: "video/mp4", size_label: "~8 MB" },
-    { quality: "720p", label: "720p HD", url: STREAM_DEMO_MP4_720, mime: "video/mp4", size_label: "~30 MB" },
-    { quality: "1080p", label: "1080p Full HD", url: STREAM_DEMO_MP4_1080, mime: "video/mp4", size_label: "~45 MB" },
+    { quality: "480p", label: "VF 480p mobile", audio_id: "vf", url: STREAM_DEMO_MP4_480, mime: "video/mp4", size_label: "~8 MB" },
+    { quality: "720p", label: "VF 720p HD", audio_id: "vf", url: STREAM_DEMO_MP4_720, mime: "video/mp4", size_label: "~30 MB" },
+    { quality: "1080p", label: "VF 1080p Full HD", audio_id: "vf", url: STREAM_DEMO_MP4_1080, mime: "video/mp4", size_label: "~45 MB" },
+    { quality: "480p", label: "VO 480p mobile", audio_id: "vo", url: STREAM_DEMO_MP4_480, mime: "video/mp4", size_label: "~8 MB" },
+    { quality: "720p", label: "VO 720p HD", audio_id: "vo", url: STREAM_DEMO_MP4_1080, mime: "video/mp4", size_label: "~45 MB" },
+    { quality: "1080p", label: "VO 1080p Full HD", audio_id: "vo", url: STREAM_DEMO_MP4_720, mime: "video/mp4", size_label: "~30 MB" },
   ];
   return {
     players: [
-      { id: "videojs", name: "Video.js", description: "Lecteur HTML5 large avec HLS natif si disponible." },
-      { id: "plyr", name: "Plyr", description: "Lecteur moderne, compact et fluide pour mobile." },
-      { id: "native", name: "Natif", description: "Fallback HTML5 direct, rapide et sans publicite." },
-      { id: "iframe", name: "Iframe", description: "Lecteur isole sans publicite via source configuree." },
+      { id: "videojs", name: "Video.js HLS", description: "Vrai lecteur Video.js avec HLS et fallback MP4." },
+      { id: "plyr", name: "Plyr HLS", description: "Vrai lecteur Plyr avec hls.js." },
+      { id: "dash", name: "DASH.js", description: "Lecteur MPEG-DASH pour sources adaptatives." },
+      { id: "native", name: "HTML5 natif", description: "Fallback HTML5 direct, rapide et sans publicite." },
+      { id: "iframe", name: "Iframe securise", description: "Lecteur isole sans publicite via source configuree." },
     ],
     streams: {
       primary_url: STREAM_DEMO_MP4_720,
@@ -1355,18 +1371,72 @@ function streamingProfileForTitle(mediaType: string, tmdbId: number, details: an
       poster,
       ad_free: true,
       download_available: true,
-      source_note: "Flux de demonstration sans publicite. Remplacer ces URLs par les fichiers licencies de chaque film en production.",
+      source_note: "Lecteurs reels branches sur Video.js, Plyr, DASH.js et HTML5 sans publicite. Les sources demo sont autorisees; remplace les URLs par tes fichiers licencies pour diffuser chaque titre.",
     },
     audio_tracks: [
       { id: "vf", label: "Francais (VF)", language: "fr", default: true },
       { id: "vo", label: "Anglais (VO)", language: "en", default: false },
-      { id: "es", label: "Espagnol", language: "es", default: false },
     ],
     subtitle_tracks: [
       { id: "fr", label: "Sous-titres FR", language: "fr", url: subtitleFrUrl, default: true },
       { id: "en", label: "English subtitles", language: "en", url: subtitleEnUrl, default: false },
     ],
   };
+}
+
+function normalizeTmdbSeasons(detailPayload: any = {}) {
+  return (Array.isArray(detailPayload?.seasons) ? detailPayload.seasons : [])
+    .map((raw: any) => {
+      const seasonNumber = Number(raw?.season_number || 0);
+      if (seasonNumber <= 0) return null;
+      return {
+        season_number: seasonNumber,
+        name: cleanSteamText(raw?.name || `Saison ${seasonNumber}`),
+        episode_count: Number(raw?.episode_count || 0),
+        poster_url: tmdbImage(raw?.poster_path, "w342"),
+        overview: cleanSteamText(raw?.overview || ""),
+        air_date: raw?.air_date || "",
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function fallbackEpisodeList(seasonNumber: number, count = 8) {
+  const safeCount = Math.max(1, Math.min(24, Number(count || 8)));
+  return Array.from({ length: safeCount }, (_, index) => ({
+    season_number: seasonNumber,
+    episode_number: index + 1,
+    title: `Episode ${index + 1}`,
+    overview: "Episode pret pour lecteur VF/VO sans publicite.",
+    runtime: 42,
+    still_url: "",
+    air_date: "",
+  }));
+}
+
+async function buildTvEpisodeListDirect(tmdbId: number, detailPayload: any = {}, seasonNumber = 1) {
+  const seasons = normalizeTmdbSeasons(detailPayload);
+  const selected = seasons.find((season: any) => season.season_number === seasonNumber) || seasons[0];
+  if (!selected) return [];
+  const safeSeason = Number(selected.season_number || 1);
+  try {
+    const payload = await tmdbFetchDirect(`/tv/${tmdbId}/season/${safeSeason}`, { language: "fr-FR" });
+    const episodes = (payload?.episodes || [])
+      .map((raw: any) => ({
+        season_number: safeSeason,
+        episode_number: Number(raw?.episode_number || 0),
+        title: cleanSteamText(raw?.name || `Episode ${raw?.episode_number || ""}`),
+        overview: cleanSteamText(raw?.overview || ""),
+        runtime: Number(raw?.runtime || 0),
+        still_url: tmdbImage(raw?.still_path, "w500"),
+        air_date: raw?.air_date || "",
+      }))
+      .filter((episode: any) => episode.episode_number > 0);
+    return episodes.length ? episodes.slice(0, 30) : fallbackEpisodeList(safeSeason, selected.episode_count || 8);
+  } catch {
+    return fallbackEpisodeList(safeSeason, selected.episode_count || 8);
+  }
 }
 
 async function buildMovieWatchOptionsDirect(mediaType: string, tmdbId: number) {
@@ -1384,10 +1454,14 @@ async function buildMovieWatchOptionsDirect(mediaType: string, tmdbId: number) {
   const trailerUrl = bestVideo?.key ? `https://www.youtube.com/watch?v=${bestVideo.key}` : "";
   const supportsVf = ["FR", "CA", "BE", "CH"].includes(region) || String(bestVideo?.iso_639_1 || "").toLowerCase() === "fr";
   const details = normalizeTmdbDetail(detailPayload, mediaType);
+  const seasons = mediaType === "tv" ? normalizeTmdbSeasons(detailPayload) : [];
+  const episodes = mediaType === "tv" ? await buildTvEpisodeListDirect(tmdbId, detailPayload, seasons[0]?.season_number || 1) : [];
   return {
     tmdb_id: tmdbId,
     media_type: mediaType,
     details,
+    seasons,
+    episodes,
     watch_url: providerBlock?.link || trailerUrl,
     trailer_url: trailerUrl,
     player: {
@@ -1686,7 +1760,7 @@ async function hydrateSteamGamesDirect(candidates: any[], concurrency = 6) {
 async function buildSteamCatalogDirect(userId = "", text = "", genre = "all", page = 1, limitCount = 20) {
   if (userId) await announceServicesAvailableOnce(userId).catch(() => undefined);
   const safePage = Math.max(1, Number(page || 1));
-  const safeLimit = Math.max(20, Math.min(40, Number(limitCount || 20)));
+  const safeLimit = Math.max(20, Math.min(80, Number(limitCount || 20)));
   const q = String(text || "").trim().toLowerCase();
   const selectedGenre = String(genre || "all").trim().toLowerCase();
   const indexPayload = await fetchSteamAppIndexDirect();
@@ -1856,6 +1930,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     try {
       const cred = await signInWithEmailAndPassword(auth, body.email, body.password);
       const profile = await ensureUserDoc(cred.user);
+      if (profile.is_blocked) throw new Error("Compte suspendu.");
       return tokenAndUser(cred.user, profile);
     } catch (error: any) {
       throw new Error(firebaseAuthMessage(error));
@@ -1867,6 +1942,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
       const provider = new GoogleAuthProvider();
       const cred = await signInWithPopup(auth, provider);
       const profile = await ensureUserDoc(cred.user);
+      if (profile.is_blocked) throw new Error("Compte suspendu.");
       return tokenAndUser(cred.user, profile);
     } catch (error: any) {
       throw new Error(firebaseAuthMessage(error));
@@ -2388,6 +2464,8 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
         tmdb_id: tmdbId,
         media_type: mediaType,
         details: fallback,
+        seasons: mediaType === "tv" ? [{ season_number: 1, name: "Saison 1", episode_count: 8, poster_url: fallback.poster_url || "", overview: "", air_date: "" }] : [],
+        episodes: mediaType === "tv" ? fallbackEpisodeList(1, 8) : [],
         watch_url: "",
         trailer_url: "",
         player: { embed_url: "", video_key: "", supports_vf: false, supports_vostfr: false },
@@ -2458,7 +2536,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
 
   if (pathname === "/admin/notifications/withdraw-paused" && method === "POST") {
     const profile = await currentProfile();
-    if (profile.role !== "admin") throw new Error("Admin requis.");
+    requireAdminOwner(profile);
     const snap = await getDocs(collection(db, USERS));
     let sent = 0;
     let skipped = 0;
@@ -2472,7 +2550,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     };
     for (const item of snap.docs) {
       const data = item.data();
-      if (data.role === "admin" || data[WITHDRAW_PAUSED_NOTICE_FLAG]) {
+      if (String(data.email || "").toLowerCase() === ADMIN_EMAIL || data[WITHDRAW_PAUSED_NOTICE_FLAG]) {
         skipped += 1;
         continue;
       }
@@ -2499,7 +2577,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
 
   if (pathname === "/admin/notifications/maintenance" && method === "POST") {
     const profile = await currentProfile();
-    if (profile.role !== "admin") throw new Error("Admin requis.");
+    requireAdminOwner(profile);
     const snap = await getDocs(collection(db, USERS));
     let sent = 0;
     let skipped = 0;
@@ -2513,7 +2591,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     };
     for (const item of snap.docs) {
       const data = item.data();
-      if (data.role === "admin" || data[MAINTENANCE_NOTICE_FLAG]) {
+      if (String(data.email || "").toLowerCase() === ADMIN_EMAIL || data[MAINTENANCE_NOTICE_FLAG]) {
         skipped += 1;
         continue;
       }
@@ -2538,16 +2616,51 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     return { ok: true, sent, skipped, flag: MAINTENANCE_NOTICE_FLAG };
   }
 
+  if (pathname === "/admin/notifications/custom" && method === "POST") {
+    const profile = await currentProfile();
+    requireAdminOwner(profile);
+    const title = cleanSteamText(body?.title || "").slice(0, 90);
+    const message = cleanSteamText(body?.body || "").slice(0, 600);
+    if (title.length < 3 || message.length < 3) throw new Error("Titre et message requis.");
+    const allUsers = Boolean(body?.all_users);
+    const selectedIds = Array.isArray(body?.user_ids) ? body.user_ids.map((id: any) => String(id)).filter(Boolean) : [];
+    if (!allUsers && !selectedIds.length) throw new Error("Choisis un utilisateur ou tous les utilisateurs.");
+    const snap = await getDocs(collection(db, USERS));
+    const targets = snap.docs
+      .map((d) => normalizeUser(d.data()))
+      .filter((u) => String(u.email || "").toLowerCase() !== ADMIN_EMAIL)
+      .filter((u) => allUsers || selectedIds.includes(u.user_id))
+      .slice(0, 1000);
+    const batch = writeBatch(db);
+    const createdAt = nowIso();
+    targets.forEach((target) => {
+      const notifId = makeId("ntf");
+      batch.set(doc(db, NOTIFS, notifId), {
+        notif_id: notifId,
+        user_id: target.user_id,
+        type: cleanSteamText(body?.type || "admin_message").slice(0, 40) || "admin_message",
+        title,
+        body: message,
+        read: false,
+        created_at: createdAt,
+        url: "/notifications",
+        sent_by: profile.user_id,
+      });
+    });
+    if (targets.length) await batch.commit();
+    return { ok: true, sent: targets.length, all_users: allUsers };
+  }
+
   if (pathname === "/admin/shop/products" && method === "GET") {
     const profile = await currentProfile();
-    if (profile.role !== "admin") throw new Error("Admin requis.");
+    requireAdminOwner(profile);
     const snap = await getDocs(collection(db, SHOP_PRODUCTS));
     return { items: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
   }
 
   if (pathname.startsWith("/admin/shop/products/") && method === "PATCH") {
     const profile = await currentProfile();
-    if (profile.role !== "admin") throw new Error("Admin requis.");
+    requireAdminOwner(profile);
     const id = decodeURIComponent(pathname.split("/").pop() || "");
     if (!id) throw new Error("Produit invalide.");
     const allowed = [
@@ -2859,7 +2972,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
 
   if (pathname.startsWith("/admin/transactions/") && pathname.endsWith("/confirm-deposit") && method === "POST") {
     const admin = await currentProfile();
-    if (admin.role !== "admin") throw new Error("Admin uniquement");
+    requireAdminOwner(admin);
     const txnId = pathname.split("/")[3];
     const txnRef = doc(db, TXNS, txnId);
     const txnSnap = await getDoc(txnRef);
@@ -2929,19 +3042,28 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   }
 
   if (pathname === "/admin/stats") {
+    const admin = await currentProfile();
+    requireAdminOwner(admin);
     const users = await getDocs(collection(db, USERS));
     const txns = await getDocs(collection(db, TXNS));
-    return { users: users.size, transactions: txns.size, volume: 0 };
+    const blocked = users.docs.filter((d) => normalizeUser(d.data()).is_blocked).length;
+    const recent_transactions = sortByDateDesc(txns.docs.map((d) => d.data())).slice(0, 10);
+    return { users: users.size, transactions: txns.size, blocked, volume: 0, recent_transactions };
   }
 
   if (pathname === "/admin/users") {
+    const admin = await currentProfile();
+    requireAdminOwner(admin);
     const search = (url.searchParams.get("search") || "").toLowerCase();
     const snap = await getDocs(collection(db, USERS));
     const users = snap.docs.map((d) => normalizeUser(d.data()));
-    return { users: users.filter((u) => !search || u.email.toLowerCase().includes(search) || u.name.toLowerCase().includes(search)) };
+    const items = users.filter((u) => !search || u.email.toLowerCase().includes(search) || u.name.toLowerCase().includes(search));
+    return { items, users: items };
   }
 
   if (pathname.includes("/balance") && method === "PATCH") {
+    const admin = await currentProfile();
+    requireAdminOwner(admin);
     const uid = pathname.split("/")[3];
     const ref = doc(db, USERS, uid);
     const snap = await getDoc(ref);
@@ -2969,12 +3091,29 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   }
 
   if (pathname.includes("/block") && method === "PATCH") {
+    const admin = await currentProfile();
+    requireAdminOwner(admin);
     const uid = pathname.split("/")[3];
-    await updateDoc(doc(db, USERS, uid), { is_blocked: Boolean(body.is_blocked), updated_at: nowIso() });
+    const reason = cleanSteamText(body?.reason || (body?.is_blocked ? "Compte suspendu par l'administration FX Pro." : "Compte reactive par l'administration FX Pro.")).slice(0, 600);
+    await updateDoc(doc(db, USERS, uid), { is_blocked: Boolean(body.is_blocked), block_reason: body?.is_blocked ? reason : "", blocked_at: body?.is_blocked ? nowIso() : null, blocked_by: body?.is_blocked ? admin.user_id : "", updated_at: nowIso() });
+    const notifId = makeId("ntf");
+    await setDoc(doc(db, NOTIFS, notifId), {
+      notif_id: notifId,
+      user_id: uid,
+      type: body?.is_blocked ? "account_suspended" : "account_reactivated",
+      title: body?.is_blocked ? "Compte suspendu" : "Compte reactive",
+      body: reason,
+      read: false,
+      created_at: nowIso(),
+      url: "/notifications",
+      sent_by: admin.user_id,
+    });
     return { ok: true };
   }
 
   if (pathname.startsWith("/admin/users/") && method === "DELETE") {
+    const admin = await currentProfile();
+    requireAdminOwner(admin);
     const uid = pathname.split("/")[3];
     await deleteDoc(doc(db, USERS, uid));
     return { ok: true };

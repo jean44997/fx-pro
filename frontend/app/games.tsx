@@ -133,7 +133,7 @@ const GAME_LOOK: Record<string, { icon: any; color: string; label: string }> = {
 };
 
 const FREE_GAME_FALLBACK: FreeGameItem[] = FREE_GAME_SNAPSHOT.map((item) => ({ ...item }));
-const STEAM_QUICK_SEARCHES = ["2026", "Forza", "God of War", "Call of Duty", "EA SPORTS FC", "GTA", "Elden Ring"];
+const STEAM_QUICK_SEARCHES = ["2026", "Upcoming", "Forza", "God of War", "Call of Duty", "EA SPORTS FC", "GTA", "Elden Ring", "Survival", "RPG", "Racing"];
 
 export default function GamesScreen() {
   const router = useRouter();
@@ -263,7 +263,7 @@ export default function GamesScreen() {
         else setSteamLoading(true);
         const params = new URLSearchParams();
         params.set("page", String(page));
-        params.set("limit", "20");
+        params.set("limit", "60");
         params.set("genre", steamGenre);
         if (steamQuery.trim()) params.set("q", steamQuery.trim());
         const payload = await withTimeout(api.get(`/games/steam/catalog?${params.toString()}`), 9000, {
@@ -472,7 +472,7 @@ export default function GamesScreen() {
               <Text style={styles.sectionKicker}>Boutique Steam</Text>
               <Text style={styles.catalogTitle}>Catalogue jeux complet</Text>
               <Text style={styles.catalogSubtitle}>
-                {steamCatalog.total_results || 0} jeu(x), pagination 20/page, cache API et prix Steam quand disponibles. Solde XOF: {formatMoney(user?.balances?.XOF || 0, "XOF")}.
+                {steamCatalog.total_results || 0} jeu(x), affichage 60/page pour charger 300+ titres par pagination, cache API et prix Steam quand disponibles. Solde XOF: {formatMoney(user?.balances?.XOF || 0, "XOF")}.
               </Text>
             </View>
             <View style={styles.steamBadge}>
@@ -555,7 +555,7 @@ export default function GamesScreen() {
             <View style={styles.emptyBox}>
               <Ionicons name="logo-steam" size={28} color={Colors.textMuted} />
               <Text style={styles.emptyTitle}>Steam indisponible</Text>
-              <Text style={styles.emptyText}>Le catalogue Steam est cache et retentera automatiquement au prochain chargement.</Text>
+              <Text style={styles.emptyText}>Le catalogue Steam est cache et retentera automatiquement au prochain chargement. Essaie 2026, Upcoming, RPG ou Racing.</Text>
             </View>
           )}
 
@@ -659,30 +659,31 @@ export default function GamesScreen() {
                 <View style={styles.checkoutTop}>
                   <RemoteImage uri={steamCheckout.image || steamCheckout.thumbnail || steamCheckout.capsule_image} style={styles.checkoutImage} fallbackIcon="logo-steam" />
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={styles.checkoutKicker}>Paiement jeu Steam</Text>
+                    <Text style={styles.checkoutKicker}>Paiement jeu Steam securise</Text>
                     <Text style={styles.checkoutTitle} numberOfLines={2}>{steamCheckout.title || steamCheckout.name}</Text>
                     <Text style={styles.checkoutPrice}>{steamCheckout.is_free ? "Gratuit" : `${steamCheckout.fx_price_label || steamCheckout.price_label || "Offre FX"}`}</Text>
                     {steamCheckout.fx_discount_percent ? <Text style={styles.checkoutDiscount}>Promo FX Pro -{steamCheckout.fx_discount_percent}%</Text> : null}
+                    <Text style={styles.checkoutLegal}>Le solde FX Pro est debite uniquement apres validation. Les infos carte servent a la confirmation, pas a un paiement bancaire reel.</Text>
                   </View>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Email de confirmation</Text>
-                  <TextInput value={steamPayment.email} onChangeText={(email) => setSteamPayment((prev) => ({ ...prev, email }))} autoCapitalize="none" keyboardType="email-address" placeholder="client@email.com" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} />
+                  <TextInput testID="steam-pay-email" value={steamPayment.email} onChangeText={(email) => setSteamPayment((prev) => ({ ...prev, email }))} autoCapitalize="none" keyboardType="email-address" placeholder="client@email.com" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} />
                 </View>
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Carte bancaire</Text>
-                  <TextInput value={steamPayment.card} onChangeText={(card) => setSteamPayment((prev) => ({ ...prev, card }))} keyboardType="number-pad" placeholder="4242 4242 4242 4242" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} maxLength={23} />
-                  <Text style={styles.secureHint}>Seuls les 4 derniers chiffres sont envoyes. Le debit se fait sur ton solde FX Pro.</Text>
+                  <TextInput testID="steam-pay-card" value={steamPayment.card} onChangeText={(card) => setSteamPayment((prev) => ({ ...prev, card }))} keyboardType="number-pad" placeholder="4242 4242 4242 4242" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} maxLength={23} />
+                  <Text style={styles.secureHint}>Seuls les 4 derniers chiffres sont envoyes. Montant debite du solde: {steamCheckout.is_free ? "0 XOF" : (steamCheckout.fx_price_label || steamCheckout.price_label || "offre FX")}.</Text>
                 </View>
                 <View style={styles.checkoutRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.inputLabel}>Expiration</Text>
-                    <TextInput value={steamPayment.expiry} onChangeText={(expiry) => setSteamPayment((prev) => ({ ...prev, expiry }))} placeholder="MM/AA" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} maxLength={5} />
+                    <TextInput testID="steam-pay-expiry" value={steamPayment.expiry} onChangeText={(expiry) => setSteamPayment((prev) => ({ ...prev, expiry }))} placeholder="MM/AA" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} maxLength={5} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.inputLabel}>Nom carte</Text>
-                    <TextInput value={steamPayment.holder} onChangeText={(holder) => setSteamPayment((prev) => ({ ...prev, holder }))} placeholder="Nom complet" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} />
+                    <TextInput testID="steam-pay-holder" value={steamPayment.holder} onChangeText={(holder) => setSteamPayment((prev) => ({ ...prev, holder }))} placeholder="Nom complet" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} />
                   </View>
                 </View>
                 <View style={styles.checkoutActions}>
@@ -1144,6 +1145,7 @@ const styles = StyleSheet.create({
   checkoutTitle: { color: "#fff", fontSize: 20, fontWeight: "900", lineHeight: 24, marginTop: 2 },
   checkoutPrice: { color: Colors.green, fontSize: 18, fontWeight: "900", marginTop: 5 },
   checkoutDiscount: { color: Colors.yellow, fontSize: 11, fontWeight: "900", marginTop: 2 },
+  checkoutLegal: { color: Colors.textSoft, fontSize: 11, lineHeight: 16, marginTop: 6 },
   inputGroup: { marginTop: 10 },
   inputLabel: { color: Colors.textSoft, fontSize: 11, fontWeight: "900", textTransform: "uppercase", letterSpacing: 1.1, marginBottom: 6 },
   checkoutInput: { minHeight: 46, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.06)", color: "#fff", paddingHorizontal: 12, fontWeight: "800" },

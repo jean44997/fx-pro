@@ -38,7 +38,6 @@ export default function TabsLayout() {
 
   useEffect(() => {
     if (!loading && !user) router.replace("/(auth)/login");
-    if (!loading && user?.role === "admin") router.replace("/admin");
   }, [user, loading, router]);
 
   return (

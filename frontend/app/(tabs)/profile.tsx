@@ -19,6 +19,7 @@ export default function Profile() {
   const [phone, setPhone] = useState(user?.phone || "");
   const [saving, setSaving] = useState(false);
   const [photoSaving, setPhotoSaving] = useState(false);
+  const isFxAdmin = user?.role === "admin" && String(user?.email || "").toLowerCase() === "fxpro@gmail.com";
 
   const pickPhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -123,6 +124,7 @@ export default function Profile() {
   };
 
   const items: { icon: any; label: string; route?: any; testID: string; onPress?: () => void; color?: string }[] = [
+    ...(isFxAdmin ? [{ icon: "shield", label: "Administration FX Pro", route: "/admin", testID: "menu-admin", color: Colors.cyan }] : []),
     { icon: "lock-closed", label: "🔒 Coffre d'épargne", route: "/vault", testID: "menu-vault", color: Colors.purple },
     { icon: "add-circle", label: "Depot d'argent", route: "/deposit", testID: "menu-deposit", color: Colors.green },
     { icon: "cash", label: "Retrait d'argent", route: "/withdraw", testID: "menu-withdraw", color: Colors.yellow },

@@ -17,9 +17,15 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false);
   const [maintenanceBroadcasting, setMaintenanceBroadcasting] = useState(false);
+  const [customTitle, setCustomTitle] = useState("Services disponibles");
+  const [customBody, setCustomBody] = useState("La vente en ligne, les jeux et le streaming films/series sont maintenant disponibles.");
+  const [customAllUsers, setCustomAllUsers] = useState(true);
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [customSending, setCustomSending] = useState(false);
 
   useEffect(() => {
-    if (user && user.role !== "admin") router.replace("/(tabs)/home");
+    const email = String(user?.email || "").toLowerCase();
+    if (user && (user.role !== "admin" || email !== "fxpro@gmail.com")) router.replace("/(tabs)/home");
   }, [user, router]);
 
   const load = useCallback(async () => {
@@ -84,6 +90,35 @@ export default function AdminDashboard() {
     }
   };
 
+  const toggleSelectedUser = (userId: string) => {
+    setSelectedUsers((prev) => (prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]));
+  };
+
+  const sendCustomNotification = async () => {
+    const title = customTitle.trim();
+    const body = customBody.trim();
+    if (!title || !body) return Alert.alert("Message requis", "Titre et message sont obligatoires.");
+    if (!customAllUsers && selectedUsers.length === 0) return Alert.alert("Selection requise", "Selectionnez au moins un utilisateur.");
+    try {
+      setCustomSending(true);
+      const res = await api.post("/admin/notifications/custom", {
+        title,
+        body,
+        all_users: customAllUsers,
+        user_ids: customAllUsers ? [] : selectedUsers,
+        type: "admin_broadcast",
+      });
+      Alert.alert("Notification envoyee", `${res.sent || 0} utilisateur(s) prevenu(s).`);
+      setSelectedUsers([]);
+      setCustomAllUsers(true);
+      await load();
+    } catch (e: any) {
+      Alert.alert("Erreur", e.message);
+    } finally {
+      setCustomSending(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await load();
@@ -142,6 +177,61 @@ export default function AdminDashboard() {
             </Pressable>
           </View>
 
+          <GlassCard testID="admin-message-card">
+            <Text style={styles.sectionLabel}>Messages admin</Text>
+            <Text style={styles.helperText}>Envoyer une notification ciblee, grouppee ou a tous les comptes utilisateurs.</Text>
+            <TextInput
+              testID="admin-custom-title"
+              value={customTitle}
+              onChangeText={setCustomTitle}
+              placeholder="Titre de la notification"
+              placeholderTextColor={Colors.textMuted}
+              style={styles.messageInput}
+            />
+            <TextInput
+              testID="admin-custom-body"
+              value={customBody}
+              onChangeText={setCustomBody}
+              placeholder="Message a envoyer"
+              placeholderTextColor={Colors.textMuted}
+              multiline
+              style={[styles.messageInput, styles.messageArea]}
+            />
+            <View style={styles.segmentRow}>
+              <Pressable
+                testID="admin-custom-all"
+                onPress={() => setCustomAllUsers(true)}
+                style={[styles.segmentBtn, customAllUsers && styles.segmentActive]}
+              >
+                <Ionicons name="people" size={15} color={customAllUsers ? "#000" : Colors.cyan} />
+                <Text style={[styles.segmentText, customAllUsers && styles.segmentTextActive]}>Tous les users</Text>
+              </Pressable>
+              <Pressable
+                testID="admin-custom-selected"
+                onPress={() => setCustomAllUsers(false)}
+                style={[styles.segmentBtn, !customAllUsers && styles.segmentActive]}
+              >
+                <Ionicons name="person-add" size={15} color={!customAllUsers ? "#000" : Colors.cyan} />
+                <Text style={[styles.segmentText, !customAllUsers && styles.segmentTextActive]}>
+                  Selection ({selectedUsers.length})
+                </Text>
+              </Pressable>
+            </View>
+            {!customAllUsers ? (
+              <View style={styles.selectedPreview}>
+                <Text style={styles.helperText}>
+                  Touchez les comptes dans la liste pour les ajouter ou les retirer de la selection.
+                </Text>
+              </View>
+            ) : null}
+            <PrimaryButton
+              testID="admin-send-custom"
+              title={customSending ? "Envoi..." : "Envoyer la notification"}
+              loading={customSending}
+              onPress={sendCustomNotification}
+            />
+          </GlassCard>
+
           {/* Users list */}
           <GlassCard testID="admin-users-card">
             <Text style={styles.sectionLabel}>Gestion des utilisateurs</Text>
@@ -160,9 +250,14 @@ export default function AdminDashboard() {
               <Animated.View key={u.user_id} entering={FadeInUp.delay(i * 30)}>
                 <Pressable
                   testID={`admin-user-${u.email}`}
-                  onPress={() => router.push({ pathname: "/admin/user", params: { id: u.user_id } })}
-                  style={styles.userRow}
+                  onPress={() => (customAllUsers ? router.push({ pathname: "/admin/user", params: { id: u.user_id } }) : toggleSelectedUser(u.user_id))}
+                  style={[styles.userRow, selectedUsers.includes(u.user_id) && styles.userRowSelected]}
                 >
+                  {!customAllUsers ? (
+                    <Pressable testID={`admin-select-${u.email}`} onPress={() => toggleSelectedUser(u.user_id)} style={[styles.selectBox, selectedUsers.includes(u.user_id) && styles.selectBoxActive]}>
+                      {selectedUsers.includes(u.user_id) ? <Ionicons name="checkmark" size={14} color="#000" /> : null}
+                    </Pressable>
+                  ) : null}
                   <View style={[styles.avatar, u.is_blocked && { borderColor: Colors.danger }]}>
                     <Text style={{ color: u.is_blocked ? Colors.danger : Colors.cyan, fontWeight: "900" }}>
                       {(u.name || "?").charAt(0).toUpperCase()}
@@ -232,9 +327,21 @@ const styles = StyleSheet.create({
   qAction: { flex: 1, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", paddingVertical: 12, borderRadius: 14, borderWidth: 1.5, backgroundColor: "rgba(255,255,255,0.04)" },
   qText: { color: "#fff", fontWeight: "800", fontSize: 12 },
   sectionLabel: { color: Colors.cyan, fontSize: 11, letterSpacing: 2, textTransform: "uppercase", marginBottom: 8 },
+  helperText: { color: Colors.textSoft, fontSize: 12, lineHeight: 18, marginBottom: 10 },
+  messageInput: { color: "#fff", fontSize: 14, borderWidth: 1, borderColor: Colors.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "rgba(255,255,255,0.05)", marginTop: 8 },
+  messageArea: { minHeight: 88, textAlignVertical: "top" },
+  segmentRow: { flexDirection: "row", gap: 8, marginTop: 12 },
+  segmentBtn: { flex: 1, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", paddingVertical: 10, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: Colors.cyan, backgroundColor: "rgba(0,255,255,0.06)" },
+  segmentActive: { backgroundColor: Colors.cyan, borderColor: Colors.cyan },
+  segmentText: { color: Colors.cyan, fontWeight: "900", fontSize: 12 },
+  segmentTextActive: { color: "#000" },
+  selectedPreview: { padding: 10, borderRadius: 12, borderWidth: 1, borderColor: "rgba(0,255,255,0.24)", backgroundColor: "rgba(0,255,255,0.05)", marginTop: 10 },
   searchRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: Colors.border, marginBottom: 8 },
   search: { flex: 1, color: "#fff", fontSize: 14 },
   userRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+  userRowSelected: { backgroundColor: "rgba(0,255,255,0.06)", borderRadius: 14, paddingHorizontal: 8, borderBottomColor: "transparent" },
+  selectBox: { width: 24, height: 24, borderRadius: 8, borderWidth: 1, borderColor: Colors.cyan, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,255,255,0.06)" },
+  selectBoxActive: { backgroundColor: Colors.cyan, borderColor: Colors.cyan },
   avatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: Colors.cyan, backgroundColor: "rgba(0,255,255,0.08)" },
   txnRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
   confirmBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 6, borderRadius: 999, backgroundColor: Colors.green },

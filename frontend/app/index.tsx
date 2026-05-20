@@ -25,8 +25,7 @@ export default function Index() {
         if (!unlocked) {
           await logout();
           router.replace("/(auth)/login");
-        } else if (user.role === "admin") router.replace("/admin");
-        else router.replace("/(tabs)/home");
+        } else router.replace("/(tabs)/home");
       }
     }, 900);
     return () => clearTimeout(t);

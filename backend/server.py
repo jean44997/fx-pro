@@ -30,6 +30,8 @@ DB_NAME = os.environ["DB_NAME"]
 JWT_SECRET = os.environ.get("JWT_SECRET", "fxpro-secret-change-me-2026")
 JWT_ALG = "HS256"
 JWT_TTL_DAYS = 7
+ADMIN_EMAIL = "fxpro@gmail.com"
+ADMIN_EMAILS = {ADMIN_EMAIL}
 
 SUPPORTED_CURRENCIES = [
     "EUR", "XOF", "XAF", "USD", "GBP", "NGN", "MAD", "CAD", "CHF", "JPY", "CNY",
@@ -76,11 +78,11 @@ SERVICES_LIMITED_NOTICE_BODY = (
     "Certains services externes peuvent etre indisponibles pendant la mise a jour. "
     "Le solde, les recus, la boutique suivie, les jeux avec tickets et les notifications restent proteges."
 )
-SERVICES_AVAILABLE_FLAG = "services_available_notice_2026_05_19_at"
+SERVICES_AVAILABLE_FLAG = "services_available_notice_2026_05_20_streaming_games_shop_at"
 SERVICES_AVAILABLE_TITLE = "Services FX Pro disponibles"
 SERVICES_AVAILABLE_BODY = (
-    "La vente en ligne, le catalogue films et series, les jeux a tickets et les notifications vendeur sont disponibles. "
-    "Ouvre la boutique, les films ou les jeux pour profiter des nouveaux services."
+    "La vente en ligne, les films, series, animes, jeux a tickets et notifications vendeur sont disponibles. "
+    "Profite des promos jeux, de la boutique moins chere et du streaming sans publicite."
 )
 MAINTENANCE_NOTICE_FLAG = "maintenance_update_notice_2026_05_20_at"
 MAINTENANCE_NOTICE_TITLE = "Maintenance FX Pro en cours"
@@ -90,7 +92,7 @@ MAINTENANCE_NOTICE_BODY = (
 )
 GAME_DAILY_TICKETS = 5
 GAME_TICKET_NOTICE_PREFIX = "game_tickets_recharged_notice_"
-GAME_GLOBAL_RECHARGE_FLAG = "game_global_recharge_2026_05_19_at"
+GAME_GLOBAL_RECHARGE_FLAG = "game_global_recharge_2026_05_20_at"
 GAME_CONFIG = {
     "scratch": {"name": "Carte Neon", "win_chance": 0.34, "min_prize": 80, "max_prize": 750},
     "vault": {"name": "Coffre Flash", "win_chance": 0.26, "min_prize": 150, "max_prize": 1400},
@@ -160,6 +162,7 @@ MOVIE_GENRE_GROUPS = {
     "documentary": {"label": "Documentaire", "movie": [99], "tv": [99]},
     "family": {"label": "Famille", "movie": [10751], "tv": [10751]},
     "horror": {"label": "Horreur", "movie": [27], "tv": [9648]},
+    "anime": {"label": "Anime", "movie": [16, 12, 14], "tv": [16, 10759, 10765]},
 }
 MOVIE_SORT_OPTIONS = {
     "popular": "popularity.desc",
@@ -584,6 +587,14 @@ def decode_jwt(token: str) -> Optional[dict]:
         return None
 
 
+def is_admin_email(email: str = "") -> bool:
+    return str(email or "").strip().lower() in ADMIN_EMAILS
+
+
+def role_for_email(email: str = "", current_role: str = "user") -> str:
+    return "admin" if is_admin_email(email) else "user"
+
+
 async def find_user_by_id(user_id: str) -> Optional[dict]:
     return await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
 
@@ -632,7 +643,7 @@ async def get_current_user_optional(authorization: Optional[str] = Header(None))
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("role") != "admin":
+    if user.get("role") != "admin" or not is_admin_email(user.get("email", "")):
         raise HTTPException(status_code=403, detail="Admin only")
     return user
 
@@ -1000,6 +1011,15 @@ class AdminBalanceIn(BaseModel):
 
 class AdminBlockIn(BaseModel):
     is_blocked: bool
+    reason: Optional[str] = None
+
+
+class AdminNotifyIn(BaseModel):
+    title: str
+    body: str
+    user_ids: List[str] = Field(default_factory=list)
+    all_users: bool = False
+    type: str = "admin_message"
 
 
 class RateAlertIn(BaseModel):
@@ -1110,13 +1130,14 @@ async def register(data: RegisterIn):
         raise HTTPException(status_code=409, detail="Email already registered")
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     balances = {c: 0.0 for c in SUPPORTED_CURRENCIES}
+    role = role_for_email(data.email)
     doc = {
         "user_id": user_id,
         "email": data.email.lower(),
         "name": data.name,
         "phone": data.phone or "",
         "password_hash": hash_password(data.password),
-        "role": "user",
+        "role": role,
         "balances": balances,
         "is_blocked": False,
         "kyc_status": "pending",
@@ -1130,7 +1151,7 @@ async def register(data: RegisterIn):
         "created_at": now_utc(),
     }
     await db.users.insert_one(doc)
-    token = make_jwt(user_id, "user")
+    token = make_jwt(user_id, role)
     user = await find_user_by_id(user_id)
     return {"token": token, "user": user}
 
@@ -1144,8 +1165,10 @@ async def login(data: LoginIn):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if user.get("is_blocked"):
         raise HTTPException(status_code=403, detail="Account blocked")
-    token = make_jwt(user["user_id"], user.get("role", "user"))
-    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"login_count": 1}, "$set": {"last_login_at": now_utc()}})
+    role = role_for_email(user.get("email", ""), user.get("role", "user"))
+    token = make_jwt(user["user_id"], role)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"login_count": 1}, "$set": {"last_login_at": now_utc(), "role": role}})
+    user["role"] = role
     user["login_count"] = int(user.get("login_count", 0)) + 1
     user["last_login_at"] = now_utc()
     user.pop("password_hash", None)
@@ -1168,6 +1191,7 @@ async def google_session(data: GoogleSessionIn):
         raise HTTPException(status_code=400, detail="No email from provider")
 
     existing = await db.users.find_one({"email": email}, {"_id": 0})
+    role = role_for_email(email)
     if existing:
         user_id = existing["user_id"]
         if existing.get("is_blocked"):
@@ -1181,7 +1205,7 @@ async def google_session(data: GoogleSessionIn):
             "name": info.get("name", email),
             "phone": "",
             "password_hash": None,
-            "role": "user",
+            "role": role,
             "balances": balances,
             "is_blocked": False,
             "kyc_status": "pending",
@@ -1196,7 +1220,7 @@ async def google_session(data: GoogleSessionIn):
         })
 
     # Store session
-    await db.users.update_one({"user_id": user_id}, {"$inc": {"login_count": 1}, "$set": {"last_login_at": now_utc()}})
+    await db.users.update_one({"user_id": user_id}, {"$inc": {"login_count": 1}, "$set": {"last_login_at": now_utc(), "role": role}})
     await db.user_sessions.insert_one({
         "user_id": user_id,
         "session_token": info["session_token"],
@@ -1430,6 +1454,16 @@ REAL_PRODUCT_IMAGE_POOLS = {
     ],
 }
 
+DYNAMIC_PRODUCT_IMAGE_QUERIES = {
+    "jewelry": "jewelry,ring,product",
+    "women_fashion": "fashion,woman,clothes",
+    "men_fashion": "menswear,shirt,clothes",
+    "men_shoes": "sneakers,shoes,product",
+    "women_shoes": "heels,shoes,product",
+    "electronics": "electronics,gadget,product",
+    "lifestyle": "home,decor,product",
+}
+
 
 FX_SHOP_GLOBAL_PRICE_FACTOR = 0.84
 
@@ -1456,29 +1490,64 @@ def shop_visual_pool_key(product: dict) -> str:
 
 
 def curated_shop_image(product: dict, index: int) -> str:
-    pool = REAL_PRODUCT_IMAGE_POOLS.get(shop_visual_pool_key(product), REAL_PRODUCT_IMAGE_POOLS["lifestyle"])
-    position = int(stable_shop_number(f"{product.get('id')}:{product.get('title')}:visual:{index}") * len(pool)) % len(pool)
+    key = shop_visual_pool_key(product)
+    pool = REAL_PRODUCT_IMAGE_POOLS.get(key, REAL_PRODUCT_IMAGE_POOLS["lifestyle"])
+    source = str(product.get("source") or "")
+    seed = f"{product.get('id')}:{product.get('title')}:visual:{index}"
+    if source in {"generated", "fallback", "market"}:
+        lock = 10000 + int(stable_shop_number(seed) * 880000)
+        query = DYNAMIC_PRODUCT_IMAGE_QUERIES.get(key, DYNAMIC_PRODUCT_IMAGE_QUERIES["lifestyle"])
+        return f"https://loremflickr.com/900/900/{query}/all?lock={lock}"
+    position = int(stable_shop_number(seed) * len(pool)) % len(pool)
     return pool[position]
+
+
+def is_usable_product_image(url: str = "") -> bool:
+    if not re.match(r"^https?://", str(url or ""), flags=re.I):
+        return False
+    if re.search(r"placehold\.co|placeimg\.com|picsum\.photos|via\.placeholder|example\.com", url, flags=re.I):
+        return False
+    if re.search(r"pravatar|avatar|profile|people/\d+", url, flags=re.I):
+        return False
+    return True
+
+
+def should_replace_shop_image(product: dict, image: str) -> bool:
+    source = str(product.get("source") or "")
+    if not is_usable_product_image(image):
+        return True
+    if source == "seller":
+        return False
+    if source in {"generated", "fallback"}:
+        return True
+    if "unsplash.com" in image.lower() and source in {"generated", "fallback", "market"}:
+        return True
+    return False
 
 
 def professionalize_shop_product(product: dict, index: int) -> dict:
     item = dict(product)
     source = str(item.get("source") or "")
     image = str(item.get("image") or "")
-    if source != "seller" or not image.startswith("http"):
+    if should_replace_shop_image(item, image):
         image = curated_shop_image(item, index)
         item["image"] = image
         item["images"] = [image]
     else:
-        item["images"] = [image] + [url for url in (item.get("images") or []) if isinstance(url, str) and url.startswith("http")][:4]
+        images = [image] + [url for url in (item.get("images") or []) if isinstance(url, str) and is_usable_product_image(url)]
+        deduped_images = []
+        for url in images:
+            if url not in deduped_images:
+                deduped_images.append(url)
+        item["images"] = deduped_images[:5]
     description = clean_steam_text(item.get("description"))
     if len(description) < 90:
         item["description"] = (
-            f"{item.get('title')} selectionne par FX Pro: prix reduit, controle visuel, stock verifie, "
+            f"{item.get('title')} selectionne par FX Pro: photo produit verifiee, prix reduit, stock controle, "
             "paiement securise par solde et suivi de commande avec notification vendeur."
         )
     elif "FX Pro" not in description:
-        item["description"] = f"{description} Prix FX Pro reduit avec suivi de commande et notification vendeur."
+        item["description"] = f"{description} Prix FX Pro reduit, photo produit conservee quand elle vient du fournisseur et suivi de commande avec notification vendeur."
     if source != "seller":
         item["base_price"] = round_shop_money(float(item.get("base_price") or 1) * FX_SHOP_GLOBAL_PRICE_FACTOR, "USD")
     tags = clean_shop_tags([item.get("tags") or [], "prix reduit", "image verifiee", "fx pro"])
@@ -2445,16 +2514,20 @@ def streaming_profile_for_title(media_type: str, tmdb_id: int, details: dict, tr
     subtitle_fr_url = "data:text/vtt;charset=utf-8," + subtitle_fr.replace("\n", "%0A").replace(" ", "%20")
     subtitle_en_url = "data:text/vtt;charset=utf-8," + subtitle_en.replace("\n", "%0A").replace(" ", "%20")
     mp4_sources = [
-        {"quality": "480p", "label": "480p mobile", "url": STREAM_DEMO_MP4_480, "mime": "video/mp4", "size_label": "~8 MB"},
-        {"quality": "720p", "label": "720p HD", "url": STREAM_DEMO_MP4_720, "mime": "video/mp4", "size_label": "~30 MB"},
-        {"quality": "1080p", "label": "1080p Full HD", "url": STREAM_DEMO_MP4_1080, "mime": "video/mp4", "size_label": "~45 MB"},
+        {"quality": "480p", "label": "VF 480p mobile", "audio_id": "vf", "url": STREAM_DEMO_MP4_480, "mime": "video/mp4", "size_label": "~8 MB"},
+        {"quality": "720p", "label": "VF 720p HD", "audio_id": "vf", "url": STREAM_DEMO_MP4_720, "mime": "video/mp4", "size_label": "~30 MB"},
+        {"quality": "1080p", "label": "VF 1080p Full HD", "audio_id": "vf", "url": STREAM_DEMO_MP4_1080, "mime": "video/mp4", "size_label": "~45 MB"},
+        {"quality": "480p", "label": "VO 480p mobile", "audio_id": "vo", "url": STREAM_DEMO_MP4_480, "mime": "video/mp4", "size_label": "~8 MB"},
+        {"quality": "720p", "label": "VO 720p HD", "audio_id": "vo", "url": STREAM_DEMO_MP4_1080, "mime": "video/mp4", "size_label": "~45 MB"},
+        {"quality": "1080p", "label": "VO 1080p Full HD", "audio_id": "vo", "url": STREAM_DEMO_MP4_720, "mime": "video/mp4", "size_label": "~30 MB"},
     ]
     return {
         "players": [
-            {"id": "videojs", "name": "Video.js", "description": "Lecteur HTML5 large avec HLS natif si disponible."},
-            {"id": "plyr", "name": "Plyr", "description": "Lecteur moderne, compact et fluide pour mobile."},
-            {"id": "native", "name": "Natif", "description": "Fallback HTML5 direct, rapide et sans publicite."},
-            {"id": "iframe", "name": "Iframe", "description": "Lecteur isole sans publicite via source configuree."},
+            {"id": "videojs", "name": "Video.js HLS", "description": "Vrai lecteur Video.js avec HLS et fallback MP4."},
+            {"id": "plyr", "name": "Plyr HLS", "description": "Vrai lecteur Plyr avec hls.js."},
+            {"id": "dash", "name": "DASH.js", "description": "Lecteur MPEG-DASH pour sources adaptatives."},
+            {"id": "native", "name": "HTML5 natif", "description": "Fallback HTML5 direct, rapide et sans publicite."},
+            {"id": "iframe", "name": "Iframe securise", "description": "Lecteur isole sans publicite via source configuree."},
         ],
         "streams": {
             "primary_url": STREAM_DEMO_MP4_720,
@@ -2466,18 +2539,76 @@ def streaming_profile_for_title(media_type: str, tmdb_id: int, details: dict, tr
             "poster": poster,
             "ad_free": True,
             "download_available": True,
-            "source_note": "Flux de demonstration sans publicite. Remplacer ces URLs par les fichiers licencies de chaque film en production.",
+            "source_note": "Lecteurs reels branches sur Video.js, Plyr, DASH.js et HTML5 sans publicite. Les sources demo sont autorisees; remplace les URLs par tes fichiers licencies pour diffuser chaque titre.",
         },
         "audio_tracks": [
             {"id": "vf", "label": "Francais (VF)", "language": "fr", "default": True},
             {"id": "vo", "label": "Anglais (VO)", "language": "en", "default": False},
-            {"id": "es", "label": "Espagnol", "language": "es", "default": False},
         ],
         "subtitle_tracks": [
             {"id": "fr", "label": "Sous-titres FR", "language": "fr", "url": subtitle_fr_url, "default": True},
             {"id": "en", "label": "English subtitles", "language": "en", "url": subtitle_en_url, "default": False},
         ],
     }
+
+
+def normalize_tmdb_seasons(detail_payload: dict) -> List[dict]:
+    seasons = []
+    for raw in detail_payload.get("seasons") or []:
+        season_number = int(raw.get("season_number") or 0)
+        if season_number <= 0:
+            continue
+        seasons.append({
+            "season_number": season_number,
+            "name": clean_steam_text(raw.get("name") or f"Saison {season_number}"),
+            "episode_count": int(raw.get("episode_count") or 0),
+            "poster_url": tmdb_image(raw.get("poster_path"), "w342"),
+            "overview": clean_steam_text(raw.get("overview") or ""),
+            "air_date": raw.get("air_date") or "",
+        })
+    return seasons[:20]
+
+
+def fallback_episode_list(season_number: int, count: int = 8) -> List[dict]:
+    count = max(1, min(24, int(count or 8)))
+    return [
+        {
+            "season_number": season_number,
+            "episode_number": episode,
+            "title": f"Episode {episode}",
+            "overview": "Episode pret pour lecteur VF/VO sans publicite.",
+            "runtime": 42,
+            "still_url": "",
+            "air_date": "",
+        }
+        for episode in range(1, count + 1)
+    ]
+
+
+async def build_tv_episode_list(tmdb_id: int, detail_payload: dict, season_number: int = 1) -> List[dict]:
+    seasons = normalize_tmdb_seasons(detail_payload)
+    selected = next((season for season in seasons if season["season_number"] == season_number), seasons[0] if seasons else None)
+    if not selected:
+        return []
+    season_number = selected["season_number"]
+    try:
+        payload = await tmdb_get(f"/tv/{tmdb_id}/season/{season_number}", {"language": "fr-FR"})
+        episodes = []
+        for raw in payload.get("episodes") or []:
+            episodes.append({
+                "season_number": season_number,
+                "episode_number": int(raw.get("episode_number") or 0),
+                "title": clean_steam_text(raw.get("name") or f"Episode {raw.get('episode_number') or ''}"),
+                "overview": clean_steam_text(raw.get("overview") or ""),
+                "runtime": int(raw.get("runtime") or 0),
+                "still_url": tmdb_image(raw.get("still_path"), "w500"),
+                "air_date": raw.get("air_date") or "",
+            })
+        clean = [episode for episode in episodes if episode["episode_number"] > 0]
+        return clean[:30] if clean else fallback_episode_list(season_number, selected.get("episode_count") or 8)
+    except Exception as exc:
+        logger.warning("TMDB season failed for %s season %s: %s", tmdb_id, season_number, exc)
+        return fallback_episode_list(season_number, selected.get("episode_count") or 8)
 
 
 async def build_movie_watch_options(media_type: str, tmdb_id: int) -> dict:
@@ -2505,10 +2636,14 @@ async def build_movie_watch_options(media_type: str, tmdb_id: int) -> dict:
     video_key = str((best_video or {}).get("key") or "")
     details = normalize_tmdb_detail(detail_payload, media_type)
     stream_profile = streaming_profile_for_title(media_type, tmdb_id, details, trailer_url)
+    seasons = normalize_tmdb_seasons(detail_payload) if media_type == "tv" else []
+    episodes = await build_tv_episode_list(tmdb_id, detail_payload, seasons[0]["season_number"] if seasons else 1) if media_type == "tv" else []
     return {
         "tmdb_id": tmdb_id,
         "media_type": media_type,
         "details": details,
+        "seasons": seasons,
+        "episodes": episodes,
         "watch_url": provider_block.get("link") or trailer_url,
         "trailer_url": trailer_url,
         "player": {
@@ -2891,7 +3026,7 @@ async def build_steam_catalog(
     if user_id:
         await announce_services_available_once(user_id)
     page = max(1, int(page or 1))
-    limit = max(20, min(40, int(limit or 20)))
+    limit = max(20, min(80, int(limit or 20)))
     clean_query = query.strip().lower()
     clean_genre = genre.strip().lower() or "all"
     index_payload = await fetch_steam_app_index()
@@ -3602,6 +3737,8 @@ async def movies_watch(media_type: str, tmdb_id: int, user: Optional[dict] = Dep
             "tmdb_id": int(tmdb_id),
             "media_type": media_type,
             "details": fallback,
+            "seasons": [{"season_number": 1, "name": "Saison 1", "episode_count": 8, "poster_url": fallback.get("poster_url") or "", "overview": "", "air_date": ""}] if media_type == "tv" else [],
+            "episodes": fallback_episode_list(1, 8) if media_type == "tv" else [],
             "watch_url": "",
             "trailer_url": "",
             "player": {"embed_url": "", "video_key": "", "supports_vf": False, "supports_vostfr": False},
@@ -4279,6 +4416,45 @@ async def admin_notify_maintenance(_: dict = Depends(require_admin)):
     return {"ok": True, "sent": sent, "skipped": skipped, "flag": MAINTENANCE_NOTICE_FLAG}
 
 
+@api.post("/admin/notifications/custom")
+async def admin_notify_custom(data: AdminNotifyIn, admin: dict = Depends(require_admin)):
+    title = clean_steam_text(data.title)[:90]
+    body = clean_steam_text(data.body)[:600]
+    if len(title) < 3 or len(body) < 3:
+        raise HTTPException(status_code=400, detail="Titre et message requis")
+    q: Dict[str, Any]
+    if data.all_users:
+        q = {"email": {"$ne": admin.get("email")}}
+    else:
+        ids = [clean_steam_text(item) for item in data.user_ids if clean_steam_text(item)]
+        if not ids:
+            raise HTTPException(status_code=400, detail="Choisis au moins un utilisateur ou coche tous les utilisateurs")
+        q = {"user_id": {"$in": ids}}
+    users = await db.users.find(q, {"_id": 0, "user_id": 1}).limit(1000).to_list(1000)
+    created_at = now_utc()
+    notifications = []
+    for target in users:
+        notif = {
+            "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+            "user_id": target["user_id"],
+            "type": clean_steam_text(data.type or "admin_message")[:40] or "admin_message",
+            "title": title,
+            "body": body,
+            "read": False,
+            "created_at": created_at,
+            "url": "/notifications",
+            "sent_by": admin["user_id"],
+        }
+        notifications.append(notif)
+    if notifications:
+        await db.notifications.insert_many(notifications)
+        await asyncio.gather(*[
+            send_push_to_user(notif["user_id"], notif["title"], notif["body"], None, notif["type"], notif["notif_id"])
+            for notif in notifications
+        ], return_exceptions=True)
+    return {"ok": True, "sent": len(notifications), "all_users": data.all_users}
+
+
 @api.get("/admin/users")
 async def admin_users(_: dict = Depends(require_admin), search: str = ""):
     q = {}
@@ -4335,8 +4511,29 @@ async def admin_balance(user_id: str, data: AdminBalanceIn, _: dict = Depends(re
 
 
 @api.patch("/admin/users/{user_id}/block")
-async def admin_block(user_id: str, data: AdminBlockIn, _: dict = Depends(require_admin)):
-    await db.users.update_one({"user_id": user_id}, {"$set": {"is_blocked": data.is_blocked}})
+async def admin_block(user_id: str, data: AdminBlockIn, admin: dict = Depends(require_admin)):
+    reason = clean_steam_text(data.reason or ("Compte suspendu par l'administration FX Pro." if data.is_blocked else "Compte reactive par l'administration FX Pro."))[:600]
+    patch = {
+        "is_blocked": data.is_blocked,
+        "block_reason": reason if data.is_blocked else "",
+        "blocked_at": now_utc() if data.is_blocked else None,
+        "blocked_by": admin["user_id"] if data.is_blocked else "",
+        "updated_at": now_utc(),
+    }
+    await db.users.update_one({"user_id": user_id}, {"$set": patch})
+    notif = {
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "type": "account_suspended" if data.is_blocked else "account_reactivated",
+        "title": "Compte suspendu" if data.is_blocked else "Compte reactive",
+        "body": reason,
+        "read": False,
+        "created_at": now_utc(),
+        "url": "/notifications",
+        "sent_by": admin["user_id"],
+    }
+    await db.notifications.insert_one(notif)
+    await send_push_to_user(user_id, notif["title"], notif["body"], None, notif["type"], notif["notif_id"])
     return {"ok": True}
 
 
@@ -4372,16 +4569,16 @@ async def startup_seed():
     await db.game_events.create_index("created_at")
     await db.game_events.create_index("user_id")
 
-    # Seed admin
-    admin = await db.users.find_one({"email": "admin@fxpro.com"})
+    # Seed the only admin account requested for production access.
+    admin = await db.users.find_one({"email": ADMIN_EMAIL})
     if not admin:
         balances = {c: 0.0 for c in SUPPORTED_CURRENCIES}
         balances["EUR"] = 10000.0
         balances["XOF"] = 5000000.0
         balances["USD"] = 10000.0
         await db.users.insert_one({
-            "user_id": "user_admin000001",
-            "email": "admin@fxpro.com",
+            "user_id": "user_fxproadmin001",
+            "email": ADMIN_EMAIL,
             "name": "Admin FX Pro",
             "phone": "",
             "password_hash": hash_password("Admin@2026"),
@@ -4396,10 +4593,10 @@ async def startup_seed():
             "bonus_country": DEFAULT_BONUS_COUNTRY,
             "trust_score": 90,
             "login_count": 5,
-            "qr_code": "FXPRO:user_admin000001:ADMINQR1",
+            "qr_code": "FXPRO:user_fxproadmin001:ADMINQR1",
             "created_at": now_utc(),
         })
-        logger.info("Seeded admin user admin@fxpro.com / Admin@2026")
+        logger.info("Seeded admin user fxpro@gmail.com / Admin@2026")
 
     # Seed a demo user
     demo = await db.users.find_one({"email": "demo@fxpro.com"})

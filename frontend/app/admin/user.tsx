@@ -16,12 +16,17 @@ export default function AdminUser() {
   const [amount, setAmount] = useState("");
   const [direction, setDirection] = useState<"credit" | "debit">("credit");
   const [loading, setLoading] = useState(false);
+  const [blockReason, setBlockReason] = useState("");
+  const [notifyTitle, setNotifyTitle] = useState("Message FX Pro");
+  const [notifyBody, setNotifyBody] = useState("");
+  const [notifyLoading, setNotifyLoading] = useState(false);
 
   const load = async () => {
     try {
       const r = await api.get(`/admin/users?search=`);
       const u = (r.items || []).find((x: any) => x.user_id === id);
       setTarget(u || null);
+      if (u?.block_reason) setBlockReason(u.block_reason);
     } catch (e: any) {
       Alert.alert("Erreur", e.message);
     }
@@ -49,11 +54,38 @@ export default function AdminUser() {
 
   const toggleBlock = async () => {
     if (!target) return;
+    const shouldBlock = !target.is_blocked;
+    if (shouldBlock && !blockReason.trim()) {
+      return Alert.alert("Raison requise", "Ecrivez la raison qui sera envoyee a l'utilisateur.");
+    }
     try {
-      await api.patch(`/admin/users/${id}/block`, { is_blocked: !target.is_blocked });
+      await api.patch(`/admin/users/${id}/block`, { is_blocked: shouldBlock, reason: shouldBlock ? blockReason.trim() : "" });
       await load();
+      Alert.alert(shouldBlock ? "Compte suspendu" : "Compte reactive", "L'utilisateur a recu une notification.");
     } catch (e: any) {
       Alert.alert("Erreur", e.message);
+    }
+  };
+
+  const sendUserNotification = async () => {
+    const title = notifyTitle.trim();
+    const body = notifyBody.trim();
+    if (!title || !body) return Alert.alert("Message requis", "Titre et message sont obligatoires.");
+    try {
+      setNotifyLoading(true);
+      const res = await api.post("/admin/notifications/custom", {
+        title,
+        body,
+        all_users: false,
+        user_ids: [id],
+        type: "admin_direct",
+      });
+      setNotifyBody("");
+      Alert.alert("Notification envoyee", `${res.sent || 0} utilisateur(s) prevenu(s).`);
+    } catch (e: any) {
+      Alert.alert("Erreur", e.message);
+    } finally {
+      setNotifyLoading(false);
     }
   };
 
@@ -181,14 +213,48 @@ export default function AdminUser() {
               <PrimaryButton testID="adm-apply" title={`${direction === "credit" ? "Créditer" : "Débiter"} le compte`} loading={loading} onPress={adjust} />
             </GlassCard>
 
-            <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
+            <GlassCard testID="adm-direct-message-card">
+              <Text style={styles.sectionLabel}>Notification directe</Text>
+              <Text style={styles.helperText}>Envoyer un message uniquement a ce compte. Il apparaitra dans ses notifications.</Text>
+              <TextInput
+                testID="adm-notify-title"
+                value={notifyTitle}
+                onChangeText={setNotifyTitle}
+                placeholder="Titre"
+                placeholderTextColor={Colors.textMuted}
+                style={styles.messageInput}
+              />
+              <TextInput
+                testID="adm-notify-body"
+                value={notifyBody}
+                onChangeText={setNotifyBody}
+                placeholder="Message"
+                placeholderTextColor={Colors.textMuted}
+                multiline
+                style={[styles.messageInput, styles.messageArea]}
+              />
+              <PrimaryButton testID="adm-send-user-notif" title={notifyLoading ? "Envoi..." : "Envoyer au user"} loading={notifyLoading} onPress={sendUserNotification} />
+            </GlassCard>
+
+            <GlassCard testID="adm-block-card">
+              <Text style={styles.sectionLabel}>Suspension du compte</Text>
+              <Text style={styles.helperText}>La raison est sauvegardee et envoyee a l'utilisateur quand le compte est bloque.</Text>
+              <TextInput
+                testID="adm-block-reason"
+                value={blockReason}
+                onChangeText={setBlockReason}
+                placeholder="Raison de suspension"
+                placeholderTextColor={Colors.textMuted}
+                multiline
+                style={[styles.messageInput, styles.messageArea]}
+              />
               <GhostButton
                 testID="adm-block-toggle"
                 title={target.is_blocked ? "Débloquer le compte" : "Bloquer le compte"}
                 icon={<Ionicons name={target.is_blocked ? "checkmark-circle" : "ban"} size={16} color={target.is_blocked ? Colors.green : Colors.danger} />}
                 onPress={toggleBlock}
               />
-            </View>
+            </GlassCard>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -202,6 +268,9 @@ const styles = StyleSheet.create({
   avatar: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: Colors.cyan, backgroundColor: "rgba(0,255,255,0.08)" },
   tag: { fontSize: 10, fontWeight: "900", letterSpacing: 1 },
   sectionLabel: { color: Colors.cyan, fontSize: 11, letterSpacing: 2, textTransform: "uppercase", marginBottom: 8 },
+  helperText: { color: Colors.textSoft, fontSize: 12, lineHeight: 18, marginBottom: 10 },
+  messageInput: { color: "#fff", fontSize: 14, borderWidth: 1, borderColor: Colors.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "rgba(255,255,255,0.05)", marginTop: 8 },
+  messageArea: { minHeight: 90, textAlignVertical: "top" },
   balRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
   label: { color: Colors.textSoft, fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 },
   inputRow: { flexDirection: "row", gap: 10, alignItems: "center", borderBottomWidth: 1.5, borderBottomColor: "rgba(255,255,255,0.18)", paddingBottom: 6 },

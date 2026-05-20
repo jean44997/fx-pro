@@ -470,6 +470,16 @@ const REAL_PRODUCT_IMAGE_POOLS = {
   ],
 };
 
+const DYNAMIC_PRODUCT_IMAGE_QUERIES: Record<keyof typeof REAL_PRODUCT_IMAGE_POOLS, string> = {
+  jewelry: "jewelry,ring,product",
+  womenFashion: "fashion,woman,clothes",
+  menFashion: "menswear,shirt,clothes",
+  menShoes: "sneakers,shoes,product",
+  womenShoes: "heels,shoes,product",
+  electronics: "electronics,gadget,product",
+  lifestyle: "home,decor,product",
+};
+
 const FX_SHOP_GLOBAL_PRICE_FACTOR = 0.84;
 
 function shopVisualPoolKey(product: ShopProduct) {
@@ -486,25 +496,48 @@ function shopVisualPoolKey(product: ShopProduct) {
 function curatedShopImage(product: ShopProduct, index: number) {
   const key = shopVisualPoolKey(product) as keyof typeof REAL_PRODUCT_IMAGE_POOLS;
   const pool = REAL_PRODUCT_IMAGE_POOLS[key] || REAL_PRODUCT_IMAGE_POOLS.lifestyle;
-  const position = Math.floor(stableNumber(`${product.id}:${product.title}:visual:${index}`) * pool.length) % pool.length;
+  const source = String(product.source || "");
+  const seed = `${product.id}:${product.title}:visual:${index}`;
+  if (source === "generated" || source === "fallback" || source === "market") {
+    const lock = 10000 + Math.floor(stableNumber(seed) * 880000);
+    const query = DYNAMIC_PRODUCT_IMAGE_QUERIES[key] || DYNAMIC_PRODUCT_IMAGE_QUERIES.lifestyle;
+    return `https://loremflickr.com/900/900/${query}/all?lock=${lock}`;
+  }
+  const position = Math.floor(stableNumber(seed) * pool.length) % pool.length;
   return pool[position];
+}
+
+function isUsableProductImage(url = "") {
+  if (!/^https?:\/\//i.test(url)) return false;
+  if (/placehold\.co|placeimg\.com|picsum\.photos|via\.placeholder|example\.com/i.test(url)) return false;
+  if (/pravatar|avatar|profile|people\/\d+/i.test(url)) return false;
+  return true;
+}
+
+function shouldReplaceShopImage(product: ShopProduct, image: string) {
+  const source = String(product.source || "");
+  if (!isUsableProductImage(image)) return true;
+  if (source === "seller") return false;
+  if (source === "generated" || source === "fallback") return true;
+  if (/unsplash\.com/i.test(image) && /generated|fallback|market/i.test(source)) return true;
+  return false;
 }
 
 function professionalizeShopProduct(product: ShopProduct, index: number): ShopProduct {
   const item: ShopProduct = { ...product };
   const currentImage = String(item.image || "");
-  if (item.source !== "seller" || !currentImage.startsWith("http")) {
+  if (shouldReplaceShopImage(item, currentImage)) {
     const image = curatedShopImage(item, index);
     item.image = image;
     item.images = [image];
   } else {
-    item.images = [currentImage, ...(item.images || []).filter((url) => String(url).startsWith("http"))].slice(0, 5);
+    item.images = [currentImage, ...(item.images || []).filter((url) => isUsableProductImage(String(url)))].filter((url, i, all) => all.indexOf(url) === i).slice(0, 5);
   }
   const description = stripHtml(item.description);
   if (description.length < 90) {
-    item.description = `${item.title} selectionne par FX Pro: prix reduit, controle visuel, stock verifie, paiement securise par solde et suivi de commande avec notification vendeur.`;
+    item.description = `${item.title} selectionne par FX Pro: photo produit verifiee, prix reduit, stock controle, paiement securise par solde et suivi de commande avec notification vendeur.`;
   } else if (!description.includes("FX Pro")) {
-    item.description = `${description} Prix FX Pro reduit avec suivi de commande et notification vendeur.`;
+    item.description = `${description} Prix FX Pro reduit, photo produit conservee quand elle vient du fournisseur et suivi de commande avec notification vendeur.`;
   }
   if (item.source !== "seller") {
     item.base_price = roundShopMoney(Number(item.base_price || 1) * FX_SHOP_GLOBAL_PRICE_FACTOR, "USD");

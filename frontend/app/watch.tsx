@@ -9,7 +9,7 @@ import { api, useAuth } from "../src/auth";
 import { Colors } from "../src/theme";
 import { GradientBg, GhostButton, PrimaryButton } from "../src/ui";
 
-type PlayerId = "videojs" | "plyr" | "native" | "iframe";
+type PlayerId = "videojs" | "plyr" | "dash" | "native" | "iframe";
 
 type StreamSource = {
   quality: string;
@@ -17,6 +17,25 @@ type StreamSource = {
   url: string;
   mime?: string;
   size_label?: string;
+  audio_id?: string;
+};
+
+type WatchSeason = {
+  season_number: number;
+  name: string;
+  episode_count?: number;
+  poster_url?: string;
+  overview?: string;
+};
+
+type WatchEpisode = {
+  season_number: number;
+  episode_number: number;
+  title: string;
+  overview?: string;
+  runtime?: number;
+  still_url?: string;
+  air_date?: string;
 };
 
 type WatchDetails = {
@@ -46,6 +65,8 @@ type WatchPayload = {
   provider_names?: string[];
   has_vf?: boolean;
   players?: { id: PlayerId; name: string; description?: string }[];
+  seasons?: WatchSeason[];
+  episodes?: WatchEpisode[];
   streams?: {
     primary_url?: string;
     hls_url?: string;
@@ -76,10 +97,11 @@ type WatchProfile = {
 };
 
 const DEFAULT_PLAYERS: { id: PlayerId; name: string; description: string }[] = [
-  { id: "videojs", name: "Video.js", description: "HTML5 large avec HLS/DASH." },
-  { id: "plyr", name: "Plyr", description: "Controle moderne et rapide." },
-  { id: "native", name: "Natif", description: "Fallback direct sans pub." },
-  { id: "iframe", name: "Iframe", description: "Lecteur isole sans pub." },
+  { id: "videojs", name: "Video.js HLS", description: "Lecteur Video.js avec HLS." },
+  { id: "plyr", name: "Plyr HLS", description: "Lecteur Plyr + hls.js." },
+  { id: "dash", name: "DASH.js", description: "Lecteur MPEG-DASH." },
+  { id: "native", name: "HTML5 natif", description: "Fallback direct sans pub." },
+  { id: "iframe", name: "Iframe securise", description: "Lecteur isole sans pub." },
 ];
 
 const PROFILE_COLORS = [Colors.cyan, Colors.magenta, Colors.green, Colors.yellow, "#FF6B6B"];
@@ -103,6 +125,8 @@ export default function WatchScreen() {
   const [profiles, setProfiles] = useState<WatchProfile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState("");
   const [profileSwitchKey, setProfileSwitchKey] = useState(0);
+  const [selectedSeason, setSelectedSeason] = useState(1);
+  const [selectedEpisode, setSelectedEpisode] = useState(1);
   const compact = width < 480;
 
   const details = payload?.details;
@@ -110,7 +134,18 @@ export default function WatchScreen() {
   const players = payload?.players?.length ? payload.players : DEFAULT_PLAYERS;
   const mp4Sources = streams.mp4_sources?.length ? streams.mp4_sources : [];
   const downloadSources = streams.download_sources?.length ? streams.download_sources : mp4Sources;
-  const selectedSource = mp4Sources.find((source) => source.quality === quality) || mp4Sources[1] || mp4Sources[0];
+  const selectedSource =
+    mp4Sources.find((source) => source.quality === quality && (!source.audio_id || source.audio_id === audioMode)) ||
+    mp4Sources.find((source) => source.quality === quality) ||
+    mp4Sources.find((source) => !source.audio_id || source.audio_id === audioMode) ||
+    mp4Sources[1] ||
+    mp4Sources[0];
+  const qualitySources = mp4Sources
+    .filter((source) => !source.audio_id || source.audio_id === audioMode)
+    .filter((source, index, list) => list.findIndex((item) => item.quality === source.quality) === index);
+  const seasonList = payload?.seasons || [];
+  const episodeList = (payload?.episodes || []).filter((episode) => !selectedSeason || episode.season_number === selectedSeason);
+  const activeEpisode = episodeList.find((episode) => episode.episode_number === selectedEpisode) || episodeList[0];
   const playerPoster = streams.poster || details?.backdrop_url || details?.poster_url || "";
   const backdrop = details?.backdrop_url || details?.poster_url || "";
   const providerNames = payload?.provider_names || [];
@@ -152,9 +187,13 @@ export default function WatchScreen() {
       const firstAudio = (res?.audio_tracks || []).find((track: any) => track.default)?.id || (res?.has_vf ? "vf" : "vo");
       const firstSubtitle = (res?.subtitle_tracks || []).find((track: any) => track.default)?.id || "fr";
       const firstQuality = (res?.streams?.mp4_sources || []).find((source: any) => source.quality === "720p")?.quality || res?.streams?.mp4_sources?.[0]?.quality || "720p";
+      const firstSeason = Number(res?.seasons?.[0]?.season_number || 1);
+      const firstEpisode = Number(res?.episodes?.[0]?.episode_number || 1);
       setAudioMode(firstAudio);
       setSubtitleMode(firstSubtitle);
       setQuality(firstQuality);
+      setSelectedSeason(firstSeason);
+      setSelectedEpisode(firstEpisode);
     } catch (e: any) {
       setError(e.message || "Lecture indisponible pour le moment.");
     } finally {
@@ -217,45 +256,38 @@ export default function WatchScreen() {
 
   const renderWebVideo = () => {
     if (!selectedSource?.url && !streams.primary_url) return null;
-    const activeUrl = selectedSource?.url || streams.primary_url || "";
-    const className = playerId === "videojs" ? "video-js vjs-fxpro" : playerId === "plyr" ? "plyr plyr-fxpro" : "fxpro-native-video";
-    return React.createElement(
-      "video" as any,
-      {
-        key: `${playerId}-${quality}-${audioMode}-${subtitleMode}`,
-        className,
-        controls: true,
-        playsInline: true,
-        preload: "metadata",
+    return React.createElement("iframe" as any, {
+      key: `${playerId}-${quality}-${audioMode}-${subtitleMode}-${selectedSeason}-${selectedEpisode}`,
+      title: `${details?.title || "Lecteur FX Pro"} - ${playerId}`,
+      srcDoc: buildPlayerDoc({
+        playerId,
+        title: `${details?.title || "FX Pro Stream"}${activeEpisode ? ` - S${activeEpisode.season_number}E${activeEpisode.episode_number}` : ""}`,
+        videoUrl: selectedSource?.url || streams.primary_url || "",
+        hlsUrl: streams.hls_url || "",
+        dashUrl: streams.dash_url || "",
         poster: playerPoster,
-        crossOrigin: "anonymous",
-        controlsList: "nodownload noremoteplayback",
-        disablePictureInPicture: false,
-        onError: () => setPlayerError("Ce lecteur ne peut pas ouvrir cette source. Change de lecteur ou de qualite."),
-        style: { width: "100%", height: "100%", display: "block", objectFit: "contain", backgroundColor: "#000" },
-      },
-      [
-        React.createElement("source" as any, { key: "mp4", src: activeUrl, type: selectedSource?.mime || "video/mp4" }),
-        streams.hls_url ? React.createElement("source" as any, { key: "hls", src: streams.hls_url, type: "application/x-mpegURL" }) : null,
-        streams.dash_url ? React.createElement("source" as any, { key: "dash", src: streams.dash_url, type: "application/dash+xml" }) : null,
-        ...(payload?.subtitle_tracks || []).map((track) =>
-          React.createElement("track" as any, {
-            key: track.id,
-            kind: "subtitles",
-            src: track.url,
-            srcLang: track.language,
-            label: track.label,
-            default: track.id === subtitleMode,
-          })
-        ),
-      ]
-    );
+        subtitles: payload?.subtitle_tracks || [],
+        subtitleMode,
+      }),
+      allow: "autoplay; fullscreen; picture-in-picture",
+      allowFullScreen: true,
+      style: { border: 0, width: "100%", height: "100%", display: "block", backgroundColor: "#000" },
+    });
   };
 
   const renderIframe = () => {
     if (Platform.OS !== "web") return null;
     const videoUrl = selectedSource?.url || streams.primary_url || "";
-    const srcDoc = buildIframeDoc(videoUrl, playerPoster, details?.title || "FX Pro Stream");
+    const srcDoc = buildPlayerDoc({
+      playerId: "iframe",
+      title: details?.title || "FX Pro Stream",
+      videoUrl,
+      hlsUrl: streams.hls_url || "",
+      dashUrl: streams.dash_url || "",
+      poster: playerPoster,
+      subtitles: payload?.subtitle_tracks || [],
+      subtitleMode,
+    });
     return React.createElement("iframe" as any, {
       title: details?.title || "Lecteur iframe FX Pro",
       srcDoc,
@@ -396,7 +428,7 @@ export default function WatchScreen() {
               </ScrollView>
 
               <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipTrack}>
-                {mp4Sources.map((source) => {
+                {qualitySources.map((source) => {
                   const active = quality === source.quality;
                   return (
                     <Pressable key={source.quality} onPress={() => { setQuality(source.quality); setPlayerError(""); }} style={[styles.qualityChip, active && styles.qualityChipActive]}>
@@ -434,6 +466,41 @@ export default function WatchScreen() {
                 </View>
               </View>
               <Text style={styles.overview}>{details.overview || "Synopsis indisponible pour le moment."}</Text>
+              {mediaType === "tv" && seasonList.length ? (
+                <View style={styles.episodePanel}>
+                  <Text style={styles.episodeTitle}>Saisons et episodes</Text>
+                  <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipTrack}>
+                    {seasonList.map((season) => {
+                      const active = selectedSeason === season.season_number;
+                      return (
+                        <Pressable
+                          key={season.season_number}
+                          onPress={() => {
+                            setSelectedSeason(season.season_number);
+                            setSelectedEpisode(1);
+                          }}
+                          style={[styles.modeChip, active && styles.modeChipActive]}
+                        >
+                          <Text style={[styles.modeText, active && styles.modeTextActive]}>{season.name || `Saison ${season.season_number}`}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                  <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.episodeTrack}>
+                    {episodeList.map((episode) => {
+                      const active = selectedEpisode === episode.episode_number;
+                      return (
+                        <Pressable key={`${episode.season_number}-${episode.episode_number}`} onPress={() => setSelectedEpisode(episode.episode_number)} style={[styles.episodeCard, active && styles.episodeCardActive]}>
+                          {episode.still_url ? <Image source={{ uri: episode.still_url }} style={styles.episodeImage} resizeMode="cover" /> : <View style={styles.episodeImageFallback}><Ionicons name="tv-outline" size={18} color={Colors.textMuted} /></View>}
+                          <Text style={[styles.episodeName, active && styles.episodeNameActive]} numberOfLines={2}>E{episode.episode_number}. {episode.title}</Text>
+                          <Text style={styles.episodeMeta}>{episode.runtime ? `${episode.runtime} min` : "VF/VO"} - sans pub</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                  {activeEpisode ? <Text style={styles.episodeSynopsis} numberOfLines={3}>{activeEpisode.overview || "Episode selectionne pret pour lecture avec les lecteurs actifs."}</Text> : null}
+                </View>
+              ) : null}
               {providerNames.length ? (
                 <Text style={styles.providers}>Sources officielles detectees: {providerNames.join(", ")}</Text>
               ) : (
@@ -475,11 +542,44 @@ export default function WatchScreen() {
   );
 }
 
-function buildIframeDoc(videoUrl: string, poster: string, title: string) {
+function buildPlayerDoc({
+  playerId,
+  title,
+  videoUrl,
+  hlsUrl,
+  dashUrl,
+  poster,
+  subtitles,
+  subtitleMode,
+}: {
+  playerId: PlayerId;
+  title: string;
+  videoUrl: string;
+  hlsUrl: string;
+  dashUrl: string;
+  poster: string;
+  subtitles: NonNullable<WatchPayload["subtitle_tracks"]>;
+  subtitleMode: string;
+}) {
   const safeVideo = escapeHtml(videoUrl);
+  const safeHls = escapeHtml(hlsUrl);
+  const safeDash = escapeHtml(dashUrl);
   const safePoster = escapeHtml(poster);
   const safeTitle = escapeHtml(title);
-  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;height:100%;background:#000;font-family:Inter,Arial,sans-serif;color:#fff}video{width:100%;height:100%;object-fit:contain;background:#000}.label{position:absolute;left:14px;top:12px;background:rgba(0,0,0,.62);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:8px 12px;font-weight:800;font-size:12px}</style></head><body><div class="label">${safeTitle} - lecteur iframe sans pub</div><video controls playsinline preload="metadata" poster="${safePoster}" src="${safeVideo}"></video></body></html>`;
+  const trackTags = subtitles
+    .map((track) => `<track kind="subtitles" src="${escapeHtml(track.url)}" srclang="${escapeHtml(track.language)}" label="${escapeHtml(track.label)}" ${track.id === subtitleMode ? "default" : ""}>`)
+    .join("");
+  const baseCss = `html,body{margin:0;width:100%;height:100%;background:#000;font-family:Inter,Arial,sans-serif;color:#fff;overflow:hidden}video{width:100%;height:100%;object-fit:contain;background:#000}.label{position:absolute;left:14px;top:12px;z-index:5;background:rgba(0,0,0,.68);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:8px 12px;font-weight:900;font-size:12px}.state{position:absolute;right:14px;top:12px;z-index:5;background:#00ff9d;color:#00100b;border-radius:999px;padding:8px 12px;font-weight:900;font-size:12px}.err{position:absolute;left:14px;right:14px;bottom:12px;z-index:5;background:rgba(255,214,10,.12);border:1px solid rgba(255,214,10,.45);border-radius:14px;padding:10px 12px;color:#ffd60a;font-weight:800;display:none}`;
+  if (playerId === "videojs") {
+    return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link href="https://vjs.zencdn.net/8.16.1/video-js.css" rel="stylesheet"><style>${baseCss}.video-js{width:100%;height:100%}</style></head><body><div class="label">${safeTitle} - Video.js HLS</div><div class="state">Sans pub</div><video id="player" class="video-js vjs-big-play-centered" controls playsinline preload="metadata" poster="${safePoster}">${trackTags}</video><div id="err" class="err">Source indisponible, change de lecteur.</div><script src="https://vjs.zencdn.net/8.16.1/video.min.js"></script><script>const p=videojs('player',{controls:true,fluid:false,responsive:true,html5:{vhs:{overrideNative:true}}});p.src({src:'${safeHls || safeVideo}',type:'${safeHls ? "application/x-mpegURL" : "video/mp4"}'});p.on('error',()=>{document.getElementById('err').style.display='block';p.src({src:'${safeVideo}',type:'video/mp4'});});</script></body></html>`;
+  }
+  if (playerId === "plyr") {
+    return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css"><style>${baseCss}.plyr,.plyr__video-wrapper{height:100%;background:#000}</style></head><body><div class="label">${safeTitle} - Plyr HLS</div><div class="state">Sans pub</div><video id="player" controls playsinline preload="metadata" poster="${safePoster}">${trackTags}</video><div id="err" class="err">Source indisponible, fallback MP4 actif.</div><script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script><script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script><script>const v=document.getElementById('player');const fallback='${safeVideo}';if('${safeHls}'&&window.Hls&&Hls.isSupported()){const hls=new Hls();hls.loadSource('${safeHls}');hls.attachMedia(v);hls.on(Hls.Events.ERROR,()=>{document.getElementById('err').style.display='block';v.src=fallback;});}else{v.src=fallback;}new Plyr(v,{ratio:'16:9'});</script></body></html>`;
+  }
+  if (playerId === "dash") {
+    return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${baseCss}</style></head><body><div class="label">${safeTitle} - DASH.js</div><div class="state">Sans pub</div><video id="player" controls playsinline preload="metadata" poster="${safePoster}">${trackTags}</video><div id="err" class="err">DASH indisponible, fallback MP4 actif.</div><script src="https://cdn.dashjs.org/latest/dash.all.min.js"></script><script>const v=document.getElementById('player');try{if('${safeDash}'&&window.dashjs){dashjs.MediaPlayer().create().initialize(v,'${safeDash}',false);}else{v.src='${safeVideo}';}}catch(e){document.getElementById('err').style.display='block';v.src='${safeVideo}';}</script></body></html>`;
+  }
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${baseCss}</style></head><body><div class="label">${safeTitle} - ${playerId === "iframe" ? "iframe securise" : "HTML5 natif"}</div><div class="state">Sans pub</div><video controls playsinline preload="metadata" poster="${safePoster}" src="${safeVideo}">${trackTags}</video></body></html>`;
 }
 
 function escapeHtml(value: string) {
@@ -546,6 +646,17 @@ const styles = StyleSheet.create({
   genreBadge: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, backgroundColor: "rgba(0,255,255,0.12)", borderWidth: 1, borderColor: "rgba(0,255,255,0.25)" },
   genreText: { color: Colors.cyan, fontSize: 10, fontWeight: "900" },
   overview: { color: Colors.textSoft, lineHeight: 21, marginTop: 14 },
+  episodePanel: { marginTop: 14, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(0,0,0,0.22)", paddingVertical: 12, gap: 10 },
+  episodeTitle: { color: "#fff", fontWeight: "900", paddingHorizontal: 12 },
+  episodeTrack: { paddingHorizontal: 12, gap: 10 },
+  episodeCard: { width: 168, minHeight: 150, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.045)" },
+  episodeCardActive: { borderColor: Colors.cyan, backgroundColor: "rgba(0,255,255,0.1)" },
+  episodeImage: { width: "100%", height: 82, backgroundColor: "rgba(255,255,255,0.06)" },
+  episodeImageFallback: { height: 82, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
+  episodeName: { color: "#fff", fontWeight: "900", fontSize: 12, lineHeight: 16, paddingHorizontal: 9, paddingTop: 8 },
+  episodeNameActive: { color: Colors.cyan },
+  episodeMeta: { color: Colors.textMuted, fontSize: 10, fontWeight: "800", paddingHorizontal: 9, paddingTop: 4 },
+  episodeSynopsis: { color: Colors.textSoft, fontSize: 12, lineHeight: 18, paddingHorizontal: 12 },
   providers: { color: "#fff", fontWeight: "800", marginTop: 12, lineHeight: 19 },
   actionRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 14 },
   actionBtn: { flexGrow: 1, minWidth: 160 },
