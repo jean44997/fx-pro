@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -121,8 +120,8 @@ export default function MoviesScreen() {
   const [savingKey, setSavingKey] = useState("");
   const [watchingKey, setWatchingKey] = useState("");
 
-  const compact = width < 560;
-  const columns = width >= 1240 ? 4 : width >= 900 ? 3 : width >= 560 ? 2 : 1;
+  const compact = width < 480;
+  const columns = width >= 1024 ? 4 : width >= 768 ? 3 : width >= 480 ? 2 : 1;
   const cardWidth = `${100 / columns}%`;
 
   const libraryMarks = useMemo(() => {
@@ -169,10 +168,20 @@ export default function MoviesScreen() {
         params.set("genre", group);
         params.set("sort", sort);
         if (query.trim()) params.set("q", query.trim());
-        const [catalogPayload, libraryPayload] = await Promise.all([
-          api.get(`/movies/catalog?${params.toString()}`),
+        const fallbackPage = {
+          items: MOVIE_LOCAL_FALLBACK,
+          source: "fallback",
+          attribution: TMDB_ATTRIBUTION,
+          page: 1,
+          page_size: MOVIE_LOCAL_FALLBACK.length,
+          has_more: false,
+          total_results: MOVIE_LOCAL_FALLBACK.length,
+        };
+        const catalogPayload = await withTimeout(api.get(`/movies/catalog?${params.toString()}`), 6500, fallbackPage);
+        const libraryPayload = await Promise.race([
           api.get("/movies/library").catch(() => ({ items: [] })),
-        ]);
+          new Promise((resolve) => setTimeout(() => resolve({ items: [] }), 2500)),
+        ]) as any;
         const nextItems = Array.isArray(catalogPayload.items) ? catalogPayload.items : [];
         setCatalog((prev) => ({
           items: append ? dedupeMovies([...prev.items, ...nextItems]) : nextItems,
@@ -232,24 +241,15 @@ export default function MoviesScreen() {
     }
   };
 
-  const handleWatch = async (item: MovieItem) => {
+  const handleWatch = (item: MovieItem) => {
     const tmdbId = item.id || item.tmdb_id;
     if (!tmdbId) return;
     const key = `${item.media_type}:${tmdbId}`;
-    try {
-      setWatchingKey(key);
-      const payload = await api.get(`/movies/watch?media_type=${encodeURIComponent(item.media_type)}&tmdb_id=${encodeURIComponent(String(tmdbId))}`);
-      const target = payload.watch_url || payload.trailer_url;
-      if (!target) {
-        Alert.alert("Lecture indisponible", "Aucun lien officiel de lecture ou de bande-annonce n'est disponible pour ce titre.");
-        return;
-      }
-      await Linking.openURL(target);
-    } catch (e: any) {
-      Alert.alert("Lecture indisponible", e.message || "Impossible d'ouvrir ce contenu pour le moment.");
-    } finally {
+    setWatchingKey(key);
+    router.push({ pathname: "/watch" as any, params: { media_type: item.media_type, tmdb_id: String(tmdbId) } });
+    setTimeout(() => {
       setWatchingKey("");
-    }
+    }, 450);
   };
 
   return (
@@ -263,7 +263,7 @@ export default function MoviesScreen() {
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.kicker}>FX PRO STREAM</Text>
               <Text testID="movies-title" style={styles.title} numberOfLines={1}>Films & series</Text>
-              <Text style={styles.subtitle} numberOfLines={2}>Catalogue large, listes perso et ouverture des liens officiels de lecture ou bande-annonce.</Text>
+              <Text style={styles.subtitle} numberOfLines={2}>Catalogue large, listes perso et page lecteur avec VF, VOSTFR, infos et liens officiels.</Text>
             </View>
             <View style={styles.freeBadge}>
               <Ionicons name="sparkles" size={15} color="#000" />
@@ -289,7 +289,7 @@ export default function MoviesScreen() {
             ) : null}
           </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sectionTrack}>
+          <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sectionTrack}>
             {SECTIONS.map((tab) => {
               const active = section === tab.id;
               return (
@@ -301,7 +301,7 @@ export default function MoviesScreen() {
             })}
           </ScrollView>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTrack}>
+          <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTrack}>
             {GROUPS.map((tab) => {
               const active = group === tab.id;
               return (
@@ -312,7 +312,7 @@ export default function MoviesScreen() {
             })}
           </ScrollView>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sortTrack}>
+          <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sortTrack}>
             {SORTS.map((tab) => {
               const active = sort === tab.id;
               return (
@@ -403,7 +403,7 @@ function MovieCard({
     <View style={[styles.movieCard, compact && styles.movieCardCompact]}>
       <View style={styles.posterBox}>
         {image ? (
-          <Image source={{ uri: image }} style={styles.poster} resizeMode="cover" />
+          <RemotePoster uri={image} mediaType={item.media_type} />
         ) : (
           <View style={styles.posterFallback}>
             <Ionicons name={item.media_type === "tv" ? "tv-outline" : "film-outline"} size={28} color={Colors.textMuted} />
@@ -456,6 +456,18 @@ function MovieCard({
       </View>
     </View>
   );
+}
+
+function RemotePoster({ uri, mediaType }: { uri: string; mediaType: "movie" | "tv" }) {
+  const [failed, setFailed] = useState(false);
+  if (failed || !uri?.startsWith("http")) {
+    return (
+      <View style={styles.posterFallback}>
+        <Ionicons name={mediaType === "tv" ? "tv-outline" : "film-outline"} size={28} color={Colors.textMuted} />
+      </View>
+    );
+  }
+  return <Image source={{ uri }} style={styles.poster} resizeMode="cover" onError={() => setFailed(true)} />;
 }
 
 function ListButton({ icon, active, color, loading, onPress }: { icon: any; active: boolean; color: string; loading: boolean; onPress: () => void }) {
@@ -515,6 +527,13 @@ function dedupeMovies(items: MovieItem[]) {
   });
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
+  ]);
+}
+
 const styles = StyleSheet.create({
   scroll: { paddingBottom: 110 },
   header: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 8 },
@@ -532,6 +551,7 @@ const styles = StyleSheet.create({
   sectionChipText: { color: "#fff", fontWeight: "900", fontSize: 12 },
   sectionChipTextActive: { color: "#000" },
   filterTrack: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 2, gap: 8 },
+  horizontalRail: { width: "100%", maxWidth: "100%", flexGrow: 0 },
   filterChip: { minHeight: 34, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.03)", alignItems: "center", justifyContent: "center" },
   filterChipActive: { backgroundColor: Colors.magenta, borderColor: Colors.magenta },
   filterChipText: { color: "#fff", fontSize: 11, fontWeight: "800" },

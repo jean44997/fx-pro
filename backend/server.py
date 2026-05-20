@@ -77,6 +77,12 @@ SERVICES_AVAILABLE_BODY = (
     "La vente en ligne, le catalogue films et series, les jeux a tickets et les notifications vendeur sont disponibles. "
     "Ouvre la boutique, les films ou les jeux pour profiter des nouveaux services."
 )
+MAINTENANCE_NOTICE_FLAG = "maintenance_update_notice_2026_05_20_at"
+MAINTENANCE_NOTICE_TITLE = "Maintenance FX Pro en cours"
+MAINTENANCE_NOTICE_BODY = (
+    "Une maintenance de l'app est en cours pour ameliorer la boutique, les films, les jeux et la stabilite. "
+    "Les soldes, recus, commandes et notifications restent proteges pendant la mise a jour."
+)
 GAME_DAILY_TICKETS = 5
 GAME_TICKET_NOTICE_PREFIX = "game_tickets_recharged_notice_"
 GAME_GLOBAL_RECHARGE_FLAG = "game_global_recharge_2026_05_19_at"
@@ -88,6 +94,53 @@ GAME_CONFIG = {
     "power_match": {"name": "Power Match", "win_chance": 0.30, "min_prize": 220, "max_prize": 1800, "mode": "hero"},
     "speed_run": {"name": "Speed Run", "win_chance": 0.44, "min_prize": 60, "max_prize": 620, "mode": "hero"},
 }
+STEAM_APPLIST_URL = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+STEAM_DETAILS_URL = "https://store.steampowered.com/api/appdetails"
+STEAM_CACHE_TTL_SECONDS = 60 * 60 * 6
+STEAM_FEATURED_APPS = [
+    {"appid": 271590, "name": "Grand Theft Auto V Legacy"},
+    {"appid": 3240220, "name": "Grand Theft Auto V Enhanced"},
+    {"appid": 1245620, "name": "ELDEN RING"},
+    {"appid": 1938090, "name": "Call of Duty"},
+    {"appid": 2669320, "name": "EA SPORTS FC 25"},
+    {"appid": 2195250, "name": "EA SPORTS FC 24"},
+    {"appid": 730, "name": "Counter-Strike 2"},
+    {"appid": 570, "name": "Dota 2"},
+    {"appid": 1174180, "name": "Red Dead Redemption 2"},
+    {"appid": 292030, "name": "The Witcher 3: Wild Hunt"},
+    {"appid": 1086940, "name": "Baldur's Gate 3"},
+    {"appid": 578080, "name": "PUBG: BATTLEGROUNDS"},
+    {"appid": 252490, "name": "Rust"},
+    {"appid": 359550, "name": "Tom Clancy's Rainbow Six Siege"},
+    {"appid": 1172470, "name": "Apex Legends"},
+    {"appid": 230410, "name": "Warframe"},
+    {"appid": 381210, "name": "Dead by Daylight"},
+    {"appid": 1551360, "name": "Forza Horizon 5"},
+    {"appid": 990080, "name": "Hogwarts Legacy"},
+    {"appid": 1091500, "name": "Cyberpunk 2077"},
+    {"appid": 440, "name": "Team Fortress 2"},
+    {"appid": 346110, "name": "ARK: Survival Evolved"},
+    {"appid": 413150, "name": "Stardew Valley"},
+    {"appid": 945360, "name": "Among Us"},
+    {"appid": 105600, "name": "Terraria"},
+    {"appid": 322330, "name": "Don't Starve Together"},
+    {"appid": 39210, "name": "FINAL FANTASY XIV Online"},
+    {"appid": 236390, "name": "War Thunder"},
+    {"appid": 444200, "name": "World of Tanks Blitz"},
+    {"appid": 238960, "name": "Path of Exile"},
+    {"appid": 582010, "name": "Monster Hunter: World"},
+    {"appid": 1203220, "name": "NARAKA: BLADEPOINT"},
+    {"appid": 227300, "name": "Euro Truck Simulator 2"},
+    {"appid": 275850, "name": "No Man's Sky"},
+    {"appid": 242760, "name": "The Forest"},
+    {"appid": 1326470, "name": "Sons Of The Forest"},
+    {"appid": 1145360, "name": "Hades"},
+    {"appid": 367520, "name": "Hollow Knight"},
+    {"appid": 289070, "name": "Sid Meier's Civilization VI"},
+    {"appid": 1248130, "name": "Farming Simulator 22"},
+]
+STEAM_APP_LIST_CACHE: Dict[str, Any] = {"items": [], "expires_at": datetime.min.replace(tzinfo=timezone.utc), "source": "fallback"}
+STEAM_DETAIL_CACHE: Dict[int, Dict[str, Any]] = {}
 MAX_SHOP_PRODUCTS = 1400
 MOVIE_PAGE_SIZE_DEFAULT = 24
 MOVIE_GENRE_GROUPS = {
@@ -685,6 +738,29 @@ async def announce_services_available_once(user_id: str) -> bool:
     return True
 
 
+async def announce_maintenance_once(user_id: str) -> bool:
+    created_at = now_utc()
+    updated = await db.users.update_one(
+        {"user_id": user_id, MAINTENANCE_NOTICE_FLAG: {"$exists": False}},
+        {"$set": {MAINTENANCE_NOTICE_FLAG: created_at, "updated_at": created_at}},
+    )
+    if updated.modified_count <= 0:
+        return False
+    notif = {
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "type": "maintenance_update",
+        "title": MAINTENANCE_NOTICE_TITLE,
+        "body": MAINTENANCE_NOTICE_BODY,
+        "read": False,
+        "created_at": created_at,
+        "url": "/notifications",
+    }
+    await db.notifications.insert_one(notif)
+    await send_push_to_user(user_id, notif["title"], notif["body"], None, "maintenance_update", notif["notif_id"])
+    return True
+
+
 def game_today_key() -> str:
     return now_utc().date().isoformat()
 
@@ -984,6 +1060,11 @@ class GamePlayIn(BaseModel):
     game_id: str = "scratch"
 
 
+class SteamPurchaseIn(BaseModel):
+    appid: int
+    wallet_currency: str = "XOF"
+
+
 class SellerProfileIn(BaseModel):
     store_name: Optional[str] = None
     bio: Optional[str] = None
@@ -1120,6 +1201,7 @@ async def google_session(data: GoogleSessionIn):
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     await notify_withdraw_paused_once(user["user_id"])
+    await announce_maintenance_once(user["user_id"])
     await announce_services_available_once(user["user_id"])
     return user
 
@@ -2187,6 +2269,34 @@ def normalize_tmdb_item(raw: dict, media_type: Optional[str] = None) -> Optional
     }
 
 
+def normalize_tmdb_detail(raw: dict, media_type: str) -> dict:
+    base = normalize_tmdb_item(raw, media_type) or {
+        "id": int(raw.get("id") or 0),
+        "media_type": media_type,
+        "title": raw.get("title") or raw.get("name") or "Titre indisponible",
+        "overview": raw.get("overview") or "Synopsis indisponible pour le moment.",
+        "poster_url": tmdb_image(raw.get("poster_path"), "w500"),
+        "backdrop_url": tmdb_image(raw.get("backdrop_path"), "w1280"),
+        "release_date": raw.get("release_date") or raw.get("first_air_date") or "",
+        "source": "tmdb",
+    }
+    runtime = raw.get("runtime")
+    if media_type == "tv":
+        runtimes = raw.get("episode_run_time") or []
+        runtime = runtimes[0] if runtimes else None
+    base.update({
+        "runtime": runtime,
+        "duration_label": f"{runtime} min" if runtime else "",
+        "tagline": raw.get("tagline") or "",
+        "status": raw.get("status") or "",
+        "genres": [item.get("name") for item in (raw.get("genres") or []) if item.get("name")],
+        "number_of_seasons": raw.get("number_of_seasons") if media_type == "tv" else None,
+        "number_of_episodes": raw.get("number_of_episodes") if media_type == "tv" else None,
+        "homepage": raw.get("homepage") or "",
+    })
+    return base
+
+
 async def tmdb_get(path: str, params: Optional[dict] = None) -> dict:
     if not TMDB_READ_TOKEN and not TMDB_API_KEY:
         raise RuntimeError("TMDB credentials missing")
@@ -2251,10 +2361,11 @@ def tmdb_provider_names(payload: dict) -> List[str]:
 
 
 async def build_movie_watch_options(media_type: str, tmdb_id: int) -> dict:
-    watch_payload, fr_videos_payload, default_videos_payload = await asyncio.gather(
+    watch_payload, fr_videos_payload, default_videos_payload, detail_payload = await asyncio.gather(
         tmdb_get(f"/{media_type}/{tmdb_id}/watch/providers"),
         tmdb_get(f"/{media_type}/{tmdb_id}/videos", {"language": "fr-FR"}),
         tmdb_get(f"/{media_type}/{tmdb_id}/videos"),
+        tmdb_get(f"/{media_type}/{tmdb_id}", {"language": "fr-FR"}),
     )
     results = watch_payload.get("results") or {}
     chosen_region = next((region for region in ["FR", "CA", "BE", "CH", "US", "GB"] if results.get(region)), "")
@@ -2271,11 +2382,20 @@ async def build_movie_watch_options(media_type: str, tmdb_id: int) -> dict:
         if str(video.get("iso_639_1") or "").lower() == "fr":
             break
     trailer_url = f"https://www.youtube.com/watch?v={best_video['key']}" if best_video and best_video.get("key") else ""
+    video_key = str((best_video or {}).get("key") or "")
     return {
         "tmdb_id": tmdb_id,
         "media_type": media_type,
+        "details": normalize_tmdb_detail(detail_payload, media_type),
         "watch_url": provider_block.get("link") or trailer_url,
         "trailer_url": trailer_url,
+        "player": {
+            "provider": "youtube" if video_key else "official",
+            "embed_url": f"https://www.youtube.com/embed/{video_key}" if video_key else "",
+            "video_key": video_key,
+            "supports_vf": chosen_region in ["FR", "CA", "BE", "CH"] or str((best_video or {}).get("iso_639_1") or "").lower() == "fr",
+            "supports_vostfr": bool(video_key),
+        },
         "provider_region": chosen_region or "",
         "provider_names": provider_names,
         "has_vf": chosen_region in ["FR", "CA", "BE", "CH"] or str((best_video or {}).get("iso_639_1") or "").lower() == "fr",
@@ -2464,6 +2584,257 @@ async def build_free_games_catalog(
         "has_more": end < len(filtered),
         "source": source,
     }
+
+
+def clean_steam_text(value: Any) -> str:
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def steam_featured_index() -> List[dict]:
+    return [{"appid": int(item["appid"]), "name": str(item["name"])} for item in STEAM_FEATURED_APPS]
+
+
+async def fetch_steam_app_index() -> dict:
+    now = now_utc()
+    if STEAM_APP_LIST_CACHE.get("items") and STEAM_APP_LIST_CACHE.get("expires_at", now) > now:
+        return {
+            "items": STEAM_APP_LIST_CACHE["items"],
+            "source": STEAM_APP_LIST_CACHE.get("source") or "cache",
+        }
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+            response = await client.get(STEAM_APPLIST_URL, params={"format": "json"})
+        response.raise_for_status()
+        payload = response.json()
+        raw_apps = payload.get("applist", {}).get("apps", [])
+        apps = []
+        seen = set()
+        for raw in raw_apps:
+            appid = int(raw.get("appid") or 0)
+            name = clean_steam_text(raw.get("name"))
+            if appid <= 0 or len(name) < 2 or appid in seen:
+                continue
+            seen.add(appid)
+            apps.append({"appid": appid, "name": name})
+        if len(apps) < 100:
+            raise RuntimeError("Steam app list too small")
+        featured = steam_featured_index()
+        featured_ids = {item["appid"] for item in featured}
+        merged = featured + [item for item in apps if item["appid"] not in featured_ids]
+        STEAM_APP_LIST_CACHE.update({"items": merged, "expires_at": now + timedelta(seconds=STEAM_CACHE_TTL_SECONDS), "source": "steam"})
+        return {"items": merged, "source": "steam"}
+    except Exception as exc:
+        logger.warning("Steam app list unavailable: %s", exc)
+        fallback = steam_featured_index()
+        STEAM_APP_LIST_CACHE.update({"items": fallback, "expires_at": now + timedelta(minutes=30), "source": "featured_fallback"})
+        return {"items": fallback, "source": "featured_fallback"}
+
+
+def steam_fallback_image(appid: int, kind: str = "header") -> str:
+    filename = "capsule_616x353.jpg" if kind == "capsule" else "header.jpg"
+    return f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/{filename}"
+
+
+def normalize_steam_game(appid: int, fallback_name: str, payload: Optional[dict] = None) -> dict:
+    detail = payload or {}
+    price = detail.get("price_overview") if isinstance(detail.get("price_overview"), dict) else {}
+    final_cents = price.get("final")
+    initial_cents = price.get("initial")
+    currency = normalize_shop_currency(price.get("currency") or "EUR")
+    final_amount = round_shop_money(float(final_cents) / 100, currency) if isinstance(final_cents, (int, float)) else None
+    initial_amount = round_shop_money(float(initial_cents) / 100, currency) if isinstance(initial_cents, (int, float)) else None
+    is_free = bool(detail.get("is_free")) or final_amount == 0
+    title = clean_steam_text(detail.get("name") or fallback_name or f"Steam App {appid}")
+    genres = [clean_steam_text(item.get("description")) for item in (detail.get("genres") or []) if item.get("description")]
+    categories = [clean_steam_text(item.get("description")) for item in (detail.get("categories") or []) if item.get("description")]
+    developers = [clean_steam_text(item) for item in (detail.get("developers") or []) if item]
+    publishers = [clean_steam_text(item) for item in (detail.get("publishers") or []) if item]
+    header = detail.get("header_image") or detail.get("capsule_image") or steam_fallback_image(appid)
+    return {
+        "appid": appid,
+        "id": appid,
+        "title": title,
+        "name": title,
+        "image": header,
+        "thumbnail": header,
+        "capsule_image": detail.get("capsule_image") or steam_fallback_image(appid, "capsule"),
+        "background": detail.get("background_raw") or detail.get("background") or "",
+        "short_description": clean_steam_text(detail.get("short_description") or detail.get("detailed_description") or "Fiche Steam avec achat, prix et informations de base."),
+        "price": final_amount,
+        "price_initial": initial_amount,
+        "price_currency": currency,
+        "price_label": "Gratuit" if is_free else (price.get("final_formatted") or (f"{final_amount} {currency}" if final_amount is not None else "Prix Steam")),
+        "discount_percent": int(price.get("discount_percent") or 0),
+        "is_free": is_free,
+        "genres": genres,
+        "genre": genres[0] if genres else "Steam",
+        "categories": categories,
+        "developers": developers,
+        "publishers": publishers,
+        "publisher": publishers[0] if publishers else "Steam",
+        "release_date": (detail.get("release_date") or {}).get("date") if isinstance(detail.get("release_date"), dict) else "",
+        "steam_url": f"https://store.steampowered.com/app/{appid}",
+        "source": "steam" if detail else "steam_fallback",
+    }
+
+
+async def get_steam_game_detail(appid: int, fallback_name: str = "") -> dict:
+    now = now_utc()
+    cached = STEAM_DETAIL_CACHE.get(appid)
+    if cached and cached.get("expires_at", now) > now:
+        return cached["item"]
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            response = await client.get(STEAM_DETAILS_URL, params={"appids": appid, "cc": "FR", "l": "french"})
+        response.raise_for_status()
+        payload = response.json().get(str(appid), {})
+        detail = payload.get("data") if payload.get("success") else None
+        item = normalize_steam_game(appid, fallback_name, detail if isinstance(detail, dict) else None)
+    except Exception as exc:
+        logger.warning("Steam detail unavailable for %s: %s", appid, exc)
+        item = normalize_steam_game(appid, fallback_name, None)
+    STEAM_DETAIL_CACHE[appid] = {"item": item, "expires_at": now + timedelta(seconds=STEAM_CACHE_TTL_SECONDS)}
+    return item
+
+
+async def hydrate_steam_games(candidates: List[dict], max_concurrency: int = 6) -> List[dict]:
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def load_one(candidate: dict) -> dict:
+        async with semaphore:
+            return await get_steam_game_detail(int(candidate["appid"]), str(candidate.get("name") or ""))
+
+    return await asyncio.gather(*[load_one(item) for item in candidates])
+
+
+async def build_steam_catalog(
+    user_id: Optional[str] = None,
+    query: str = "",
+    genre: str = "all",
+    page: int = 1,
+    limit: int = 20,
+) -> dict:
+    if user_id:
+        await announce_services_available_once(user_id)
+    page = max(1, int(page or 1))
+    limit = max(20, min(40, int(limit or 20)))
+    clean_query = query.strip().lower()
+    clean_genre = genre.strip().lower() or "all"
+    index_payload = await fetch_steam_app_index()
+    candidates = index_payload["items"]
+    if clean_query:
+        candidates = [item for item in candidates if clean_query in str(item.get("name") or "").lower()]
+    if clean_genre != "all":
+        hydrated_pool = await hydrate_steam_games(candidates[:180])
+        filtered_items = [item for item in hydrated_pool if clean_genre in " ".join(item.get("genres") or [item.get("genre", "")]).lower()]
+        total_results = len(filtered_items)
+        start = (page - 1) * limit
+        items = filtered_items[start:start + limit]
+    else:
+        total_results = len(candidates)
+        start = (page - 1) * limit
+        selected = candidates[start:start + limit]
+        items = await hydrate_steam_games(selected)
+    genre_pool = sorted({
+        genre_name
+        for item in items
+        for genre_name in (item.get("genres") or [])
+        if genre_name
+    })
+    if not genre_pool:
+        genre_pool = ["Action", "Adventure", "RPG", "Simulation", "Sports", "Strategy", "Free to Play"]
+    return {
+        "items": items,
+        "genres": genre_pool[:18],
+        "page": page,
+        "limit": limit,
+        "total_results": total_results,
+        "has_more": page * limit < total_results,
+        "source": index_payload.get("source") or "steam",
+        "cache_ttl_seconds": STEAM_CACHE_TTL_SECONDS,
+    }
+
+
+async def purchase_steam_game(data: SteamPurchaseIn, user: dict) -> dict:
+    appid = int(data.appid or 0)
+    if appid <= 0:
+        raise HTTPException(status_code=400, detail="Jeu Steam invalide")
+    wallet_currency = normalize_shop_currency(data.wallet_currency)
+    game = await get_steam_game_detail(appid)
+    price_currency = normalize_shop_currency(game.get("price_currency") or "EUR")
+    price_amount = game.get("price")
+    if price_amount is None and not game.get("is_free"):
+        raise HTTPException(status_code=409, detail="Prix Steam indisponible pour ce jeu. Ouvrez la page Steam officielle pour finaliser.")
+    rates_doc = await get_active_rates("EUR")
+    debit_amount = 0.0 if game.get("is_free") else convert_shop_money(float(price_amount or 0), price_currency, wallet_currency, rates_doc.get("rates") or FALLBACK_RATES)
+    balance_key = f"balances.{wallet_currency}"
+    if debit_amount > 0:
+        updated_user = await db.users.find_one_and_update(
+            {"user_id": user["user_id"], balance_key: {"$gte": debit_amount}},
+            {"$inc": {balance_key: -debit_amount}, "$set": {"updated_at": now_utc()}},
+            projection={"_id": 0},
+            return_document=ReturnDocument.AFTER,
+        )
+        if not updated_user:
+            full = await find_user_full(user["user_id"])
+            available = float((full.get("balances") or {}).get(wallet_currency, 0))
+            raise HTTPException(status_code=400, detail=f"Solde insuffisant: disponible {available} {wallet_currency}, achat {debit_amount} {wallet_currency}.")
+    else:
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"updated_at": now_utc()}})
+        updated_user = await find_user_full(user["user_id"]) or user
+    created_at = now_utc()
+    purchase_id = f"stp_{uuid.uuid4().hex[:12]}"
+    txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+    reference = f"STEAM-{uuid.uuid4().hex[:8].upper()}"
+    purchase = {
+        "purchase_id": purchase_id,
+        "user_id": user["user_id"],
+        "appid": appid,
+        "game": game,
+        "reference": reference,
+        "status": "completed" if debit_amount > 0 else "reserved",
+        "debit_amount": debit_amount,
+        "wallet_currency": wallet_currency,
+        "price_amount": price_amount or 0,
+        "price_currency": price_currency,
+        "steam_url": game.get("steam_url"),
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+    txn = {
+        "txn_id": txn_id,
+        "type": "steam_purchase" if debit_amount > 0 else "steam_free_redeem",
+        "user_id": user["user_id"],
+        "participants": [user["user_id"]],
+        "amount": debit_amount,
+        "currency": wallet_currency,
+        "reference": reference,
+        "status": "completed",
+        "steam_appid": appid,
+        "steam_purchase_id": purchase_id,
+        "steam_price": price_amount or 0,
+        "steam_currency": price_currency,
+        "created_at": created_at,
+    }
+    notif = {
+        "notif_id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"],
+        "type": "steam_purchase",
+        "txn_id": txn_id,
+        "title": "Achat jeu confirme",
+        "body": f"{game.get('title')}: {reference}. {'Aucun debit, jeu gratuit.' if debit_amount <= 0 else f'Paiement {debit_amount} {wallet_currency}.'}",
+        "read": False,
+        "created_at": created_at,
+        "url": "/games",
+    }
+    await db.steam_purchases.insert_one(purchase)
+    await db.transactions.insert_one(txn)
+    await db.notifications.insert_one(notif)
+    await send_push_to_user(user["user_id"], notif["title"], notif["body"], txn_id, "steam_purchase", notif["notif_id"])
+    purchase.pop("_id", None)
+    txn.pop("_id", None)
+    return {"ok": True, "purchase": purchase, "transaction": txn, "balances": updated_user.get("balances", {}), "steam_url": game.get("steam_url")}
 
 
 async def get_movie_library(user_id: str) -> List[dict]:
@@ -3085,6 +3456,22 @@ async def games_catalog(
     return await build_free_games_catalog((user or {}).get("user_id"), q, genre, platform, page, limit)
 
 
+@api.get("/games/steam/catalog")
+async def games_steam_catalog(
+    q: str = "",
+    genre: str = "all",
+    page: int = 1,
+    limit: int = 20,
+    user: Optional[dict] = Depends(get_current_user_optional),
+):
+    return await build_steam_catalog((user or {}).get("user_id"), q, genre, page, limit)
+
+
+@api.post("/games/steam/purchase")
+async def games_steam_purchase(data: SteamPurchaseIn, user: dict = Depends(get_current_user)):
+    return await purchase_steam_game(data, user)
+
+
 @api.get("/admin/shop/products")
 async def admin_shop_products(_: dict = Depends(require_admin)):
     items = await db.shop_products.find({}, {"_id": 0}).to_list(500)
@@ -3678,6 +4065,22 @@ async def admin_notify_withdraw_paused(_: dict = Depends(require_admin)):
         else:
             skipped += 1
     return {"ok": True, "sent": sent, "skipped": skipped, "flag": WITHDRAW_PAUSED_NOTICE_FLAG}
+
+
+@api.post("/admin/notifications/maintenance")
+async def admin_notify_maintenance(_: dict = Depends(require_admin)):
+    sent = 0
+    skipped = 0
+    cursor = db.users.find({"role": {"$ne": "admin"}}, {"_id": 0, "user_id": 1, MAINTENANCE_NOTICE_FLAG: 1})
+    async for item in cursor:
+        if item.get(MAINTENANCE_NOTICE_FLAG):
+            skipped += 1
+            continue
+        if await announce_maintenance_once(item["user_id"]):
+            sent += 1
+        else:
+            skipped += 1
+    return {"ok": True, "sent": sent, "skipped": skipped, "flag": MAINTENANCE_NOTICE_FLAG}
 
 
 @api.get("/admin/users")

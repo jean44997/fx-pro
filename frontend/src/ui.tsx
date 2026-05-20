@@ -9,8 +9,6 @@ import Animated, {
   withSpring,
   withRepeat,
   withTiming,
-  withDelay,
-  Easing,
   FadeIn,
   FadeInDown,
   FadeInUp,
@@ -29,28 +27,8 @@ export function GradientBg({ children }: { children: React.ReactNode }) {
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      <GlowOrb top={-80} left={-60} color="rgba(157,76,221,0.35)" size={220} />
-      <GlowOrb top={120} left={220} color="rgba(0,255,255,0.20)" size={180} delay={400} />
-      <GlowOrb top={500} left={-40} color="rgba(255,0,127,0.18)" size={200} delay={800} />
       {children}
     </View>
-  );
-}
-
-export function GlowOrb({ top, left, color, size, delay = 0 }: any) {
-  const s = useSharedValue(1);
-  useEffect(() => {
-    s.value = withDelay(delay, withRepeat(withTiming(1.2, { duration: 4000, easing: Easing.inOut(Easing.ease) }), -1, true));
-  }, [delay, s]);
-  const st = useAnimatedStyle(() => ({ transform: [{ scale: s.value }] }));
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[
-        { position: "absolute", top, left, width: size, height: size, borderRadius: size / 2, backgroundColor: color },
-        st,
-      ]}
-    />
   );
 }
 

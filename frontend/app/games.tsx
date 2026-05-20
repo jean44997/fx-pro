@@ -76,9 +76,45 @@ type FreeGamesState = {
   source?: string;
 };
 
+type SteamGameItem = {
+  appid: number;
+  id?: number;
+  title: string;
+  name?: string;
+  image?: string;
+  thumbnail?: string;
+  capsule_image?: string;
+  background?: string;
+  short_description?: string;
+  price?: number | null;
+  price_initial?: number | null;
+  price_currency?: string;
+  price_label?: string;
+  discount_percent?: number;
+  is_free?: boolean;
+  genres?: string[];
+  genre?: string;
+  developers?: string[];
+  publishers?: string[];
+  publisher?: string;
+  release_date?: string;
+  steam_url?: string;
+  source?: string;
+};
+
+type SteamCatalogState = {
+  items: SteamGameItem[];
+  genres: string[];
+  page: number;
+  has_more: boolean;
+  total_results: number;
+  source?: string;
+};
+
 function gameSourceLabel(source?: string) {
   if (source === "snapshot") return "catalogue integre";
   if (source === "fallback") return "secours";
+  if (source === "featured_fallback") return "Steam selection";
   return source || "live";
 }
 
@@ -95,7 +131,7 @@ const FREE_GAME_FALLBACK: FreeGameItem[] = FREE_GAME_SNAPSHOT.map((item) => ({ .
 
 export default function GamesScreen() {
   const router = useRouter();
-  const { refresh } = useAuth();
+  const { user, refresh } = useAuth();
   const { width } = useWindowDimensions();
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState<string | null>(null);
@@ -108,6 +144,12 @@ export default function GamesScreen() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogLoadingMore, setCatalogLoadingMore] = useState(false);
   const [openingKey, setOpeningKey] = useState("");
+  const [steamQuery, setSteamQuery] = useState("");
+  const [steamGenre, setSteamGenre] = useState("all");
+  const [steamCatalog, setSteamCatalog] = useState<SteamCatalogState>({ items: [], genres: [], page: 1, has_more: false, total_results: 0, source: "" });
+  const [steamLoading, setSteamLoading] = useState(true);
+  const [steamLoadingMore, setSteamLoadingMore] = useState(false);
+  const [buyingSteamKey, setBuyingSteamKey] = useState("");
   const pulse = useSharedValue(1);
 
   useEffect(() => {
@@ -116,11 +158,13 @@ export default function GamesScreen() {
 
   const pulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulse.value }] }));
 
-  const compact = width < 560;
-  const bonusColumns = width >= 980 ? 3 : width >= 620 ? 2 : 1;
-  const catalogColumns = width >= 1280 ? 4 : width >= 920 ? 3 : width >= 600 ? 2 : 1;
+  const compact = width < 480;
+  const bonusColumns = width >= 1024 ? 3 : width >= 768 ? 2 : 1;
+  const catalogColumns = width >= 1024 ? 4 : width >= 768 ? 3 : width >= 480 ? 2 : 1;
+  const steamColumns = catalogColumns;
   const bonusCardWidth = `${100 / bonusColumns}%`;
   const catalogCardWidth = `${100 / catalogColumns}%`;
+  const steamCardWidth = `${100 / steamColumns}%`;
   const games: GameItem[] = status?.games || [];
   const heroes: HeroItem[] = status?.heroes || [];
 
@@ -159,7 +203,8 @@ export default function GamesScreen() {
         params.set("genre", genre);
         params.set("platform", platform);
         if (query.trim()) params.set("q", query.trim());
-        const payload = await api.get(`/games/catalog?${params.toString()}`);
+        const payload = await withTimeout(api.get(`/games/catalog?${params.toString()}`), 6500, null as any);
+        if (!payload) throw new Error("Catalogue jeux indisponible");
         const nextItems = Array.isArray(payload.items) ? payload.items : [];
         setCatalog((prev) => ({
           items: append ? dedupeFreeGames([...prev.items, ...nextItems]) : nextItems,
@@ -195,9 +240,55 @@ export default function GamesScreen() {
     [compact, genre, platform, query]
   );
 
+  const loadSteamCatalog = useCallback(
+    async (page = 1, append = false) => {
+      try {
+        if (append) setSteamLoadingMore(true);
+        else setSteamLoading(true);
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        params.set("limit", "20");
+        params.set("genre", steamGenre);
+        if (steamQuery.trim()) params.set("q", steamQuery.trim());
+        const payload = await withTimeout(api.get(`/games/steam/catalog?${params.toString()}`), 9000, {
+          items: [],
+          genres: ["Action", "Adventure", "RPG", "Simulation", "Sports", "Strategy", "Free to Play"],
+          page,
+          has_more: false,
+          total_results: 0,
+          source: "offline",
+        });
+        const nextItems = Array.isArray(payload.items) ? payload.items : [];
+        setSteamCatalog((prev) => ({
+          items: append ? dedupeSteamGames([...prev.items, ...nextItems]) : nextItems,
+          genres: Array.isArray(payload.genres) ? payload.genres : [],
+          page: Number(payload.page || page),
+          has_more: Boolean(payload.has_more),
+          total_results: Number(payload.total_results || nextItems.length),
+          source: payload.source,
+        }));
+      } catch {
+        if (!append) {
+          setSteamCatalog((prev) => ({ ...prev, items: [], genres: [], page: 1, has_more: false, total_results: 0, source: "offline" }));
+        }
+      } finally {
+        setSteamLoading(false);
+        setSteamLoadingMore(false);
+      }
+    },
+    [steamGenre, steamQuery]
+  );
+
   useEffect(() => {
     loadStatus().catch(() => undefined);
   }, [loadStatus]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadSteamCatalog(1, false).catch(() => undefined);
+    }, steamQuery.trim() ? 320 : 0);
+    return () => clearTimeout(timer);
+  }, [loadSteamCatalog, steamGenre, steamQuery]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -244,8 +335,35 @@ export default function GamesScreen() {
     }
   };
 
+  const openSteamPage = async (item: SteamGameItem) => {
+    const target = item.steam_url || `https://store.steampowered.com/app/${item.appid}`;
+    try {
+      await Linking.openURL(target);
+    } catch (e: any) {
+      Alert.alert("Steam indisponible", e.message || "Impossible d'ouvrir la fiche Steam.");
+    }
+  };
+
+  const buySteamGame = async (item: SteamGameItem) => {
+    try {
+      setBuyingSteamKey(String(item.appid));
+      const res = await api.post("/games/steam/purchase", { appid: item.appid, wallet_currency: "XOF" });
+      await refresh();
+      Alert.alert(
+        "Achat confirme",
+        `${item.title || item.name} - ${res.transaction?.reference || res.purchase?.reference || "STEAM"}. ${res.transaction?.amount ? `Debit ${res.transaction.amount} ${res.transaction.currency}.` : "Aucun debit pour ce jeu gratuit."}`,
+        [{ text: "Ouvrir Steam", onPress: () => openSteamPage(item) }, { text: "OK" }]
+      );
+    } catch (e: any) {
+      Alert.alert("Achat indisponible", e.message || "Impossible de finaliser cet achat maintenant.");
+    } finally {
+      setBuyingSteamKey("");
+    }
+  };
+
   const visibleGenres = useMemo(() => ["all", ...catalog.genres.slice(0, 12)], [catalog.genres]);
   const visiblePlatforms = useMemo(() => ["all", ...catalog.platforms.slice(0, 6)], [catalog.platforms]);
+  const visibleSteamGenres = useMemo(() => ["all", ...steamCatalog.genres.slice(0, 10)], [steamCatalog.genres]);
 
   return (
     <GradientBg>
@@ -306,6 +424,87 @@ export default function GamesScreen() {
             <GhostButton testID="games-refresh" title="Actualiser tickets" onPress={() => loadStatus()} icon={<Ionicons name="refresh" size={16} color={Colors.cyan} />} />
           </View>
 
+          <View style={styles.steamHeader}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.sectionKicker}>Boutique Steam</Text>
+              <Text style={styles.catalogTitle}>Catalogue jeux complet</Text>
+              <Text style={styles.catalogSubtitle}>
+                {steamCatalog.total_results || 0} jeu(x), pagination 20/page, cache API et prix Steam quand disponibles. Solde XOF: {formatMoney(user?.balances?.XOF || 0, "XOF")}.
+              </Text>
+            </View>
+            <View style={styles.steamBadge}>
+              <Ionicons name="logo-steam" size={15} color="#000" />
+              <Text style={styles.steamBadgeText}>{gameSourceLabel(steamCatalog.source)}</Text>
+            </View>
+          </View>
+
+          <View style={styles.searchBox}>
+            <Ionicons name="search" size={18} color={Colors.textSoft} />
+            <TextInput
+              value={steamQuery}
+              onChangeText={setSteamQuery}
+              placeholder="GTA V, FIFA, Call of Duty, Elden Ring..."
+              placeholderTextColor={Colors.textMuted}
+              style={styles.searchInput}
+            />
+            {steamQuery ? (
+              <Pressable onPress={() => setSteamQuery("")} hitSlop={10}>
+                <Ionicons name="close-circle" size={18} color={Colors.textSoft} />
+              </Pressable>
+            ) : null}
+          </View>
+
+          <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTrack}>
+            {visibleSteamGenres.map((item) => {
+              const active = steamGenre === item;
+              return (
+                <Pressable key={`steam-${item}`} onPress={() => setSteamGenre(item)} style={[styles.filterChip, active && styles.filterChipActive]}>
+                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{item === "all" ? "Tous Steam" : item}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          {steamLoading ? (
+            <View style={styles.loading}>
+              <ActivityIndicator color={Colors.cyan} />
+              <Text style={{ color: Colors.textSoft, marginTop: 10 }}>Chargement Steam...</Text>
+            </View>
+          ) : steamCatalog.items.length ? (
+            <>
+              <View style={styles.catalogGrid}>
+                {steamCatalog.items.map((item, index) => (
+                  <Animated.View key={item.appid} entering={FadeInUp.delay(Math.min(index, 18) * 28)} style={{ width: steamCardWidth as any, padding: 8 }}>
+                    <SteamGameCard
+                      item={item}
+                      compact={compact}
+                      buying={buyingSteamKey === String(item.appid)}
+                      onBuy={() => buySteamGame(item)}
+                      onOpen={() => openSteamPage(item)}
+                    />
+                  </Animated.View>
+                ))}
+              </View>
+              {steamCatalog.has_more ? (
+                <View style={styles.moreWrap}>
+                  <GhostButton
+                    title={steamLoadingMore ? "Chargement..." : "Voir plus Steam"}
+                    onPress={() => {
+                      if (!steamLoadingMore) loadSteamCatalog((steamCatalog.page || 1) + 1, true).catch(() => undefined);
+                    }}
+                    icon={steamLoadingMore ? <ActivityIndicator size="small" color={Colors.cyan} /> : <Ionicons name="chevron-down" size={16} color={Colors.cyan} />}
+                  />
+                </View>
+              ) : null}
+            </>
+          ) : (
+            <View style={styles.emptyBox}>
+              <Ionicons name="logo-steam" size={28} color={Colors.textMuted} />
+              <Text style={styles.emptyTitle}>Steam indisponible</Text>
+              <Text style={styles.emptyText}>Le catalogue Steam est cache et retentera automatiquement au prochain chargement.</Text>
+            </View>
+          )}
+
           <View style={styles.catalogHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.sectionKicker}>Catalogue live</Text>
@@ -334,7 +533,7 @@ export default function GamesScreen() {
             ) : null}
           </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTrack}>
+          <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTrack}>
             {visibleGenres.map((item) => {
               const active = genre === item;
               return (
@@ -345,7 +544,7 @@ export default function GamesScreen() {
             })}
           </ScrollView>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.platformTrack}>
+          <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.platformTrack}>
             {visiblePlatforms.map((item) => {
               const active = platform === item;
               return (
@@ -463,6 +662,88 @@ function GameCard({ game, onPlay, loading, disabled, locked }: { game: GameItem;
   );
 }
 
+function RemoteImage({
+  uri,
+  style,
+  fallbackIcon = "image-outline",
+  resizeMode = "cover",
+}: {
+  uri?: string;
+  style: any;
+  fallbackIcon?: any;
+  resizeMode?: "cover" | "contain";
+}) {
+  const [failed, setFailed] = useState(false);
+  const valid = Boolean(uri && uri.startsWith("http") && !failed);
+  if (!valid) {
+    return (
+      <View style={[style, styles.remoteFallback]}>
+        <Ionicons name={fallbackIcon} size={28} color={Colors.textMuted} />
+      </View>
+    );
+  }
+  return <Image source={{ uri }} style={style} resizeMode={resizeMode} onError={() => setFailed(true)} />;
+}
+
+function SteamGameCard({
+  item,
+  compact,
+  buying,
+  onBuy,
+  onOpen,
+}: {
+  item: SteamGameItem;
+  compact: boolean;
+  buying: boolean;
+  onBuy: () => void;
+  onOpen: () => void;
+}) {
+  const price = item.price_label || (item.is_free ? "Gratuit" : "Prix Steam");
+  const discount = Number(item.discount_percent || 0);
+  const genreLine = (item.genres || [item.genre || "Steam"]).filter(Boolean).slice(0, 2).join(" / ");
+  return (
+    <View style={[styles.steamCard, compact && styles.steamCardCompact]}>
+      <View style={styles.steamImageWrap}>
+        <RemoteImage uri={item.image || item.thumbnail || item.capsule_image} style={styles.steamImage} fallbackIcon="logo-steam" />
+        {discount > 0 ? (
+          <View style={styles.discountBadge}>
+            <Text style={styles.discountText}>-{discount}%</Text>
+          </View>
+        ) : null}
+      </View>
+      <View style={styles.steamBody}>
+        <View style={styles.freeGameTopRow}>
+          <Text style={styles.freeGameGenre}>{genreLine || "Steam"}</Text>
+          <Text style={styles.freeGamePlatform}>PC</Text>
+        </View>
+        <Text style={styles.freeGameTitle} numberOfLines={2}>{item.title || item.name}</Text>
+        <Text style={styles.freeGameDesc} numberOfLines={compact ? 4 : 3}>{item.short_description || "Jeu Steam avec fiche, prix et lien officiel."}</Text>
+        <View style={styles.steamPriceRow}>
+          {discount > 0 && item.price_initial ? <Text style={styles.oldPrice}>{item.price_initial} {item.price_currency}</Text> : null}
+          <Text style={[styles.priceText, item.is_free && { color: Colors.green }]}>{price}</Text>
+        </View>
+        <View style={styles.freeMetaLine}>
+          <InfoTiny icon="business-outline" text={item.publisher || item.publishers?.[0] || "Steam"} color={Colors.cyan} />
+          {item.release_date ? <InfoTiny icon="calendar-outline" text={item.release_date} color={Colors.yellow} /> : null}
+        </View>
+        <View style={styles.freeActions}>
+          <PrimaryButton
+            title={buying ? "Achat..." : "Acheter"}
+            onPress={onBuy}
+            loading={buying}
+            icon={<Ionicons name="cart" size={16} color="#000" />}
+            style={styles.freePlayBtn}
+          />
+          <Pressable onPress={onOpen} style={styles.freeProfileBtn}>
+            <Ionicons name="open-outline" size={16} color={Colors.cyan} />
+            <Text style={styles.freeProfileText}>Steam</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function FreeGameCard({
   item,
   compact,
@@ -480,7 +761,7 @@ function FreeGameCard({
   const profileKey = `profile:${item.id}`;
   return (
     <View style={[styles.freeGameCard, compact && styles.freeGameCardCompact]}>
-      <Image source={{ uri: item.thumbnail || "" }} style={styles.freeGameImage} resizeMode="cover" />
+      <RemoteImage uri={item.thumbnail || ""} style={styles.freeGameImage} fallbackIcon="game-controller-outline" />
       <View style={styles.freeGameBody}>
         <View style={styles.freeGameTopRow}>
           <Text style={styles.freeGameGenre}>{item.genre || "Autre"}</Text>
@@ -520,7 +801,7 @@ function HeroStrip({ heroes }: { heroes: HeroItem[] }) {
         </View>
         <Ionicons name="pulse" size={20} color={Colors.cyan} />
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.heroTrack}>
+      <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.heroTrack}>
         {heroes.slice(0, 18).map((hero, index) => {
           const total = heroTotal(hero);
           return (
@@ -607,6 +888,16 @@ function dedupeFreeGames(items: FreeGameItem[]) {
   });
 }
 
+function dedupeSteamGames(items: SteamGameItem[]) {
+  const seen = new Set<number>();
+  return items.filter((item) => {
+    const id = Number(item.appid || item.id || 0);
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 function filterFreeGames(items: FreeGameItem[], query: string, genre: string, platform: string) {
   const q = query.trim().toLowerCase();
   const g = genre.trim().toLowerCase();
@@ -617,6 +908,13 @@ function filterFreeGames(items: FreeGameItem[], query: string, genre: string, pl
     if (p !== "all" && !String(item.platform || "").toLowerCase().includes(p)) return false;
     return true;
   });
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
+  ]);
 }
 
 const styles = StyleSheet.create({
@@ -670,9 +968,13 @@ const styles = StyleSheet.create({
   catalogSubtitle: { color: Colors.textSoft, fontSize: 12, lineHeight: 18, marginTop: 4 },
   catalogBadge: { borderRadius: 999, backgroundColor: Colors.green, minHeight: 34, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
   catalogBadgeText: { color: "#000", fontWeight: "900", fontSize: 12 },
+  steamHeader: { marginTop: 22, paddingHorizontal: 18, flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  steamBadge: { maxWidth: 160, borderRadius: 999, backgroundColor: Colors.cyan, minHeight: 34, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  steamBadgeText: { color: "#000", fontWeight: "900", fontSize: 11 },
   searchBox: { marginHorizontal: 16, marginTop: 10, minHeight: 48, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.055)", flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 14 },
   searchInput: { flex: 1, minWidth: 0, color: "#fff", fontSize: 15, paddingVertical: 12 },
   filterTrack: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4, gap: 8 },
+  horizontalRail: { width: "100%", maxWidth: "100%", flexGrow: 0 },
   filterChip: { minHeight: 36, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.03)", alignItems: "center", justifyContent: "center" },
   filterChipActive: { backgroundColor: Colors.magenta, borderColor: Colors.magenta },
   filterChipText: { color: "#fff", fontSize: 11, fontWeight: "800" },
@@ -683,6 +985,16 @@ const styles = StyleSheet.create({
   platformChipText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   platformChipTextActive: { color: "#000" },
   catalogGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 8, marginTop: 8 },
+  steamCard: { minHeight: 438, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(10,12,22,0.96)" },
+  steamCardCompact: { minHeight: 466 },
+  steamImageWrap: { width: "100%", height: 172, backgroundColor: "rgba(255,255,255,0.05)" },
+  steamImage: { width: "100%", height: "100%", backgroundColor: "rgba(255,255,255,0.05)" },
+  discountBadge: { position: "absolute", right: 10, bottom: 10, borderRadius: 999, backgroundColor: Colors.green, paddingHorizontal: 10, paddingVertical: 5 },
+  discountText: { color: "#000", fontWeight: "900", fontSize: 12 },
+  steamBody: { padding: 13, flex: 1 },
+  steamPriceRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10, minHeight: 24 },
+  oldPrice: { color: Colors.textMuted, fontSize: 11, textDecorationLine: "line-through", fontWeight: "800" },
+  priceText: { color: Colors.yellow, fontSize: 16, fontWeight: "900" },
   freeGameCard: { minHeight: 392, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(12,12,20,0.94)" },
   freeGameCardCompact: { minHeight: 426 },
   freeGameImage: { width: "100%", height: 178, backgroundColor: "rgba(255,255,255,0.05)" },
@@ -697,6 +1009,7 @@ const styles = StyleSheet.create({
   freePlayBtn: { minHeight: 44 },
   freeProfileBtn: { minHeight: 42, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.045)", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   freeProfileText: { color: Colors.cyan, fontWeight: "900" },
+  remoteFallback: { alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
   infoTiny: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5, backgroundColor: "rgba(255,255,255,0.055)" },
   infoTinyText: { color: "#fff", fontSize: 10, fontWeight: "800" },
   moreWrap: { paddingHorizontal: 16, marginTop: 8 },

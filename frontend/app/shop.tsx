@@ -73,8 +73,8 @@ export default function Shop() {
   const [cartOpen, setCartOpen] = useState(false);
   const [selected, setSelected] = useState<ShopCatalogPayload["products"][number] | null>(null);
 
-  const compact = width < 760;
-  const columns = width >= 1280 ? 4 : width >= 980 ? 3 : width >= 680 ? 2 : 1;
+  const compact = width < 480;
+  const columns = width >= 1024 ? 4 : width >= 768 ? 3 : width >= 480 ? 2 : 1;
   const cardWidth = columns === 1 ? "100%" : `${100 / columns - 1.4}%`;
 
   const load = useCallback(async () => {
@@ -412,7 +412,7 @@ export default function Shop() {
           </View>
 
           <SectionTitle title="Devise boutique" subtitle="Les prix se recalculent automatiquement avec les taux live disponibles." />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
             {CURRENCIES.map((item) => {
               const active = currency === item.code;
               return (
@@ -450,7 +450,7 @@ export default function Shop() {
               ))}
             </View>
           ) : null}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
             {quickSearches.map((item) => (
               <Pressable key={item} onPress={() => setQuery(item)} style={[styles.quickChip, query === item && styles.quickChipActive]}>
                 <Text style={[styles.quickChipText, query === item && { color: "#000" }]}>{item}</Text>
@@ -474,13 +474,13 @@ export default function Shop() {
                     ))}
                   </View>
                   <SectionTitle title="Mini pubs" subtitle="Selections courtes pour motiver l'achat sans alourdir la page." />
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.adRow}>
+                  <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.adRow}>
                     {adProducts.map((product) => (
                       <MiniAdCard key={`ad-${product.id}`} product={product} onOpen={() => setSelected(product)} onAdd={() => addToCart(product.id)} />
                     ))}
                   </ScrollView>
                   <SectionTitle title="Rayons" subtitle="La recherche reste locale: une lettre suffit pour filtrer sans ralentir le catalogue." />
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                  <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
                     {categories.map((item) => {
                       const active = category === item;
                       return (
@@ -634,7 +634,7 @@ export default function Shop() {
                     <View style={styles.sellerList}>
                       {sellerArticles.map((article) => (
                         <View key={article.article_id} style={styles.sellerArticleCard}>
-                          <Image source={{ uri: article.image }} style={styles.sellerArticleImage} resizeMode="cover" />
+                          <RemoteShopImage uri={article.image} style={styles.sellerArticleImage} />
                           <View style={{ flex: 1, minWidth: 0 }}>
                             <Text style={styles.sellerArticleTitle} numberOfLines={1}>{article.title}</Text>
                             <Text style={styles.sellerArticleDesc} numberOfLines={2}>{article.description}</Text>
@@ -737,6 +737,19 @@ export default function Shop() {
   );
 }
 
+function RemoteShopImage({ uri, style }: { uri?: string; style: any }) {
+  const [failed, setFailed] = useState(false);
+  const valid = Boolean(uri && String(uri).startsWith("http") && !failed);
+  if (!valid) {
+    return (
+      <View style={[style, styles.imageFallback]}>
+        <Ionicons name="image-outline" size={24} color={Colors.textMuted} />
+      </View>
+    );
+  }
+  return <Image source={{ uri: String(uri) }} style={style} resizeMode="cover" onError={() => setFailed(true)} />;
+}
+
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <View style={styles.sectionTitle}>
@@ -794,7 +807,7 @@ function PromoCard({ product, index, onOpen, onAdd }: any) {
   return (
     <Animated.View entering={FadeInDown.delay(index * 80)} style={styles.promoCard}>
       <Pressable onPress={onOpen}>
-        <Image source={{ uri: product.image }} style={styles.promoImage} resizeMode="contain" />
+        <RemoteShopImage uri={product.image} style={styles.promoImage} />
         <View style={styles.promoOverlay}>
           <Text style={styles.promoBadge}>{product.promotion?.label}</Text>
           <Text style={styles.promoTitle} numberOfLines={2}>{product.title}</Text>
@@ -815,7 +828,7 @@ function PromoCard({ product, index, onOpen, onAdd }: any) {
 function MiniAdCard({ product, onOpen, onAdd }: any) {
   return (
     <Pressable onPress={onOpen} style={styles.adCard}>
-      <Image source={{ uri: product.image }} style={styles.adImage} resizeMode="contain" />
+      <RemoteShopImage uri={product.image} style={styles.adImage} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={styles.adBadge}>{product.promotion?.label || "Bon plan"}</Text>
         <Text style={styles.adTitle} numberOfLines={2}>{product.title}</Text>
@@ -833,7 +846,7 @@ function ProductCard({ product, index, width, onOpen, onAdd }: any) {
   return (
     <Animated.View entering={FadeInUp.delay(Math.min(index, 12) * 35)} style={[styles.productCard, { width }]}>
       <Pressable onPress={onOpen}>
-        <Image source={{ uri: product.image }} style={styles.productImage} resizeMode="contain" />
+        <RemoteShopImage uri={product.image} style={styles.productImage} />
         {product.promotion ? <Text style={styles.discountFlag}>-{product.promotion.discount_percent}%</Text> : null}
         <View style={styles.productBody}>
           <Text style={styles.productBrand}>{product.brand}</Text>
@@ -892,7 +905,7 @@ function ProductModal({ product, onClose, onAdd }: any) {
       <Animated.View entering={FadeIn.duration(220)} style={styles.modalBg}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={styles.productModal}>
-          <Image source={{ uri: product.image }} style={styles.modalImage} resizeMode="contain" />
+          <RemoteShopImage uri={product.image} style={styles.modalImage} />
           <Pressable onPress={onClose} style={styles.modalClose}>
             <Ionicons name="close" size={20} color="#fff" />
           </Pressable>
@@ -978,7 +991,7 @@ function CartModal({
             {items.length ? (
               items.map((item: any) => (
                 <View key={item.product_id} style={styles.cartLine}>
-                  <Image source={{ uri: item.image }} style={styles.cartImage} resizeMode="contain" />
+                  <RemoteShopImage uri={item.image} style={styles.cartImage} />
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={styles.cartItemTitle} numberOfLines={2}>{item.title}</Text>
                     <Text style={styles.cartItemPrice}>{formatMoney(item.unit_price, currency)} x {item.quantity}</Text>
@@ -1000,7 +1013,7 @@ function CartModal({
           </ScrollView>
 
           <Text style={styles.walletLabel}>Portefeuille a debiter</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.walletRow}>
+          <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.walletRow}>
             {activeWallets.map((item) => {
               const active = walletCurrency === item.code;
               return (
@@ -1080,6 +1093,7 @@ const styles = StyleSheet.create({
   sectionText: { color: "#fff", fontSize: 19, fontWeight: "900" },
   sectionSub: { color: Colors.textSoft, fontSize: 12, marginTop: 3, lineHeight: 17 },
   chipRow: { paddingHorizontal: 16, paddingVertical: 4, gap: 8 },
+  horizontalRail: { width: "100%", maxWidth: "100%", flexGrow: 0 },
   currencyChip: { minHeight: 38, borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.045)", paddingHorizontal: 14, alignItems: "center", justifyContent: "center" },
   currencyChipActive: { backgroundColor: Colors.cyan, borderColor: Colors.cyan },
   currencyChipText: { color: "#fff", fontWeight: "900", fontSize: 12 },
@@ -1173,6 +1187,7 @@ const styles = StyleSheet.create({
   cartTitle: { color: "#fff", fontSize: 20, fontWeight: "900" },
   cartLine: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.08)" },
   cartImage: { width: 58, height: 58, borderRadius: 16, backgroundColor: "#fff" },
+  imageFallback: { alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
   cartItemTitle: { color: "#fff", fontSize: 13, fontWeight: "900" },
   cartItemPrice: { color: Colors.textSoft, fontSize: 11, marginTop: 4 },
   qtyBox: { flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderWidth: 1, borderColor: Colors.border, padding: 4 },

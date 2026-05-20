@@ -49,7 +49,9 @@ import {
   fetchFakeStoreShopProducts,
   fetchFreeEcommerceShopProducts,
   hashShopCartSnapshot,
+  convertShopMoney,
   normalizeShopCurrency,
+  roundShopMoney,
   SHOP_AGENCY_MESSAGE,
   SHOP_PICKUP_MESSAGE,
   type ShopCartLine,
@@ -76,6 +78,7 @@ const SHOP_PRODUCTS = "fxpro_shop_products";
 const SHOP_SELLERS = "fxpro_shop_sellers";
 const SHOP_SELLER_ARTICLES = "fxpro_shop_seller_articles";
 const MOVIE_LIBRARY = "fxpro_movie_library";
+const STEAM_PURCHASES = "fxpro_steam_purchases";
 const APILAYER_SHOP_KEY = process.env.EXPO_PUBLIC_APILAYER_KEY || "";
 const TMDB_READ_TOKEN = process.env.EXPO_PUBLIC_TMDB_READ_TOKEN || "";
 const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY || "4300217e16dba490da871af16163cedb";
@@ -93,6 +96,10 @@ const SERVICES_AVAILABLE_FLAG = "services_available_notice_2026_05_19_at";
 const SERVICES_AVAILABLE_TITLE = "Services FX Pro disponibles";
 const SERVICES_AVAILABLE_BODY =
   "La vente en ligne, le catalogue films et series, les jeux a tickets et les notifications vendeur sont disponibles. Ouvre la boutique, les films ou les jeux pour profiter des nouveaux services.";
+const MAINTENANCE_NOTICE_FLAG = "maintenance_update_notice_2026_05_20_at";
+const MAINTENANCE_NOTICE_TITLE = "Maintenance FX Pro en cours";
+const MAINTENANCE_NOTICE_BODY =
+  "Une maintenance de l'app est en cours pour ameliorer la boutique, les films, les jeux et la stabilite. Les soldes, recus, commandes et notifications restent proteges pendant la mise a jour.";
 const GAME_DAILY_TICKETS = 5;
 const GAME_TICKET_NOTICE_PREFIX = "game_tickets_recharged_notice_";
 const GAME_GLOBAL_RECHARGE_FLAG = "game_global_recharge_2026_05_19_at";
@@ -104,6 +111,53 @@ const GAME_CONFIG: Record<string, { name: string; win_chance: number; min_prize:
   power_match: { name: "Power Match", win_chance: 0.3, min_prize: 220, max_prize: 1800, mode: "hero" },
   speed_run: { name: "Speed Run", win_chance: 0.44, min_prize: 60, max_prize: 620, mode: "hero" },
 };
+const STEAM_APPLIST_URL = "https://api.steampowered.com/ISteamApps/GetAppList/v2/";
+const STEAM_DETAILS_URL = "https://store.steampowered.com/api/appdetails";
+const STEAM_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const STEAM_FEATURED_APPS = [
+  { appid: 271590, name: "Grand Theft Auto V Legacy" },
+  { appid: 3240220, name: "Grand Theft Auto V Enhanced" },
+  { appid: 1245620, name: "ELDEN RING" },
+  { appid: 1938090, name: "Call of Duty" },
+  { appid: 2669320, name: "EA SPORTS FC 25" },
+  { appid: 2195250, name: "EA SPORTS FC 24" },
+  { appid: 730, name: "Counter-Strike 2" },
+  { appid: 570, name: "Dota 2" },
+  { appid: 1174180, name: "Red Dead Redemption 2" },
+  { appid: 292030, name: "The Witcher 3: Wild Hunt" },
+  { appid: 1086940, name: "Baldur's Gate 3" },
+  { appid: 578080, name: "PUBG: BATTLEGROUNDS" },
+  { appid: 252490, name: "Rust" },
+  { appid: 359550, name: "Tom Clancy's Rainbow Six Siege" },
+  { appid: 1172470, name: "Apex Legends" },
+  { appid: 230410, name: "Warframe" },
+  { appid: 381210, name: "Dead by Daylight" },
+  { appid: 1551360, name: "Forza Horizon 5" },
+  { appid: 990080, name: "Hogwarts Legacy" },
+  { appid: 1091500, name: "Cyberpunk 2077" },
+  { appid: 440, name: "Team Fortress 2" },
+  { appid: 346110, name: "ARK: Survival Evolved" },
+  { appid: 413150, name: "Stardew Valley" },
+  { appid: 945360, name: "Among Us" },
+  { appid: 105600, name: "Terraria" },
+  { appid: 322330, name: "Don't Starve Together" },
+  { appid: 39210, name: "FINAL FANTASY XIV Online" },
+  { appid: 236390, name: "War Thunder" },
+  { appid: 444200, name: "World of Tanks Blitz" },
+  { appid: 238960, name: "Path of Exile" },
+  { appid: 582010, name: "Monster Hunter: World" },
+  { appid: 1203220, name: "NARAKA: BLADEPOINT" },
+  { appid: 227300, name: "Euro Truck Simulator 2" },
+  { appid: 275850, name: "No Man's Sky" },
+  { appid: 242760, name: "The Forest" },
+  { appid: 1326470, name: "Sons Of The Forest" },
+  { appid: 1145360, name: "Hades" },
+  { appid: 367520, name: "Hollow Knight" },
+  { appid: 289070, name: "Sid Meier's Civilization VI" },
+  { appid: 1248130, name: "Farming Simulator 22" },
+];
+let steamAppListCache: { items: any[]; expiresAt: number; source: string } = { items: [], expiresAt: 0, source: "featured_fallback" };
+const steamDetailCache = new Map<number, { item: any; expiresAt: number }>();
 const MOVIE_PAGE_SIZE_DEFAULT = 24;
 const MOVIE_GENRE_GROUPS: Record<string, { label: string; movie: number[]; tv: number[] }> = {
   all: { label: "Tout", movie: [], tv: [] },
@@ -376,11 +430,14 @@ async function findUserByQr(code: string) {
   return { id: first.id, ...normalizeUser(first.data()), qr_code: first.data().qr_code };
 }
 
-async function fetchJsonWithTimeout(url: string, timeoutMs = 7000) {
+async function fetchJsonWithTimeout(url: string, initOrTimeout: RequestInit | number = {}, timeoutMs = 7000) {
+  const init = typeof initOrTimeout === "number" ? {} : initOrTimeout;
+  const timeout = typeof initOrTimeout === "number" ? initOrTimeout : timeoutMs;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } finally {
     clearTimeout(timer);
@@ -869,6 +926,28 @@ async function announceServicesAvailableOnce(userId: string, userData?: any) {
   return true;
 }
 
+async function announceMaintenanceOnce(userId: string, userData?: any) {
+  const userRef = doc(db, USERS, userId);
+  const data = userData || (await getDoc(userRef)).data();
+  if (data?.[MAINTENANCE_NOTICE_FLAG]) return false;
+  const notifId = makeId("ntf");
+  const createdAt = nowIso();
+  await Promise.all([
+    setDoc(userRef, { [MAINTENANCE_NOTICE_FLAG]: createdAt, updated_at: createdAt }, { merge: true }),
+    setDoc(doc(db, NOTIFS, notifId), {
+      notif_id: notifId,
+      user_id: userId,
+      type: "maintenance_update",
+      title: MAINTENANCE_NOTICE_TITLE,
+      body: MAINTENANCE_NOTICE_BODY,
+      read: false,
+      created_at: createdAt,
+      url: "/notifications",
+    }),
+  ]);
+  return true;
+}
+
 function gameTodayKey() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1180,14 +1259,37 @@ function normalizeTmdbItem(raw: any, mediaType?: string) {
   };
 }
 
+function normalizeTmdbDetail(raw: any, mediaType: string) {
+  const base = normalizeTmdbItem(raw, mediaType) || {
+    id: Number(raw?.id || 0),
+    media_type: mediaType,
+    title: raw?.title || raw?.name || "Titre indisponible",
+    overview: raw?.overview || "Synopsis indisponible pour le moment.",
+    poster_url: tmdbImage(raw?.poster_path, "w500"),
+    backdrop_url: tmdbImage(raw?.backdrop_path, "w1280"),
+    release_date: raw?.release_date || raw?.first_air_date || "",
+    source: "tmdb",
+  };
+  const runtime = mediaType === "tv" ? Number((raw?.episode_run_time || [])[0] || 0) : Number(raw?.runtime || 0);
+  return {
+    ...base,
+    runtime: runtime || null,
+    duration_label: runtime ? `${runtime} min` : "",
+    tagline: raw?.tagline || "",
+    status: raw?.status || "",
+    genres: Array.isArray(raw?.genres) ? raw.genres.map((item: any) => item?.name).filter(Boolean) : [],
+    number_of_seasons: mediaType === "tv" ? raw?.number_of_seasons || null : null,
+    number_of_episodes: mediaType === "tv" ? raw?.number_of_episodes || null : null,
+    homepage: raw?.homepage || "",
+  };
+}
+
 async function tmdbFetchDirect(path: string, params: Record<string, any> = {}) {
   if (!TMDB_READ_TOKEN && !TMDB_API_KEY) throw new Error("TMDB credentials missing");
   const qs = new URLSearchParams({ ...params, ...(TMDB_READ_TOKEN ? {} : { api_key: TMDB_API_KEY }) }).toString();
-  const res = await fetch(`https://api.themoviedb.org/3${path}?${qs}`, {
+  return fetchJsonWithTimeout(`https://api.themoviedb.org/3${path}?${qs}`, {
     headers: TMDB_READ_TOKEN ? { Authorization: `Bearer ${TMDB_READ_TOKEN}`, Accept: "application/json" } : { Accept: "application/json" },
-  });
-  if (!res.ok) throw new Error(`TMDB status ${res.status}`);
-  return res.json();
+  }, 12000);
 }
 
 async function getMovieLibraryDirect(userId: string) {
@@ -1220,10 +1322,11 @@ function tmdbProviderNames(providerBlock: any = {}) {
 }
 
 async function buildMovieWatchOptionsDirect(mediaType: string, tmdbId: number) {
-  const [watchPayload, frVideosPayload, defaultVideosPayload] = await Promise.all([
+  const [watchPayload, frVideosPayload, defaultVideosPayload, detailPayload] = await Promise.all([
     tmdbFetchDirect(`/${mediaType}/${tmdbId}/watch/providers`),
     tmdbFetchDirect(`/${mediaType}/${tmdbId}/videos`, { language: "fr-FR" }),
     tmdbFetchDirect(`/${mediaType}/${tmdbId}/videos`),
+    tmdbFetchDirect(`/${mediaType}/${tmdbId}`, { language: "fr-FR" }),
   ]);
   const results = watchPayload?.results || {};
   const region = ["FR", "CA", "BE", "CH", "US", "GB"].find((code) => results?.[code]) || "";
@@ -1231,14 +1334,23 @@ async function buildMovieWatchOptionsDirect(mediaType: string, tmdbId: number) {
   const allVideos = [...(frVideosPayload?.results || []), ...(defaultVideosPayload?.results || [])];
   const bestVideo = allVideos.find((video: any) => String(video?.site || "").toLowerCase() === "youtube" && ["trailer", "teaser", "featurette", "clip"].includes(String(video?.type || "").toLowerCase())) || null;
   const trailerUrl = bestVideo?.key ? `https://www.youtube.com/watch?v=${bestVideo.key}` : "";
+  const supportsVf = ["FR", "CA", "BE", "CH"].includes(region) || String(bestVideo?.iso_639_1 || "").toLowerCase() === "fr";
   return {
     tmdb_id: tmdbId,
     media_type: mediaType,
+    details: normalizeTmdbDetail(detailPayload, mediaType),
     watch_url: providerBlock?.link || trailerUrl,
     trailer_url: trailerUrl,
+    player: {
+      provider: bestVideo?.key ? "youtube" : "official",
+      embed_url: bestVideo?.key ? `https://www.youtube.com/embed/${bestVideo.key}` : "",
+      video_key: bestVideo?.key || "",
+      supports_vf: supportsVf,
+      supports_vostfr: Boolean(bestVideo?.key),
+    },
     provider_region: region,
     provider_names: tmdbProviderNames(providerBlock),
-    has_vf: ["FR", "CA", "BE", "CH"].includes(region) || String(bestVideo?.iso_639_1 || "").toLowerCase() === "fr",
+    has_vf: supportsVf,
   };
 }
 
@@ -1355,9 +1467,7 @@ async function buildFreeGamesCatalogDirect(userId = "", text = "", genre = "all"
   let rawItems: any[] = [];
   let source = "freetogame";
   try {
-    const res = await fetch("https://www.freetogame.com/api/games");
-    if (!res.ok) throw new Error(`FreeToGame status ${res.status}`);
-    rawItems = await res.json();
+    rawItems = await fetchJsonWithTimeout("https://www.freetogame.com/api/games", {}, 12000);
   } catch {
     rawItems = FREE_GAME_FALLBACK_ITEMS;
     source = "snapshot";
@@ -1387,6 +1497,213 @@ async function buildFreeGamesCatalogDirect(userId = "", text = "", genre = "all"
     has_more: end < filtered.length,
     source,
   };
+}
+
+function cleanSteamText(value: any) {
+  return String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function steamFeaturedIndex() {
+  return STEAM_FEATURED_APPS.map((item) => ({ appid: Number(item.appid), name: String(item.name) }));
+}
+
+async function fetchSteamAppIndexDirect() {
+  const now = Date.now();
+  if (steamAppListCache.items.length && steamAppListCache.expiresAt > now) return steamAppListCache;
+  try {
+    const payload = await fetchJsonWithTimeout(`${STEAM_APPLIST_URL}?format=json`, {}, 12000);
+    const apps = (payload?.applist?.apps || [])
+      .map((raw: any) => ({ appid: Number(raw?.appid || 0), name: cleanSteamText(raw?.name) }))
+      .filter((item: any) => item.appid > 0 && item.name.length > 1);
+    if (apps.length < 100) throw new Error("Steam app list too small");
+    const featured = steamFeaturedIndex();
+    const featuredIds = new Set(featured.map((item) => item.appid));
+    steamAppListCache = { items: [...featured, ...apps.filter((item: any) => !featuredIds.has(item.appid))], expiresAt: now + STEAM_CACHE_TTL_MS, source: "steam" };
+    return steamAppListCache;
+  } catch {
+    steamAppListCache = { items: steamFeaturedIndex(), expiresAt: now + 30 * 60 * 1000, source: "featured_fallback" };
+    return steamAppListCache;
+  }
+}
+
+function steamFallbackImage(appid: number, kind = "header") {
+  const file = kind === "capsule" ? "capsule_616x353.jpg" : "header.jpg";
+  return `https://cdn.akamai.steamstatic.com/steam/apps/${appid}/${file}`;
+}
+
+function normalizeSteamGameDirect(appid: number, fallbackName = "", detail: any = null) {
+  const price = detail?.price_overview || {};
+  const currency = normalizeShopCurrency(price?.currency || "EUR");
+  const finalAmount = typeof price?.final === "number" ? roundShopMoney(price.final / 100, currency) : null;
+  const initialAmount = typeof price?.initial === "number" ? roundShopMoney(price.initial / 100, currency) : null;
+  const isFree = Boolean(detail?.is_free) || finalAmount === 0;
+  const title = cleanSteamText(detail?.name || fallbackName || `Steam App ${appid}`);
+  const genres = Array.isArray(detail?.genres) ? detail.genres.map((item: any) => cleanSteamText(item?.description)).filter(Boolean) : [];
+  const categories = Array.isArray(detail?.categories) ? detail.categories.map((item: any) => cleanSteamText(item?.description)).filter(Boolean) : [];
+  const developers = Array.isArray(detail?.developers) ? detail.developers.map(cleanSteamText).filter(Boolean) : [];
+  const publishers = Array.isArray(detail?.publishers) ? detail.publishers.map(cleanSteamText).filter(Boolean) : [];
+  const image = detail?.header_image || detail?.capsule_image || steamFallbackImage(appid);
+  return {
+    appid,
+    id: appid,
+    title,
+    name: title,
+    image,
+    thumbnail: image,
+    capsule_image: detail?.capsule_image || steamFallbackImage(appid, "capsule"),
+    background: detail?.background_raw || detail?.background || "",
+    short_description: cleanSteamText(detail?.short_description || detail?.detailed_description || "Fiche Steam avec achat, prix et informations de base."),
+    price: finalAmount,
+    price_initial: initialAmount,
+    price_currency: currency,
+    price_label: isFree ? "Gratuit" : price?.final_formatted || (finalAmount !== null ? `${finalAmount} ${currency}` : "Prix Steam"),
+    discount_percent: Number(price?.discount_percent || 0),
+    is_free: isFree,
+    genres,
+    genre: genres[0] || "Steam",
+    categories,
+    developers,
+    publishers,
+    publisher: publishers[0] || "Steam",
+    release_date: detail?.release_date?.date || "",
+    steam_url: `https://store.steampowered.com/app/${appid}`,
+    source: detail ? "steam" : "steam_fallback",
+  };
+}
+
+async function getSteamGameDetailDirect(appid: number, fallbackName = "") {
+  const now = Date.now();
+  const cached = steamDetailCache.get(appid);
+  if (cached && cached.expiresAt > now) return cached.item;
+  let item: any;
+  try {
+    const params = new URLSearchParams({ appids: String(appid), cc: "FR", l: "french" });
+    const payload = await fetchJsonWithTimeout(`${STEAM_DETAILS_URL}?${params.toString()}`, {}, 10000);
+    const node = payload?.[String(appid)];
+    item = normalizeSteamGameDirect(appid, fallbackName, node?.success ? node?.data : null);
+  } catch {
+    item = normalizeSteamGameDirect(appid, fallbackName, null);
+  }
+  steamDetailCache.set(appid, { item, expiresAt: now + STEAM_CACHE_TTL_MS });
+  return item;
+}
+
+async function hydrateSteamGamesDirect(candidates: any[], concurrency = 6) {
+  const items: any[] = [];
+  for (let index = 0; index < candidates.length; index += concurrency) {
+    const batch = candidates.slice(index, index + concurrency);
+    items.push(...(await Promise.all(batch.map((item) => getSteamGameDetailDirect(Number(item.appid), String(item.name || ""))))));
+  }
+  return items;
+}
+
+async function buildSteamCatalogDirect(userId = "", text = "", genre = "all", page = 1, limitCount = 20) {
+  if (userId) await announceServicesAvailableOnce(userId).catch(() => undefined);
+  const safePage = Math.max(1, Number(page || 1));
+  const safeLimit = Math.max(20, Math.min(40, Number(limitCount || 20)));
+  const q = String(text || "").trim().toLowerCase();
+  const selectedGenre = String(genre || "all").trim().toLowerCase();
+  const indexPayload = await fetchSteamAppIndexDirect();
+  let candidates = indexPayload.items;
+  if (q) candidates = candidates.filter((item: any) => String(item.name || "").toLowerCase().includes(q));
+  let totalResults = candidates.length;
+  let items: any[] = [];
+  if (selectedGenre !== "all") {
+    const pool = await hydrateSteamGamesDirect(candidates.slice(0, 180));
+    const filtered = pool.filter((item) => (item.genres || [item.genre || ""]).join(" ").toLowerCase().includes(selectedGenre));
+    totalResults = filtered.length;
+    const start = (safePage - 1) * safeLimit;
+    items = filtered.slice(start, start + safeLimit);
+  } else {
+    const start = (safePage - 1) * safeLimit;
+    items = await hydrateSteamGamesDirect(candidates.slice(start, start + safeLimit));
+  }
+  const genres = Array.from(new Set(items.flatMap((item) => item.genres || []).filter(Boolean))).sort();
+  return {
+    items,
+    genres: genres.length ? genres.slice(0, 18) : ["Action", "Adventure", "RPG", "Simulation", "Sports", "Strategy", "Free to Play"],
+    page: safePage,
+    limit: safeLimit,
+    total_results: totalResults,
+    has_more: safePage * safeLimit < totalResults,
+    source: indexPayload.source,
+    cache_ttl_seconds: STEAM_CACHE_TTL_MS / 1000,
+  };
+}
+
+async function purchaseSteamGameDirect(body: any) {
+  const firebaseUser = await requireFirebaseUser();
+  const appid = Number(body?.appid || 0);
+  if (!appid) throw new Error("Jeu Steam invalide.");
+  const walletCurrency = normalizeShopCurrency(body?.wallet_currency || "XOF");
+  const game = await getSteamGameDetailDirect(appid);
+  if (game.price === null && !game.is_free) throw new Error("Prix Steam indisponible pour ce jeu. Ouvrez la page Steam officielle pour finaliser.");
+  const ratesPayload = await getRates();
+  const priceCurrency = normalizeShopCurrency(game.price_currency || "EUR");
+  const debitAmount = game.is_free ? 0 : convertShopMoney(Number(game.price || 0), priceCurrency, walletCurrency, ratesPayload.rates || {});
+  const userRef = doc(db, USERS, firebaseUser.uid);
+  const purchaseId = makeId("stp");
+  const txnId = makeId("txn");
+  const notifId = makeId("ntf");
+  const reference = `STEAM-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
+  const createdAt = nowIso();
+  let balances: Record<string, number> = {};
+  const purchase = {
+    purchase_id: purchaseId,
+    user_id: firebaseUser.uid,
+    appid,
+    game,
+    reference,
+    status: debitAmount > 0 ? "completed" : "reserved",
+    debit_amount: debitAmount,
+    wallet_currency: walletCurrency,
+    price_amount: game.price || 0,
+    price_currency: priceCurrency,
+    steam_url: game.steam_url,
+    created_at: createdAt,
+    updated_at: createdAt,
+  };
+  const transaction = {
+    txn_id: txnId,
+    type: debitAmount > 0 ? "steam_purchase" : "steam_free_redeem",
+    user_id: firebaseUser.uid,
+    participants: [firebaseUser.uid],
+    amount: debitAmount,
+    currency: walletCurrency,
+    reference,
+    status: "completed",
+    steam_appid: appid,
+    steam_purchase_id: purchaseId,
+    steam_price: game.price || 0,
+    steam_currency: priceCurrency,
+    created_at: createdAt,
+  };
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(userRef);
+    const data = normalizeUser(snap.data());
+    balances = { ...data.balances };
+    const available = Number(balances[walletCurrency] || 0);
+    if (available < debitAmount) throw new Error(`Solde insuffisant: disponible ${available} ${walletCurrency}, achat ${debitAmount} ${walletCurrency}.`);
+    balances[walletCurrency] = roundShopMoney(available - debitAmount, walletCurrency);
+    tx.set(userRef, { balances, updated_at: createdAt }, { merge: true });
+    tx.set(doc(db, STEAM_PURCHASES, purchaseId), purchase);
+    tx.set(doc(db, TXNS, txnId), transaction);
+    tx.set(doc(db, NOTIFS, notifId), {
+      notif_id: notifId,
+      user_id: firebaseUser.uid,
+      type: "steam_purchase",
+      txn_id: txnId,
+      title: "Achat jeu confirme",
+      body: `${game.title}: ${reference}. ${debitAmount > 0 ? `Paiement ${debitAmount} ${walletCurrency}.` : "Aucun debit, jeu gratuit."}`,
+      read: false,
+      created_at: createdAt,
+      url: "/games",
+    });
+  });
+  return { ok: true, purchase, transaction, balances, steam_url: game.steam_url };
 }
 
 export function subscribeFirebaseNotifications(
@@ -1465,6 +1782,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
   if (pathname === "/auth/me") {
     const profile = await currentProfile();
     await notifyWithdrawPausedOnce(profile.user_id).catch(() => undefined);
+    await announceMaintenanceOnce(profile.user_id).catch(() => undefined);
     await announceServicesAvailableOnce(profile.user_id).catch(() => undefined);
     return profile;
   }
@@ -1968,7 +2286,22 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     if (!["movie", "tv"].includes(mediaType)) throw new Error("Type media invalide.");
     if (!tmdbId) throw new Error("Identifiant film invalide.");
     if (auth.currentUser?.uid) await announceServicesAvailableOnce(auth.currentUser.uid).catch(() => undefined);
-    return buildMovieWatchOptionsDirect(mediaType, tmdbId);
+    try {
+      return await buildMovieWatchOptionsDirect(mediaType, tmdbId);
+    } catch {
+      const fallback = MOVIE_FALLBACK_ITEMS.find((item: any) => item.id === tmdbId && item.media_type === mediaType) || MOVIE_FALLBACK_ITEMS[0];
+      return {
+        tmdb_id: tmdbId,
+        media_type: mediaType,
+        details: fallback,
+        watch_url: "",
+        trailer_url: "",
+        player: { embed_url: "", video_key: "", supports_vf: false, supports_vostfr: false },
+        provider_region: "",
+        provider_names: [],
+        has_vf: false,
+      };
+    }
   }
 
   if (pathname === "/movies/library" && method === "GET") {
@@ -2014,6 +2347,20 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     );
   }
 
+  if (pathname === "/games/steam/catalog" && method === "GET") {
+    return buildSteamCatalogDirect(
+      auth.currentUser?.uid || "",
+      url.searchParams.get("q") || "",
+      url.searchParams.get("genre") || "all",
+      Number(url.searchParams.get("page") || 1),
+      Number(url.searchParams.get("limit") || 20)
+    );
+  }
+
+  if (pathname === "/games/steam/purchase" && method === "POST") {
+    return purchaseSteamGameDirect(body);
+  }
+
   if (pathname === "/admin/notifications/withdraw-paused" && method === "POST") {
     const profile = await currentProfile();
     if (profile.role !== "admin") throw new Error("Admin requis.");
@@ -2053,6 +2400,47 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
     }
     await commitBatch();
     return { ok: true, sent, skipped, flag: WITHDRAW_PAUSED_NOTICE_FLAG };
+  }
+
+  if (pathname === "/admin/notifications/maintenance" && method === "POST") {
+    const profile = await currentProfile();
+    if (profile.role !== "admin") throw new Error("Admin requis.");
+    const snap = await getDocs(collection(db, USERS));
+    let sent = 0;
+    let skipped = 0;
+    let batch = writeBatch(db);
+    let writes = 0;
+    const commitBatch = async () => {
+      if (!writes) return;
+      await batch.commit();
+      batch = writeBatch(db);
+      writes = 0;
+    };
+    for (const item of snap.docs) {
+      const data = item.data();
+      if (data.role === "admin" || data[MAINTENANCE_NOTICE_FLAG]) {
+        skipped += 1;
+        continue;
+      }
+      const notifId = makeId("ntf");
+      const createdAt = nowIso();
+      batch.set(doc(db, USERS, item.id), { [MAINTENANCE_NOTICE_FLAG]: createdAt, updated_at: createdAt }, { merge: true });
+      batch.set(doc(db, NOTIFS, notifId), {
+        notif_id: notifId,
+        user_id: data.user_id || item.id,
+        type: "maintenance_update",
+        title: MAINTENANCE_NOTICE_TITLE,
+        body: MAINTENANCE_NOTICE_BODY,
+        read: false,
+        created_at: createdAt,
+        url: "/notifications",
+      });
+      writes += 2;
+      sent += 1;
+      if (writes >= 450) await commitBatch();
+    }
+    await commitBatch();
+    return { ok: true, sent, skipped, flag: MAINTENANCE_NOTICE_FLAG };
   }
 
   if (pathname === "/admin/shop/products" && method === "GET") {

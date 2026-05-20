@@ -16,6 +16,7 @@ export default function AdminDashboard() {
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false);
+  const [maintenanceBroadcasting, setMaintenanceBroadcasting] = useState(false);
 
   useEffect(() => {
     if (user && user.role !== "admin") router.replace("/(tabs)/home");
@@ -70,6 +71,19 @@ export default function AdminDashboard() {
     }
   };
 
+  const notifyMaintenance = async () => {
+    try {
+      setMaintenanceBroadcasting(true);
+      const res = await api.post("/admin/notifications/maintenance", {});
+      Alert.alert("Maintenance annoncee", `${res.sent || 0} utilisateur(s) prevenu(s). ${res.skipped || 0} deja notifie(s).`);
+      await load();
+    } catch (e: any) {
+      Alert.alert("Erreur", e.message);
+    } finally {
+      setMaintenanceBroadcasting(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await load();
@@ -121,6 +135,10 @@ export default function AdminDashboard() {
             <Pressable testID="admin-notify-withdraw-paused" onPress={notifyWithdrawPaused} disabled={broadcasting} style={[styles.qAction, { borderColor: Colors.orange, opacity: broadcasting ? 0.55 : 1 }]}>
               <Ionicons name="notifications" size={18} color={Colors.orange} />
               <Text style={styles.qText}>{broadcasting ? "Envoi en cours..." : "Notifier retrait indisponible"}</Text>
+            </Pressable>
+            <Pressable testID="admin-notify-maintenance" onPress={notifyMaintenance} disabled={maintenanceBroadcasting} style={[styles.qAction, { borderColor: Colors.cyan, opacity: maintenanceBroadcasting ? 0.55 : 1, marginTop: 10 }]}>
+              <Ionicons name="construct" size={18} color={Colors.cyan} />
+              <Text style={styles.qText}>{maintenanceBroadcasting ? "Envoi maintenance..." : "Notifier maintenance app en cours"}</Text>
             </Pressable>
           </View>
 
