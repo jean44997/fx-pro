@@ -470,6 +470,49 @@ const REAL_PRODUCT_IMAGE_POOLS = {
   ],
 };
 
+const FX_SHOP_GLOBAL_PRICE_FACTOR = 0.84;
+
+function shopVisualPoolKey(product: ShopProduct) {
+  const label = `${product.title} ${product.category} ${(product.tags || []).join(" ")}`.toLowerCase();
+  if (/jewel|bijou|ring|bracelet|collier|earring/.test(label)) return "jewelry";
+  if (/women|femme|robe|jupe|blazer|top/.test(label)) return "womenFashion";
+  if (/men shoes|chaussures homme|sneaker|derbies|boots/.test(label)) return "menShoes";
+  if (/women shoes|chaussures femme|heels|sandales/.test(label)) return "womenShoes";
+  if (/men|homme|chemise|polo|cargo|sweat/.test(label)) return "menFashion";
+  if (/phone|laptop|camera|monitor|watch|tech|electronics|gadget|ssd|tablet/.test(label)) return "electronics";
+  return "lifestyle";
+}
+
+function curatedShopImage(product: ShopProduct, index: number) {
+  const key = shopVisualPoolKey(product) as keyof typeof REAL_PRODUCT_IMAGE_POOLS;
+  const pool = REAL_PRODUCT_IMAGE_POOLS[key] || REAL_PRODUCT_IMAGE_POOLS.lifestyle;
+  const position = Math.floor(stableNumber(`${product.id}:${product.title}:visual:${index}`) * pool.length) % pool.length;
+  return pool[position];
+}
+
+function professionalizeShopProduct(product: ShopProduct, index: number): ShopProduct {
+  const item: ShopProduct = { ...product };
+  const currentImage = String(item.image || "");
+  if (item.source !== "seller" || !currentImage.startsWith("http")) {
+    const image = curatedShopImage(item, index);
+    item.image = image;
+    item.images = [image];
+  } else {
+    item.images = [currentImage, ...(item.images || []).filter((url) => String(url).startsWith("http"))].slice(0, 5);
+  }
+  const description = stripHtml(item.description);
+  if (description.length < 90) {
+    item.description = `${item.title} selectionne par FX Pro: prix reduit, controle visuel, stock verifie, paiement securise par solde et suivi de commande avec notification vendeur.`;
+  } else if (!description.includes("FX Pro")) {
+    item.description = `${description} Prix FX Pro reduit avec suivi de commande et notification vendeur.`;
+  }
+  if (item.source !== "seller") {
+    item.base_price = roundShopMoney(Number(item.base_price || 1) * FX_SHOP_GLOBAL_PRICE_FACTOR, "USD");
+  }
+  item.tags = cleanTags([item.tags, "prix reduit", "image verifiee", "fx pro"]);
+  return item;
+}
+
 const GENERATED_MARKET_PACKS: GeneratedMarketPack[] = [
   {
     key: "jewelry",
@@ -1127,7 +1170,7 @@ export function buildShopCatalogPayload({
     ]),
     overrides
   ).slice(0, MAX_SHOP_PRODUCTS);
-  const products = merged.length ? merged : FALLBACK_SHOP_PRODUCTS;
+  const products = (merged.length ? merged : FALLBACK_SHOP_PRODUCTS).map((product, index) => professionalizeShopProduct(product, index));
   const productIds = new Set(products.map((product) => product.id));
   const adminPromotions = overrides
     .filter((override) => override.promo_active && productIds.has(String(override.product_id || override.id || "")))

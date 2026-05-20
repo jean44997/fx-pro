@@ -82,6 +82,11 @@ const STEAM_PURCHASES = "fxpro_steam_purchases";
 const APILAYER_SHOP_KEY = process.env.EXPO_PUBLIC_APILAYER_KEY || "";
 const TMDB_READ_TOKEN = process.env.EXPO_PUBLIC_TMDB_READ_TOKEN || "";
 const TMDB_API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY || "4300217e16dba490da871af16163cedb";
+const STREAM_DEMO_MP4_480 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
+const STREAM_DEMO_MP4_720 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+const STREAM_DEMO_MP4_1080 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4";
+const STREAM_DEMO_HLS = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
+const STREAM_DEMO_DASH = "https://dash.akamaized.net/envivio/EnvivioDash3/manifest.mpd";
 const DEFAULT_FAVORITE_PAIR_KEYS = ["EUR_USD", "EUR_XOF"];
 const MAX_INLINE_PROFILE_PICTURE_CHARS = 700000;
 const WITHDRAW_PAUSED_NOTICE_FLAG = "withdraw_paused_notice_2026_05_18_at";
@@ -1321,6 +1326,49 @@ function tmdbProviderNames(providerBlock: any = {}) {
   return Array.from(names).slice(0, 8);
 }
 
+function streamingProfileForTitle(mediaType: string, tmdbId: number, details: any = {}, trailerUrl = "") {
+  const title = cleanSteamText(details?.title || "FX Pro Stream");
+  const poster = details?.backdrop_url || details?.poster_url || "";
+  const subtitleFr = `WEBVTT\n\n00:00:00.000 --> 00:00:04.000\n${title} - lecture FX Pro sans publicite.\n\n00:00:04.000 --> 00:00:08.000\nSelectionne VF, VO ou les sous-titres depuis les options du lecteur.\n`;
+  const subtitleEn = `WEBVTT\n\n00:00:00.000 --> 00:00:04.000\n${title} - ad-free FX Pro playback.\n\n00:00:04.000 --> 00:00:08.000\nChoose audio language and captions from the player controls.\n`;
+  const subtitleFrUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(subtitleFr)}`;
+  const subtitleEnUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(subtitleEn)}`;
+  const mp4Sources = [
+    { quality: "480p", label: "480p mobile", url: STREAM_DEMO_MP4_480, mime: "video/mp4", size_label: "~8 MB" },
+    { quality: "720p", label: "720p HD", url: STREAM_DEMO_MP4_720, mime: "video/mp4", size_label: "~30 MB" },
+    { quality: "1080p", label: "1080p Full HD", url: STREAM_DEMO_MP4_1080, mime: "video/mp4", size_label: "~45 MB" },
+  ];
+  return {
+    players: [
+      { id: "videojs", name: "Video.js", description: "Lecteur HTML5 large avec HLS natif si disponible." },
+      { id: "plyr", name: "Plyr", description: "Lecteur moderne, compact et fluide pour mobile." },
+      { id: "native", name: "Natif", description: "Fallback HTML5 direct, rapide et sans publicite." },
+      { id: "iframe", name: "Iframe", description: "Lecteur isole sans publicite via source configuree." },
+    ],
+    streams: {
+      primary_url: STREAM_DEMO_MP4_720,
+      hls_url: STREAM_DEMO_HLS,
+      dash_url: STREAM_DEMO_DASH,
+      iframe_url: trailerUrl,
+      mp4_sources: mp4Sources,
+      download_sources: mp4Sources,
+      poster,
+      ad_free: true,
+      download_available: true,
+      source_note: "Flux de demonstration sans publicite. Remplacer ces URLs par les fichiers licencies de chaque film en production.",
+    },
+    audio_tracks: [
+      { id: "vf", label: "Francais (VF)", language: "fr", default: true },
+      { id: "vo", label: "Anglais (VO)", language: "en", default: false },
+      { id: "es", label: "Espagnol", language: "es", default: false },
+    ],
+    subtitle_tracks: [
+      { id: "fr", label: "Sous-titres FR", language: "fr", url: subtitleFrUrl, default: true },
+      { id: "en", label: "English subtitles", language: "en", url: subtitleEnUrl, default: false },
+    ],
+  };
+}
+
 async function buildMovieWatchOptionsDirect(mediaType: string, tmdbId: number) {
   const [watchPayload, frVideosPayload, defaultVideosPayload, detailPayload] = await Promise.all([
     tmdbFetchDirect(`/${mediaType}/${tmdbId}/watch/providers`),
@@ -1335,10 +1383,11 @@ async function buildMovieWatchOptionsDirect(mediaType: string, tmdbId: number) {
   const bestVideo = allVideos.find((video: any) => String(video?.site || "").toLowerCase() === "youtube" && ["trailer", "teaser", "featurette", "clip"].includes(String(video?.type || "").toLowerCase())) || null;
   const trailerUrl = bestVideo?.key ? `https://www.youtube.com/watch?v=${bestVideo.key}` : "";
   const supportsVf = ["FR", "CA", "BE", "CH"].includes(region) || String(bestVideo?.iso_639_1 || "").toLowerCase() === "fr";
+  const details = normalizeTmdbDetail(detailPayload, mediaType);
   return {
     tmdb_id: tmdbId,
     media_type: mediaType,
-    details: normalizeTmdbDetail(detailPayload, mediaType),
+    details,
     watch_url: providerBlock?.link || trailerUrl,
     trailer_url: trailerUrl,
     player: {
@@ -1348,6 +1397,7 @@ async function buildMovieWatchOptionsDirect(mediaType: string, tmdbId: number) {
       supports_vf: supportsVf,
       supports_vostfr: Boolean(bestVideo?.key),
     },
+    ...streamingProfileForTitle(mediaType, tmdbId, details, trailerUrl),
     provider_region: region,
     provider_names: tmdbProviderNames(providerBlock),
     has_vf: supportsVf,
@@ -1534,6 +1584,39 @@ function steamFallbackImage(appid: number, kind = "header") {
   return `https://cdn.akamai.steamstatic.com/steam/apps/${appid}/${file}`;
 }
 
+function steamReferencePrice(appid: number, title: string) {
+  const label = `${appid} ${title}`.toLowerCase();
+  if (/free|demo|prologue/.test(label)) return 0;
+  let base = 39.99;
+  if (/forza|god of war|call of duty|grand theft auto|elden ring|fc |fifa/.test(label)) base = 59.99;
+  else if (/deluxe|ultimate|premium/.test(label)) base = 79.99;
+  else if (/indie|simulator|manager|strategy/.test(label)) base = 24.99;
+  return roundShopMoney(base + stableDirectNumber(`steam_ref:${appid}:${title}`) * 8, "EUR");
+}
+
+function applyFxSteamOffer(game: any) {
+  const copy = { ...game };
+  let basePrice = copy.price;
+  let currency = normalizeShopCurrency(copy.price_currency || "EUR");
+  if (copy.is_free) {
+    return { ...copy, fx_discount_percent: 0, fx_price: 0, fx_currency: currency, fx_price_label: "Gratuit", fx_price_source: "free" };
+  }
+  let priceSource = "steam";
+  if (basePrice === null || basePrice === undefined) {
+    basePrice = steamReferencePrice(Number(copy.appid || 0), String(copy.title || ""));
+    currency = "EUR";
+    copy.price = basePrice;
+    copy.price_currency = currency;
+    copy.price_label = `Prix reference FX ${basePrice} ${currency}`;
+    priceSource = "fx_reference";
+  }
+  const internalDiscount = 12 + Math.floor(stableDirectNumber(`steam_fx_discount:${copy.appid}`) * 18);
+  const steamDiscount = Number(copy.discount_percent || 0);
+  const fxDiscount = Math.min(70, Math.max(internalDiscount, steamDiscount ? steamDiscount + 5 : internalDiscount));
+  const fxPrice = roundShopMoney(Number(basePrice || 0) * (1 - fxDiscount / 100), currency);
+  return { ...copy, fx_discount_percent: fxDiscount, fx_price: fxPrice, fx_currency: currency, fx_price_label: `${fxPrice} ${currency}`, fx_price_source: priceSource };
+}
+
 function normalizeSteamGameDirect(appid: number, fallbackName = "", detail: any = null) {
   const price = detail?.price_overview || {};
   const currency = normalizeShopCurrency(price?.currency || "EUR");
@@ -1546,7 +1629,7 @@ function normalizeSteamGameDirect(appid: number, fallbackName = "", detail: any 
   const developers = Array.isArray(detail?.developers) ? detail.developers.map(cleanSteamText).filter(Boolean) : [];
   const publishers = Array.isArray(detail?.publishers) ? detail.publishers.map(cleanSteamText).filter(Boolean) : [];
   const image = detail?.header_image || detail?.capsule_image || steamFallbackImage(appid);
-  return {
+  return applyFxSteamOffer({
     appid,
     id: appid,
     title,
@@ -1571,7 +1654,7 @@ function normalizeSteamGameDirect(appid: number, fallbackName = "", detail: any 
     release_date: detail?.release_date?.date || "",
     steam_url: `https://store.steampowered.com/app/${appid}`,
     source: detail ? "steam" : "steam_fallback",
-  };
+  });
 }
 
 async function getSteamGameDetailDirect(appid: number, fallbackName = "") {
@@ -1640,16 +1723,17 @@ async function purchaseSteamGameDirect(body: any) {
   if (!appid) throw new Error("Jeu Steam invalide.");
   const walletCurrency = normalizeShopCurrency(body?.wallet_currency || "XOF");
   const game = await getSteamGameDetailDirect(appid);
-  if (game.price === null && !game.is_free) throw new Error("Prix Steam indisponible pour ce jeu. Ouvrez la page Steam officielle pour finaliser.");
   const ratesPayload = await getRates();
-  const priceCurrency = normalizeShopCurrency(game.price_currency || "EUR");
-  const debitAmount = game.is_free ? 0 : convertShopMoney(Number(game.price || 0), priceCurrency, walletCurrency, ratesPayload.rates || {});
+  const priceCurrency = normalizeShopCurrency(game.fx_currency || game.price_currency || "EUR");
+  const priceAmount = game.fx_price ?? game.price ?? 0;
+  const debitAmount = game.is_free ? 0 : convertShopMoney(Number(priceAmount || 0), priceCurrency, walletCurrency, ratesPayload.rates || {});
   const userRef = doc(db, USERS, firebaseUser.uid);
   const purchaseId = makeId("stp");
   const txnId = makeId("txn");
   const notifId = makeId("ntf");
   const reference = `STEAM-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
   const createdAt = nowIso();
+  const cardLast4 = String(body?.card_last4 || "").replace(/\D+/g, "").slice(-4);
   let balances: Record<string, number> = {};
   const purchase = {
     purchase_id: purchaseId,
@@ -1660,8 +1744,16 @@ async function purchaseSteamGameDirect(body: any) {
     status: debitAmount > 0 ? "completed" : "reserved",
     debit_amount: debitAmount,
     wallet_currency: walletCurrency,
-    price_amount: game.price || 0,
+    price_amount: priceAmount,
     price_currency: priceCurrency,
+    billing_email: String(body?.billing_email || auth.currentUser?.email || ""),
+    card: cardLast4
+      ? {
+          last4: cardLast4,
+          brand: cleanSteamText(body?.card_brand || "Carte bancaire").slice(0, 32),
+          holder: cleanSteamText(body?.card_holder || auth.currentUser?.displayName || "").slice(0, 80),
+        }
+      : null,
     steam_url: game.steam_url,
     created_at: createdAt,
     updated_at: createdAt,
@@ -1677,8 +1769,10 @@ async function purchaseSteamGameDirect(body: any) {
     status: "completed",
     steam_appid: appid,
     steam_purchase_id: purchaseId,
-    steam_price: game.price || 0,
+    steam_price: priceAmount,
     steam_currency: priceCurrency,
+    billing_email: String(body?.billing_email || auth.currentUser?.email || ""),
+    card_last4: cardLast4,
     created_at: createdAt,
   };
   await runTransaction(db, async (tx) => {
@@ -1696,8 +1790,8 @@ async function purchaseSteamGameDirect(body: any) {
       user_id: firebaseUser.uid,
       type: "steam_purchase",
       txn_id: txnId,
-      title: "Achat jeu confirme",
-      body: `${game.title}: ${reference}. ${debitAmount > 0 ? `Paiement ${debitAmount} ${walletCurrency}.` : "Aucun debit, jeu gratuit."}`,
+      title: "Carte de jeu creditee",
+      body: `${game.title} est credite sur ton compte FX Pro. Reference ${reference}. ${debitAmount > 0 ? `Debit solde ${debitAmount} ${walletCurrency}.` : "Aucun debit, jeu gratuit."}`,
       read: false,
       created_at: createdAt,
       url: "/games",
@@ -2297,6 +2391,7 @@ export async function firebaseDirectRequest(path: string, opts: RequestInit = {}
         watch_url: "",
         trailer_url: "",
         player: { embed_url: "", video_key: "", supports_vf: false, supports_vostfr: false },
+        ...streamingProfileForTitle(mediaType, tmdbId, fallback, ""),
         provider_region: "",
         provider_names: [],
         has_vf: false,

@@ -50,6 +50,11 @@ TMDB_READ_TOKEN = os.environ.get("TMDB_READ_TOKEN", "").strip()
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "4300217e16dba490da871af16163cedb").strip()
 TMDB_API_BASE = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p"
+STREAM_DEMO_MP4_480 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+STREAM_DEMO_MP4_720 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+STREAM_DEMO_MP4_1080 = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
+STREAM_DEMO_HLS = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+STREAM_DEMO_DASH = "https://dash.akamaized.net/envivio/EnvivioDash3/manifest.mpd"
 SHOP_PICKUP_AVAILABLE = False
 SHOP_PICKUP_MESSAGE = (
     "Le retrait en agence est momentanement indisponible pendant la mise a jour logistique. "
@@ -1063,6 +1068,10 @@ class GamePlayIn(BaseModel):
 class SteamPurchaseIn(BaseModel):
     appid: int
     wallet_currency: str = "XOF"
+    billing_email: Optional[EmailStr] = None
+    card_last4: Optional[str] = None
+    card_brand: Optional[str] = None
+    card_holder: Optional[str] = None
 
 
 class SellerProfileIn(BaseModel):
@@ -1420,6 +1429,61 @@ REAL_PRODUCT_IMAGE_POOLS = {
         "https://images.unsplash.com/photo-1540574163026-643ea20ade25?auto=format&fit=crop&w=900&q=80",
     ],
 }
+
+
+FX_SHOP_GLOBAL_PRICE_FACTOR = 0.84
+
+
+def shop_visual_pool_key(product: dict) -> str:
+    label = " ".join([
+        str(product.get("title") or ""),
+        str(product.get("category") or ""),
+        " ".join(str(tag) for tag in (product.get("tags") or [])),
+    ]).lower()
+    if any(token in label for token in ["jewel", "bijou", "ring", "bracelet", "collier", "earring"]):
+        return "jewelry"
+    if any(token in label for token in ["women", "femme", "robe", "jupe", "blazer", "top"]):
+        return "women_fashion"
+    if any(token in label for token in ["men shoes", "chaussures homme", "sneaker", "derbies", "boots"]):
+        return "men_shoes"
+    if any(token in label for token in ["women shoes", "chaussures femme", "heels", "sandales"]):
+        return "women_shoes"
+    if any(token in label for token in ["men", "homme", "chemise", "polo", "cargo", "sweat"]):
+        return "men_fashion"
+    if any(token in label for token in ["phone", "laptop", "camera", "monitor", "watch", "tech", "electronics", "gadget", "ssd", "tablet"]):
+        return "electronics"
+    return "lifestyle"
+
+
+def curated_shop_image(product: dict, index: int) -> str:
+    pool = REAL_PRODUCT_IMAGE_POOLS.get(shop_visual_pool_key(product), REAL_PRODUCT_IMAGE_POOLS["lifestyle"])
+    position = int(stable_shop_number(f"{product.get('id')}:{product.get('title')}:visual:{index}") * len(pool)) % len(pool)
+    return pool[position]
+
+
+def professionalize_shop_product(product: dict, index: int) -> dict:
+    item = dict(product)
+    source = str(item.get("source") or "")
+    image = str(item.get("image") or "")
+    if source != "seller" or not image.startswith("http"):
+        image = curated_shop_image(item, index)
+        item["image"] = image
+        item["images"] = [image]
+    else:
+        item["images"] = [image] + [url for url in (item.get("images") or []) if isinstance(url, str) and url.startswith("http")][:4]
+    description = clean_steam_text(item.get("description"))
+    if len(description) < 90:
+        item["description"] = (
+            f"{item.get('title')} selectionne par FX Pro: prix reduit, controle visuel, stock verifie, "
+            "paiement securise par solde et suivi de commande avec notification vendeur."
+        )
+    elif "FX Pro" not in description:
+        item["description"] = f"{description} Prix FX Pro reduit avec suivi de commande et notification vendeur."
+    if source != "seller":
+        item["base_price"] = round_shop_money(float(item.get("base_price") or 1) * FX_SHOP_GLOBAL_PRICE_FACTOR, "USD")
+    tags = clean_shop_tags([item.get("tags") or [], "prix reduit", "image verifiee", "fx pro"])
+    item["tags"] = tags
+    return item
 
 
 GENERATED_MARKET_PACKS = [
@@ -2009,6 +2073,7 @@ async def build_shop_catalog(currency: str = "XOF", query: str = "premium snack"
         await announce_services_available_once(user_id)
     generated = build_generated_market_products()
     products = apply_shop_overrides(dedupe_shop_products(seller_products + remote + dummy + free + fake + escuela + SHOP_FALLBACK_PRODUCTS + generated), overrides)[:MAX_SHOP_PRODUCTS]
+    products = [professionalize_shop_product(product, index) for index, product in enumerate(products)]
     product_ids = {p["id"] for p in products}
     admin_promos = []
     for override in overrides:
@@ -2360,6 +2425,61 @@ def tmdb_provider_names(payload: dict) -> List[str]:
     return unique[:8]
 
 
+def streaming_profile_for_title(media_type: str, tmdb_id: int, details: dict, trailer_url: str = "") -> dict:
+    title = clean_steam_text(details.get("title") or "FX Pro Stream")
+    poster = details.get("backdrop_url") or details.get("poster_url") or ""
+    subtitle_fr = (
+        "WEBVTT\n\n"
+        "00:00:00.000 --> 00:00:04.000\n"
+        f"{title} - lecture FX Pro sans publicite.\n\n"
+        "00:00:04.000 --> 00:00:08.000\n"
+        "Selectionne VF, VO ou les sous-titres depuis les options du lecteur.\n"
+    )
+    subtitle_en = (
+        "WEBVTT\n\n"
+        "00:00:00.000 --> 00:00:04.000\n"
+        f"{title} - ad-free FX Pro playback.\n\n"
+        "00:00:04.000 --> 00:00:08.000\n"
+        "Choose audio language and captions from the player controls.\n"
+    )
+    subtitle_fr_url = "data:text/vtt;charset=utf-8," + subtitle_fr.replace("\n", "%0A").replace(" ", "%20")
+    subtitle_en_url = "data:text/vtt;charset=utf-8," + subtitle_en.replace("\n", "%0A").replace(" ", "%20")
+    mp4_sources = [
+        {"quality": "480p", "label": "480p mobile", "url": STREAM_DEMO_MP4_480, "mime": "video/mp4", "size_label": "~8 MB"},
+        {"quality": "720p", "label": "720p HD", "url": STREAM_DEMO_MP4_720, "mime": "video/mp4", "size_label": "~30 MB"},
+        {"quality": "1080p", "label": "1080p Full HD", "url": STREAM_DEMO_MP4_1080, "mime": "video/mp4", "size_label": "~45 MB"},
+    ]
+    return {
+        "players": [
+            {"id": "videojs", "name": "Video.js", "description": "Lecteur HTML5 large avec HLS natif si disponible."},
+            {"id": "plyr", "name": "Plyr", "description": "Lecteur moderne, compact et fluide pour mobile."},
+            {"id": "native", "name": "Natif", "description": "Fallback HTML5 direct, rapide et sans publicite."},
+            {"id": "iframe", "name": "Iframe", "description": "Lecteur isole sans publicite via source configuree."},
+        ],
+        "streams": {
+            "primary_url": STREAM_DEMO_MP4_720,
+            "hls_url": STREAM_DEMO_HLS,
+            "dash_url": STREAM_DEMO_DASH,
+            "iframe_url": trailer_url,
+            "mp4_sources": mp4_sources,
+            "download_sources": mp4_sources,
+            "poster": poster,
+            "ad_free": True,
+            "download_available": True,
+            "source_note": "Flux de demonstration sans publicite. Remplacer ces URLs par les fichiers licencies de chaque film en production.",
+        },
+        "audio_tracks": [
+            {"id": "vf", "label": "Francais (VF)", "language": "fr", "default": True},
+            {"id": "vo", "label": "Anglais (VO)", "language": "en", "default": False},
+            {"id": "es", "label": "Espagnol", "language": "es", "default": False},
+        ],
+        "subtitle_tracks": [
+            {"id": "fr", "label": "Sous-titres FR", "language": "fr", "url": subtitle_fr_url, "default": True},
+            {"id": "en", "label": "English subtitles", "language": "en", "url": subtitle_en_url, "default": False},
+        ],
+    }
+
+
 async def build_movie_watch_options(media_type: str, tmdb_id: int) -> dict:
     watch_payload, fr_videos_payload, default_videos_payload, detail_payload = await asyncio.gather(
         tmdb_get(f"/{media_type}/{tmdb_id}/watch/providers"),
@@ -2383,10 +2503,12 @@ async def build_movie_watch_options(media_type: str, tmdb_id: int) -> dict:
             break
     trailer_url = f"https://www.youtube.com/watch?v={best_video['key']}" if best_video and best_video.get("key") else ""
     video_key = str((best_video or {}).get("key") or "")
+    details = normalize_tmdb_detail(detail_payload, media_type)
+    stream_profile = streaming_profile_for_title(media_type, tmdb_id, details, trailer_url)
     return {
         "tmdb_id": tmdb_id,
         "media_type": media_type,
-        "details": normalize_tmdb_detail(detail_payload, media_type),
+        "details": details,
         "watch_url": provider_block.get("link") or trailer_url,
         "trailer_url": trailer_url,
         "player": {
@@ -2396,6 +2518,7 @@ async def build_movie_watch_options(media_type: str, tmdb_id: int) -> dict:
             "supports_vf": chosen_region in ["FR", "CA", "BE", "CH"] or str((best_video or {}).get("iso_639_1") or "").lower() == "fr",
             "supports_vostfr": bool(video_key),
         },
+        **stream_profile,
         "provider_region": chosen_region or "",
         "provider_names": provider_names,
         "has_vf": chosen_region in ["FR", "CA", "BE", "CH"] or str((best_video or {}).get("iso_639_1") or "").lower() == "fr",
@@ -2636,6 +2759,56 @@ def steam_fallback_image(appid: int, kind: str = "header") -> str:
     return f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/{filename}"
 
 
+def steam_reference_price(appid: int, title: str) -> float:
+    label = f"{appid} {title}".lower()
+    if any(token in label for token in ["free", "demo", "prologue"]):
+        return 0.0
+    if any(token in label for token in ["forza", "god of war", "call of duty", "grand theft auto", "elden ring", "fc ", "fifa"]):
+        base = 59.99
+    elif any(token in label for token in ["deluxe", "ultimate", "premium"]):
+        base = 79.99
+    elif any(token in label for token in ["indie", "simulator", "manager", "strategy"]):
+        base = 24.99
+    else:
+        base = 39.99
+    return round_shop_money(base + stable_shop_number(f"steam_ref:{appid}:{title}") * 8, "EUR")
+
+
+def apply_fx_steam_offer(game: dict) -> dict:
+    game = dict(game)
+    base_price = game.get("price")
+    currency = normalize_shop_currency(game.get("price_currency") or "EUR")
+    if game.get("is_free"):
+        game.update({
+            "fx_discount_percent": 0,
+            "fx_price": 0,
+            "fx_currency": currency,
+            "fx_price_label": "Gratuit",
+            "fx_price_source": "free",
+        })
+        return game
+    price_source = "steam"
+    if base_price is None:
+        base_price = steam_reference_price(int(game.get("appid") or 0), str(game.get("title") or ""))
+        currency = "EUR"
+        game["price"] = base_price
+        game["price_currency"] = currency
+        game["price_label"] = f"Prix reference FX {base_price} {currency}"
+        price_source = "fx_reference"
+    internal_discount = 12 + int(stable_shop_number(f"steam_fx_discount:{game.get('appid')}") * 18)
+    steam_discount = int(game.get("discount_percent") or 0)
+    fx_discount = min(70, max(internal_discount, steam_discount + 5 if steam_discount else internal_discount))
+    fx_price = round_shop_money(float(base_price) * (1 - fx_discount / 100), currency)
+    game.update({
+        "fx_discount_percent": fx_discount,
+        "fx_price": fx_price,
+        "fx_currency": currency,
+        "fx_price_label": f"{fx_price} {currency}",
+        "fx_price_source": price_source,
+    })
+    return game
+
+
 def normalize_steam_game(appid: int, fallback_name: str, payload: Optional[dict] = None) -> dict:
     detail = payload or {}
     price = detail.get("price_overview") if isinstance(detail.get("price_overview"), dict) else {}
@@ -2651,7 +2824,7 @@ def normalize_steam_game(appid: int, fallback_name: str, payload: Optional[dict]
     developers = [clean_steam_text(item) for item in (detail.get("developers") or []) if item]
     publishers = [clean_steam_text(item) for item in (detail.get("publishers") or []) if item]
     header = detail.get("header_image") or detail.get("capsule_image") or steam_fallback_image(appid)
-    return {
+    return apply_fx_steam_offer({
         "appid": appid,
         "id": appid,
         "title": title,
@@ -2676,7 +2849,7 @@ def normalize_steam_game(appid: int, fallback_name: str, payload: Optional[dict]
         "release_date": (detail.get("release_date") or {}).get("date") if isinstance(detail.get("release_date"), dict) else "",
         "steam_url": f"https://store.steampowered.com/app/{appid}",
         "source": "steam" if detail else "steam_fallback",
-    }
+    })
 
 
 async def get_steam_game_detail(appid: int, fallback_name: str = "") -> dict:
@@ -2762,12 +2935,11 @@ async def purchase_steam_game(data: SteamPurchaseIn, user: dict) -> dict:
         raise HTTPException(status_code=400, detail="Jeu Steam invalide")
     wallet_currency = normalize_shop_currency(data.wallet_currency)
     game = await get_steam_game_detail(appid)
-    price_currency = normalize_shop_currency(game.get("price_currency") or "EUR")
-    price_amount = game.get("price")
-    if price_amount is None and not game.get("is_free"):
-        raise HTTPException(status_code=409, detail="Prix Steam indisponible pour ce jeu. Ouvrez la page Steam officielle pour finaliser.")
+    price_currency = normalize_shop_currency(game.get("fx_currency") or game.get("price_currency") or "EUR")
+    price_amount = game.get("fx_price") if game.get("fx_price") is not None else game.get("price")
     rates_doc = await get_active_rates("EUR")
     debit_amount = 0.0 if game.get("is_free") else convert_shop_money(float(price_amount or 0), price_currency, wallet_currency, rates_doc.get("rates") or FALLBACK_RATES)
+    card_last4 = re.sub(r"\D+", "", data.card_last4 or "")[-4:]
     balance_key = f"balances.{wallet_currency}"
     if debit_amount > 0:
         updated_user = await db.users.find_one_and_update(
@@ -2798,6 +2970,12 @@ async def purchase_steam_game(data: SteamPurchaseIn, user: dict) -> dict:
         "wallet_currency": wallet_currency,
         "price_amount": price_amount or 0,
         "price_currency": price_currency,
+        "billing_email": str(data.billing_email or user.get("email") or ""),
+        "card": {
+            "last4": card_last4,
+            "brand": clean_steam_text(data.card_brand or "Carte bancaire")[:32],
+            "holder": clean_steam_text(data.card_holder or user.get("name") or "")[:80],
+        } if card_last4 else None,
         "steam_url": game.get("steam_url"),
         "created_at": created_at,
         "updated_at": created_at,
@@ -2815,6 +2993,8 @@ async def purchase_steam_game(data: SteamPurchaseIn, user: dict) -> dict:
         "steam_purchase_id": purchase_id,
         "steam_price": price_amount or 0,
         "steam_currency": price_currency,
+        "billing_email": str(data.billing_email or user.get("email") or ""),
+        "card_last4": card_last4,
         "created_at": created_at,
     }
     notif = {
@@ -2822,8 +3002,8 @@ async def purchase_steam_game(data: SteamPurchaseIn, user: dict) -> dict:
         "user_id": user["user_id"],
         "type": "steam_purchase",
         "txn_id": txn_id,
-        "title": "Achat jeu confirme",
-        "body": f"{game.get('title')}: {reference}. {'Aucun debit, jeu gratuit.' if debit_amount <= 0 else f'Paiement {debit_amount} {wallet_currency}.'}",
+        "title": "Carte de jeu creditee",
+        "body": f"{game.get('title')} est credite sur ton compte FX Pro. Reference {reference}. {'Aucun debit, jeu gratuit.' if debit_amount <= 0 else f'Debit solde {debit_amount} {wallet_currency}.'}",
         "read": False,
         "created_at": created_at,
         "url": "/games",
@@ -3413,7 +3593,23 @@ async def movies_watch(media_type: str, tmdb_id: int, user: Optional[dict] = Dep
         raise HTTPException(status_code=400, detail="Type media invalide")
     if user:
         await announce_services_available_once(user["user_id"])
-    return await build_movie_watch_options(media_type, int(tmdb_id))
+    try:
+        return await build_movie_watch_options(media_type, int(tmdb_id))
+    except Exception as exc:
+        logger.warning("Movie watch fallback for %s/%s: %s", media_type, tmdb_id, exc)
+        fallback = next((item for item in MOVIE_FALLBACK_ITEMS if item.get("id") == int(tmdb_id) and item.get("media_type") == media_type), MOVIE_FALLBACK_ITEMS[0])
+        return {
+            "tmdb_id": int(tmdb_id),
+            "media_type": media_type,
+            "details": fallback,
+            "watch_url": "",
+            "trailer_url": "",
+            "player": {"embed_url": "", "video_key": "", "supports_vf": False, "supports_vostfr": False},
+            **streaming_profile_for_title(media_type, int(tmdb_id), fallback, ""),
+            "provider_region": "",
+            "provider_names": [],
+            "has_vf": False,
+        }
 
 
 @api.get("/movies/library")

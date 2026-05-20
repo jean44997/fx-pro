@@ -90,6 +90,11 @@ type SteamGameItem = {
   price_initial?: number | null;
   price_currency?: string;
   price_label?: string;
+  fx_price?: number | null;
+  fx_currency?: string;
+  fx_price_label?: string;
+  fx_discount_percent?: number;
+  fx_price_source?: string;
   discount_percent?: number;
   is_free?: boolean;
   genres?: string[];
@@ -128,6 +133,7 @@ const GAME_LOOK: Record<string, { icon: any; color: string; label: string }> = {
 };
 
 const FREE_GAME_FALLBACK: FreeGameItem[] = FREE_GAME_SNAPSHOT.map((item) => ({ ...item }));
+const STEAM_QUICK_SEARCHES = ["2026", "Forza", "God of War", "Call of Duty", "EA SPORTS FC", "GTA", "Elden Ring"];
 
 export default function GamesScreen() {
   const router = useRouter();
@@ -150,11 +156,21 @@ export default function GamesScreen() {
   const [steamLoading, setSteamLoading] = useState(true);
   const [steamLoadingMore, setSteamLoadingMore] = useState(false);
   const [buyingSteamKey, setBuyingSteamKey] = useState("");
+  const [steamCheckout, setSteamCheckout] = useState<SteamGameItem | null>(null);
+  const [steamPayment, setSteamPayment] = useState({ email: user?.email || "", card: "", expiry: "", holder: user?.name || "" });
   const pulse = useSharedValue(1);
 
   useEffect(() => {
     pulse.value = withRepeat(withSequence(withTiming(1.04, { duration: 900 }), withTiming(1, { duration: 900 })), -1, true);
   }, [pulse]);
+
+  useEffect(() => {
+    setSteamPayment((prev) => ({
+      ...prev,
+      email: prev.email || user?.email || "",
+      holder: prev.holder || user?.name || "",
+    }));
+  }, [user?.email, user?.name]);
 
   const pulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulse.value }] }));
 
@@ -344,14 +360,41 @@ export default function GamesScreen() {
     }
   };
 
+  const openSteamCheckout = (item: SteamGameItem) => {
+    setSteamPayment((prev) => ({
+      ...prev,
+      email: prev.email || user?.email || "",
+      holder: prev.holder || user?.name || "",
+    }));
+    setSteamCheckout(item);
+  };
+
   const buySteamGame = async (item: SteamGameItem) => {
+    const email = steamPayment.email.trim();
+    const cardDigits = steamPayment.card.replace(/\D+/g, "");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      Alert.alert("Email requis", "Entre un email valide pour recevoir la confirmation du jeu.");
+      return;
+    }
+    if (!item.is_free && cardDigits.length < 12) {
+      Alert.alert("Carte bancaire requise", "Entre un numero de carte valide. Seuls les 4 derniers chiffres seront envoyes.");
+      return;
+    }
     try {
       setBuyingSteamKey(String(item.appid));
-      const res = await api.post("/games/steam/purchase", { appid: item.appid, wallet_currency: "XOF" });
+      const res = await api.post("/games/steam/purchase", {
+        appid: item.appid,
+        wallet_currency: "XOF",
+        billing_email: email,
+        card_last4: cardDigits.slice(-4),
+        card_brand: detectCardBrand(cardDigits),
+        card_holder: steamPayment.holder.trim() || user?.name || "Client FX Pro",
+      });
       await refresh();
+      setSteamCheckout(null);
       Alert.alert(
-        "Achat confirme",
-        `${item.title || item.name} - ${res.transaction?.reference || res.purchase?.reference || "STEAM"}. ${res.transaction?.amount ? `Debit ${res.transaction.amount} ${res.transaction.currency}.` : "Aucun debit pour ce jeu gratuit."}`,
+        "Carte de jeu creditee",
+        `${item.title || item.name} - ${res.transaction?.reference || res.purchase?.reference || "STEAM"}. ${res.transaction?.amount ? `Debit solde ${res.transaction.amount} ${res.transaction.currency}.` : "Aucun debit pour ce jeu gratuit."}`,
         [{ text: "Ouvrir Steam", onPress: () => openSteamPage(item) }, { text: "OK" }]
       );
     } catch (e: any) {
@@ -443,7 +486,7 @@ export default function GamesScreen() {
             <TextInput
               value={steamQuery}
               onChangeText={setSteamQuery}
-              placeholder="GTA V, FIFA, Call of Duty, Elden Ring..."
+              placeholder="Forza, God of War, 2026, Call of Duty..."
               placeholderTextColor={Colors.textMuted}
               style={styles.searchInput}
             />
@@ -453,6 +496,17 @@ export default function GamesScreen() {
               </Pressable>
             ) : null}
           </View>
+
+          <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTrack}>
+            {STEAM_QUICK_SEARCHES.map((item) => {
+              const active = steamQuery.toLowerCase() === item.toLowerCase();
+              return (
+                <Pressable key={`steam-search-${item}`} onPress={() => setSteamQuery(active ? "" : item)} style={[styles.filterChip, active && styles.filterChipActive]}>
+                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{item}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
 
           <ScrollView horizontal style={styles.horizontalRail} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTrack}>
             {visibleSteamGenres.map((item) => {
@@ -479,7 +533,7 @@ export default function GamesScreen() {
                       item={item}
                       compact={compact}
                       buying={buyingSteamKey === String(item.appid)}
-                      onBuy={() => buySteamGame(item)}
+                      onBuy={() => openSteamCheckout(item)}
                       onOpen={() => openSteamPage(item)}
                     />
                   </Animated.View>
@@ -597,6 +651,55 @@ export default function GamesScreen() {
           )}
         </ScrollView>
 
+        <Modal visible={Boolean(steamCheckout)} transparent animationType="slide" onRequestClose={() => setSteamCheckout(null)}>
+          <View style={styles.modalBg}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setSteamCheckout(null)} />
+            {steamCheckout ? (
+              <Animated.View entering={SlideInUp.springify()} style={styles.checkoutCard}>
+                <View style={styles.checkoutTop}>
+                  <RemoteImage uri={steamCheckout.image || steamCheckout.thumbnail || steamCheckout.capsule_image} style={styles.checkoutImage} fallbackIcon="logo-steam" />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.checkoutKicker}>Paiement jeu Steam</Text>
+                    <Text style={styles.checkoutTitle} numberOfLines={2}>{steamCheckout.title || steamCheckout.name}</Text>
+                    <Text style={styles.checkoutPrice}>{steamCheckout.is_free ? "Gratuit" : `${steamCheckout.fx_price_label || steamCheckout.price_label || "Offre FX"}`}</Text>
+                    {steamCheckout.fx_discount_percent ? <Text style={styles.checkoutDiscount}>Promo FX Pro -{steamCheckout.fx_discount_percent}%</Text> : null}
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Email de confirmation</Text>
+                  <TextInput value={steamPayment.email} onChangeText={(email) => setSteamPayment((prev) => ({ ...prev, email }))} autoCapitalize="none" keyboardType="email-address" placeholder="client@email.com" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} />
+                </View>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Carte bancaire</Text>
+                  <TextInput value={steamPayment.card} onChangeText={(card) => setSteamPayment((prev) => ({ ...prev, card }))} keyboardType="number-pad" placeholder="4242 4242 4242 4242" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} maxLength={23} />
+                  <Text style={styles.secureHint}>Seuls les 4 derniers chiffres sont envoyes. Le debit se fait sur ton solde FX Pro.</Text>
+                </View>
+                <View style={styles.checkoutRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inputLabel}>Expiration</Text>
+                    <TextInput value={steamPayment.expiry} onChangeText={(expiry) => setSteamPayment((prev) => ({ ...prev, expiry }))} placeholder="MM/AA" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} maxLength={5} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inputLabel}>Nom carte</Text>
+                    <TextInput value={steamPayment.holder} onChangeText={(holder) => setSteamPayment((prev) => ({ ...prev, holder }))} placeholder="Nom complet" placeholderTextColor={Colors.textMuted} style={styles.checkoutInput} />
+                  </View>
+                </View>
+                <View style={styles.checkoutActions}>
+                  <GhostButton title="Annuler" onPress={() => setSteamCheckout(null)} icon={<Ionicons name="close" size={16} color={Colors.cyan} />} style={styles.checkoutAction} />
+                  <PrimaryButton
+                    title={buyingSteamKey === String(steamCheckout.appid) ? "Paiement..." : "Payer et crediter"}
+                    onPress={() => buySteamGame(steamCheckout)}
+                    loading={buyingSteamKey === String(steamCheckout.appid)}
+                    icon={<Ionicons name="card" size={16} color="#000" />}
+                    style={styles.checkoutAction}
+                  />
+                </View>
+              </Animated.View>
+            ) : null}
+          </View>
+        </Modal>
+
         <Modal visible={Boolean(result)} transparent animationType="fade" onRequestClose={() => setResult(null)}>
           <Animated.View entering={FadeIn} style={styles.modalBg}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setResult(null)} />
@@ -698,8 +801,8 @@ function SteamGameCard({
   onBuy: () => void;
   onOpen: () => void;
 }) {
-  const price = item.price_label || (item.is_free ? "Gratuit" : "Prix Steam");
-  const discount = Number(item.discount_percent || 0);
+  const price = item.fx_price_label || item.price_label || (item.is_free ? "Gratuit" : "Offre FX");
+  const discount = Number(item.fx_discount_percent || item.discount_percent || 0);
   const genreLine = (item.genres || [item.genre || "Steam"]).filter(Boolean).slice(0, 2).join(" / ");
   return (
     <View style={[styles.steamCard, compact && styles.steamCardCompact]}>
@@ -719,9 +822,10 @@ function SteamGameCard({
         <Text style={styles.freeGameTitle} numberOfLines={2}>{item.title || item.name}</Text>
         <Text style={styles.freeGameDesc} numberOfLines={compact ? 4 : 3}>{item.short_description || "Jeu Steam avec fiche, prix et lien officiel."}</Text>
         <View style={styles.steamPriceRow}>
-          {discount > 0 && item.price_initial ? <Text style={styles.oldPrice}>{item.price_initial} {item.price_currency}</Text> : null}
+          {discount > 0 && item.price ? <Text style={styles.oldPrice}>{item.price} {item.price_currency || "EUR"}</Text> : null}
           <Text style={[styles.priceText, item.is_free && { color: Colors.green }]}>{price}</Text>
         </View>
+        {discount > 0 ? <Text style={styles.fxDealText}>Promo FX Pro supplementaire -{discount}%</Text> : null}
         <View style={styles.freeMetaLine}>
           <InfoTiny icon="business-outline" text={item.publisher || item.publishers?.[0] || "Steam"} color={Colors.cyan} />
           {item.release_date ? <InfoTiny icon="calendar-outline" text={item.release_date} color={Colors.yellow} /> : null}
@@ -917,6 +1021,13 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Pr
   ]);
 }
 
+function detectCardBrand(digits: string) {
+  if (/^4/.test(digits)) return "Visa";
+  if (/^5[1-5]/.test(digits)) return "Mastercard";
+  if (/^3[47]/.test(digits)) return "American Express";
+  return "Carte bancaire";
+}
+
 const styles = StyleSheet.create({
   scroll: { paddingBottom: 80 },
   header: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 6 },
@@ -995,6 +1106,7 @@ const styles = StyleSheet.create({
   steamPriceRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10, minHeight: 24 },
   oldPrice: { color: Colors.textMuted, fontSize: 11, textDecorationLine: "line-through", fontWeight: "800" },
   priceText: { color: Colors.yellow, fontSize: 16, fontWeight: "900" },
+  fxDealText: { color: Colors.green, fontSize: 11, fontWeight: "900", marginTop: 4 },
   freeGameCard: { minHeight: 392, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(12,12,20,0.94)" },
   freeGameCardCompact: { minHeight: 426 },
   freeGameImage: { width: "100%", height: 178, backgroundColor: "rgba(255,255,255,0.05)" },
@@ -1025,6 +1137,20 @@ const styles = StyleSheet.create({
   vsText: { color: "#000", backgroundColor: Colors.yellow, overflow: "hidden", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, fontWeight: "900" },
   marginText: { color: Colors.textSoft, fontSize: 11, fontWeight: "900", marginTop: 5 },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", padding: 18 },
+  checkoutCard: { borderRadius: 24, borderWidth: 1, borderColor: Colors.borderStrong, backgroundColor: "#101018", padding: 16, maxWidth: 620, width: "100%", alignSelf: "center" },
+  checkoutTop: { flexDirection: "row", gap: 12, alignItems: "center", marginBottom: 12 },
+  checkoutImage: { width: 112, height: 64, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.06)" },
+  checkoutKicker: { color: Colors.cyan, fontSize: 10, fontWeight: "900", textTransform: "uppercase", letterSpacing: 1.4 },
+  checkoutTitle: { color: "#fff", fontSize: 20, fontWeight: "900", lineHeight: 24, marginTop: 2 },
+  checkoutPrice: { color: Colors.green, fontSize: 18, fontWeight: "900", marginTop: 5 },
+  checkoutDiscount: { color: Colors.yellow, fontSize: 11, fontWeight: "900", marginTop: 2 },
+  inputGroup: { marginTop: 10 },
+  inputLabel: { color: Colors.textSoft, fontSize: 11, fontWeight: "900", textTransform: "uppercase", letterSpacing: 1.1, marginBottom: 6 },
+  checkoutInput: { minHeight: 46, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, backgroundColor: "rgba(255,255,255,0.06)", color: "#fff", paddingHorizontal: 12, fontWeight: "800" },
+  secureHint: { color: Colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: 6 },
+  checkoutRow: { flexDirection: "row", gap: 10, marginTop: 10 },
+  checkoutActions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 14 },
+  checkoutAction: { flexGrow: 1, minWidth: 170 },
   resultCard: { borderRadius: 24, padding: 20, backgroundColor: "#0b0b14", borderWidth: 2, alignItems: "center" },
   winCard: { borderColor: Colors.green },
   lossCard: { borderColor: Colors.danger },
